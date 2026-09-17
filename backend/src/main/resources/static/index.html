@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudyHubAI - Học Thông Minh Hơn Với AI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+
+    <!-- NAVBAR -->
+    <nav class="navbar">
+        <div class="logo-text">StudyHub<span class="logo-ai">AI</span></div>
+        <div class="nav-links">
+            <a href="#" class="nav-link active">Trang chủ</a>
+            <a href="#" class="nav-link">Tài liệu</a>
+            <a href="#" class="nav-link">Trắc nghiệm</a>
+        </div>
+        <div class="nav-actions">
+            <button class="btn btn-primary btn-sm">Bắt đầu ngay</button>
+        </div>
+    </nav>
+
+    <!-- TRANG CHÍNH (Thêm class active để không bị đen màn hình) -->
+<div id="page-landing" class="page active" style="display: block !important; opacity: 1 !important; visibility: visible !important;">        <section class="hero">
+            <div class="hero-content">
+                <div class="hero-badge">
+                    <span class="badge-dot"></span> Trợ lý học tập thông minh AI
+                </div>
+                <h1 class="hero-title">Bứt phá điểm số với <span class="text-gradient">StudyHubAI</span></h1>
+                <p class="hero-subtitle">Tải lên tài liệu PDF, nhận bản tóm tắt tự động và luyện tập trắc nghiệm thông minh trong vài giây.</p>
+                <div class="hero-actions">
+                    <button class="btn btn-primary btn-lg" onclick="document.getElementById('upload-zone').scrollIntoView({behavior: 'smooth'})">
+                        Tải tài liệu lên
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- KHU VỰC UPLOAD TÀI LIỆU -->
+        <section style="padding: 2rem 5rem;">
+            <div class="card">
+                <h3 style="margin-bottom: 1rem;">📁 Tải lên Tài liệu của bạn</h3>
+                <div id="upload-zone" class="upload-zone">
+                    <div class="upload-icon" style="font-size: 3rem;">📄</div>
+                    <h3>Kéo thả file PDF vào đây hoặc bấm để chọn file</h3>
+                    <p>Hỗ trợ định dạng .PDF, .TXT (Tối đa 10MB)</p>
+                    <input type="file" id="file-input" accept=".pdf,.txt" style="display: none;">
+                </div>
+
+                <div class="docs-layout">
+                    <!-- Danh sách tài liệu -->
+                    <div>
+                        <h4 style="margin-bottom: 1rem;">Tài liệu đã lưu trữ</h4>
+                        <div id="document-library" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                            <!-- JS tự động chèn danh sách vào đây -->
+                        </div>
+                    </div>
+
+                    <!-- Panel hiển thị Tóm tắt AI -->
+                    <div class="ai-panel">
+                        <div class="ai-hd">
+                            <span class="ai-badge">Gemini AI</span>
+                            <h3>Kết quả phân tích</h3>
+                        </div>
+                        <div id="ai-summary-content" class="ai-body">
+                            <p style="color: var(--muted);">Chọn hoặc tải lên một tài liệu để xem tóm tắt tự động từ AI.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- KHUNG MODAL QUIZ (Bắt buộc có class hidden để tránh bị đè đen) -->
+    <div id="quiz-modal" class="overlay hidden">
+        <div class="modal-box">
+            <div class="modal-hd">
+                <h3>Bài Trắc Nghiệm AI</h3>
+                <button class="btn btn-ghost" onclick="document.getElementById('quiz-modal').classList.add('hidden')">✕</button>
+            </div>
+            <div id="quiz-content">
+                <!-- Nội dung quiz -->
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPTS -->
+    <script src="scripts/upload.js"></script>
+    <script src="scripts/app.js"></script>
+</body>
+</html>
