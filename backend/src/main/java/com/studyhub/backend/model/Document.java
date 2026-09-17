@@ -35,6 +35,14 @@ public class Document {
 
     @Column(name = "file_url", nullable = false, columnDefinition = "TEXT")
     private String fileUrl;
+    @Column(name = "file_type", length = 50)
+    private String fileType;
+
+    @Column(name = "file_size_bytes")
+    private Long fileSizeBytes;
+
+    @Column(name = "page_count")
+    private Integer pageCount;
     // ĐÂY LÀ TRƯỜNG BỊ THIẾU ĐÃ ĐƯỢC BỔ SUNG
     @Column(name = "processing_status", length = 20)
     private String processingStatus;
