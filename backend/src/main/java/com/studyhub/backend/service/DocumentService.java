@@ -49,11 +49,13 @@ public class DocumentService {
 
         // 2. Tạo đối tượng Document bằng Builder
         Document document = Document.builder()
-                .userId(UUID.fromString("123e4567-e89b-12d3-a456-426614174000")) // Đã xóa chữ name:
+                .userId(UUID.fromString("123e4567-e89b-12d3-a456-426614174000"))
                 .title(title)
                 .description(description)
                 .fileName(originalFileName)
                 .fileUrl(filePath.toString())
+                .fileType(file.getContentType()) // BỔ SUNG: Tự động lưu loại file (VD: application/pdf)
+                .fileSizeBytes(file.getSize()) // BỔ SUNG: Tự động lưu dung lượng file bằng Byte
                 .processingStatus("pending")
                 .build();
 
