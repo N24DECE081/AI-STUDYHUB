@@ -1,0 +1,16 @@
+﻿version: '3.8'
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: studyhub-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: studyhub_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: rootpassword
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
