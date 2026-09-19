@@ -6,3 +6,4 @@ dist/
 **/.venv/
 .git-archive/
 *.pre_phase1
+*.zip
