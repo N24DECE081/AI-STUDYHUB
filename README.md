@@ -28,18 +28,6 @@ npm run dev
 
 Mở URL Vite hiển thị, thường là `http://localhost:5173`. Vite tự proxy `/api` sang Python API ở `http://127.0.0.1:5000`.
 
-### Chạy một giao diện thống nhất (production-like)
-
-Sau khi hoàn tất thay đổi UI, build React rồi chỉ chạy Python API. Python sẽ tự phục vụ `frontend/dist`, vì vậy web và API dùng cùng một giao diện tại `http://127.0.0.1:5000`.
-
-```powershell
-cd frontend
-npm run build
-
-cd ../apps/python-api
-python run.py
-```
-
 ## Luồng đã tích hợp
 
 - `POST /api/auth/register`, `/login`, `/logout` và `GET /api/auth/me`: session cookie thật.
@@ -55,7 +43,7 @@ Thanh toán, hủy gói và hoàn tiền là UI mockup; không được coi là 
 1. Không push trực tiếp vào `main`. Tạo nhánh `feat/<ten-tinh-nang>` và mở Pull Request.
 2. Không commit `node_modules`, `.venv`, `.env`, database SQLite, upload runtime hoặc API key.
 3. Thay đổi API phải cập nhật test ở `apps/python-api/tests/` và mô tả contract trong PR.
-4. React frontend là UI duy nhất. `apps/python-api/web/` chỉ là legacy fallback khi chưa có `frontend/dist`; không phát triển tính năng mới ở đó.
+4. Không chỉnh đồng thời `frontend/` và `apps/python-api/web/` cho cùng một UI; React frontend là UI chính. Vanilla UI trong Python API chỉ giữ tương thích/preview.
 
 ## Kiểm tra trước khi mở PR
 
