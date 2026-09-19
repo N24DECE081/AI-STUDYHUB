@@ -201,12 +201,21 @@ class H(BaseHTTPRequestHandler):
         progress_id=c.execute(f'INSERT INTO user_progress(user_id,{target},progress_percent,last_position,completed) VALUES(?,?,?,?,?)',(u['id'],raw_id,progress,last_position,int(completed))).lastrowid
       c.commit(); row=c.execute('SELECT * FROM user_progress WHERE id=?',(progress_id,)).fetchone()
      return self.json(dict(row),200)
-  if path in ('/api/ai/chat','/api/chat'):
+  if path in ('/api/ai/chat','/api/chat','/api/ai-tutor/chat'):
    u=require_user(self)
    if not u:return
    x=json_body(data)
-   question=x.get('question','').strip() if isinstance(x,dict) else ''
+   tutor_contract=path=='/api/ai-tutor/chat'
+   question=(x.get('message','') if tutor_contract else x.get('question','')).strip() if isinstance(x,dict) else ''
    document_id=x.get('document_id') if isinstance(x,dict) else None
+   if tutor_contract:
+    file_ids=x.get('file_ids',[])
+    if isinstance(file_ids,list) and file_ids:
+     document_id=file_ids[0]
+    conversation_id=str(x.get('conversation_id') or secrets.token_hex(16))
+    mode=str(x.get('mode') or 'explain').lower()
+    if mode not in ('explain','solve','hint','summarize','generate_quiz'):
+     return self.json({'error':'invalid tutor mode'},400)
    if not question:return self.json({'error':'Câu hỏi không được để trống'},400)
    with db() as c:
     if document_id:
@@ -241,6 +250,8 @@ class H(BaseHTTPRequestHandler):
     session_id=c.execute('INSERT INTO chat_sessions(user_id,document_id,title) VALUES(?,?,?)',(u['id'],document_id,'AI Tutor')).lastrowid
     c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(session_id,'user',question))
     c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(session_id,'assistant',answer)); c.commit()
+   if tutor_contract:
+    return self.json({'conversation_id':conversation_id,'message_id':str(session_id),'role':'assistant','content':answer},200)
    return self.json({'answer':answer,'sources':sources,'session_id':session_id,'mode':'local-rag'},200)
   if path=='/api/upload':
    u=user_from(self)

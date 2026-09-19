@@ -145,4 +145,18 @@ class ServerIntegrationTest(unittest.TestCase):
         self.assertEqual(cm.exception.code,404)
         self.assertEqual(json.loads(cm.exception.read())['error'], 'document not found')
 
+    def test_ai_tutor_contract_returns_client_conversation_id(self):
+        payload=json.dumps({'email':'student@studyhub.local','password':'Student123!'}).encode()
+        req=urllib.request.Request(f'http://127.0.0.1:{self.port}/api/auth/login', data=payload, headers={'Content-Type':'application/json'}, method='POST')
+        with urllib.request.urlopen(req, timeout=2) as r:
+            cookie=r.headers['Set-Cookie'].split(';',1)[0]
+        payload=json.dumps({'conversation_id':'browser-conversation-1','message':'Giải thích tài liệu hiện có','mode':'explain','file_ids':[]}).encode()
+        req=urllib.request.Request(f'http://127.0.0.1:{self.port}/api/ai-tutor/chat', data=payload, headers={'Content-Type':'application/json','Cookie':cookie}, method='POST')
+        with urllib.request.urlopen(req, timeout=2) as r:
+            result=json.loads(r.read())
+        self.assertEqual(result['conversation_id'],'browser-conversation-1')
+        self.assertEqual(result['role'],'assistant')
+        self.assertTrue(result['message_id'])
+        self.assertIsInstance(result['content'],str)
+
 if __name__=='__main__': unittest.main()
