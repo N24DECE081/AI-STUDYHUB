@@ -66,6 +66,16 @@ class H(BaseHTTPRequestHandler):
   if path in ('/api/me','/api/auth/me'): return self.json({'user':user_from(self)})
   if path=='/api/subjects':
     c=db(); rows=[dict(r) for r in c.execute('SELECT * FROM subjects ORDER BY name')]; c.close(); return self.json(rows)
+  if path=='/api/subscription':
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    active=c.execute('SELECT s.status,p.name FROM subscriptions s JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? AND s.status=? ORDER BY s.id DESC LIMIT 1',(u['id'],'active')).fetchone()
+    scheduled=c.execute('SELECT p.name,sc.billing_cycle,sc.effective_at FROM subscription_changes sc JOIN plans p ON p.id=sc.target_plan_id WHERE sc.user_id=? AND sc.status=? ORDER BY sc.id DESC LIMIT 1',(u['id'],'scheduled')).fetchone()
+   codes={'free':'free','standard':'plus','plus':'plus','premium':'pro','pro':'pro'}
+   current=dict(active) if active else {'name':'Free','status':'active'}
+   change={'plan':codes.get(str(scheduled['name']).lower(),'free'),'billing_cycle':scheduled['billing_cycle'],'effective_at':scheduled['effective_at']} if scheduled else None
+   return self.json({'plan':codes.get(str(current['name']).lower(),'free'),'status':current['status'],'billing_cycle':'month','scheduled_change':change})
   if path=='/api/documents':
     qs=parse_qs(p.query); q=qs.get('q',[''])[0]; sub=qs.get('subject',[''])[0]; c=db(); sql='SELECT d.*, d.original_filename AS file_name, d.storage_path AS file_path, d.uploaded_by AS uploader_id, s.code subject_code,s.name subject_name,u.full_name AS uploader FROM documents d JOIN subjects s ON s.id=d.subject_id JOIN users u ON u.id=d.uploaded_by WHERE 1=1'; args=[]
     if q: sql+=' AND (d.title LIKE ? OR d.description LIKE ?)'; args += [f'%{q}%',f'%{q}%']
@@ -156,6 +166,41 @@ class H(BaseHTTPRequestHandler):
     return self.json({'error':error},400)
    user, token, expires_at = result
    return self.json({'ok':True,'user':user,'expires_at':expires_at},201,{'Set-Cookie':session_cookie(token)})
+  if path=='/api/subscription/checkout':
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   if not isinstance(x,dict): return self.json({'error':'invalid checkout data'},400)
+   target_code=str(x.get('plan','')).lower(); cycle=str(x.get('billing_cycle','month')).lower(); method=str(x.get('payment_method','')).lower()
+   if target_code not in ('free','plus','pro') or cycle not in ('month','year') or method not in ('card','bank','ewallet','demo'):
+    return self.json({'error':'invalid checkout selection'},400)
+   names={'free':('free',),'plus':('plus','standard'),'pro':('pro','premium')}; ranks={'free':0,'plus':1,'pro':2}
+   with db() as c:
+    plans=[dict(row) for row in c.execute('SELECT id,name FROM plans WHERE status=?',('active',)).fetchall()]
+    by_code={code:next((plan for plan in plans if str(plan['name']).lower() in aliases),None) for code,aliases in names.items()}
+    target=by_code[target_code]
+    if not target:return self.json({'error':'selected plan is unavailable'},400)
+    active=c.execute('SELECT s.id,p.name FROM subscriptions s JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? AND s.status=? ORDER BY s.id DESC LIMIT 1',(u['id'],'active')).fetchone()
+    current_code=next((code for code,aliases in names.items() if active and str(active['name']).lower() in aliases),'free')
+    if current_code==target_code:return self.json({'error':'this is already your current plan'},409)
+    c.execute('UPDATE subscription_changes SET status=? WHERE user_id=? AND status=?',('cancelled',u['id'],'scheduled'))
+    if ranks[target_code] < ranks[current_code]:
+     c.execute('INSERT INTO subscription_changes(user_id,target_plan_id,billing_cycle,status,effective_at) VALUES(?,?,?,?,datetime(\'now\',\'+1 month\'))',(u['id'],target['id'],cycle,'scheduled'))
+     c.commit()
+     return self.json({'plan':current_code,'status':'active','scheduled_change':{'plan':target_code,'billing_cycle':cycle},'change_type':'downgrade_scheduled'})
+    if active:c.execute('UPDATE subscriptions SET status=? WHERE id=?',('expired',active['id']))
+    c.execute('INSERT INTO subscriptions(user_id,plan_id,status) VALUES(?,?,?)',(u['id'],target['id'],'active')); c.commit()
+   return self.json({'plan':target_code,'status':'active','billing_cycle':cycle,'scheduled_change':None,'change_type':'upgrade_applied'})
+  if path=='/api/subscription/cancel':
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    free=c.execute('SELECT id FROM plans WHERE lower(name)=? AND status=?',('free','active')).fetchone()
+    active=c.execute('SELECT s.id,p.name FROM subscriptions s JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? AND s.status=? ORDER BY s.id DESC LIMIT 1',(u['id'],'active')).fetchone()
+    if not active or str(active['name']).lower()=='free':return self.json({'error':'no paid subscription to cancel'},409)
+    c.execute('UPDATE subscription_changes SET status=? WHERE user_id=? AND status=?',('cancelled',u['id'],'scheduled'))
+    c.execute('INSERT INTO subscription_changes(user_id,target_plan_id,billing_cycle,status,effective_at) VALUES(?,?,?,?,datetime(\'now\',\'+1 month\'))',(u['id'],free['id'],'month','scheduled')); c.commit()
+   return self.json({'ok':True,'change_type':'cancellation_scheduled','scheduled_change':{'plan':'free'}})
   if path=='/api/courses':
     u=require_user(self)
     if not u:return
@@ -201,12 +246,21 @@ class H(BaseHTTPRequestHandler):
         progress_id=c.execute(f'INSERT INTO user_progress(user_id,{target},progress_percent,last_position,completed) VALUES(?,?,?,?,?)',(u['id'],raw_id,progress,last_position,int(completed))).lastrowid
       c.commit(); row=c.execute('SELECT * FROM user_progress WHERE id=?',(progress_id,)).fetchone()
      return self.json(dict(row),200)
-  if path in ('/api/ai/chat','/api/chat'):
+  if path in ('/api/ai/chat','/api/chat','/api/ai-tutor/chat'):
    u=require_user(self)
    if not u:return
    x=json_body(data)
-   question=x.get('question','').strip() if isinstance(x,dict) else ''
+   tutor_contract=path=='/api/ai-tutor/chat'
+   question=(x.get('message','') if tutor_contract else x.get('question','')).strip() if isinstance(x,dict) else ''
    document_id=x.get('document_id') if isinstance(x,dict) else None
+   if tutor_contract:
+    file_ids=x.get('file_ids',[])
+    if isinstance(file_ids,list) and file_ids:
+     document_id=file_ids[0]
+    conversation_id=str(x.get('conversation_id') or secrets.token_hex(16))
+    mode=str(x.get('mode') or 'explain').lower()
+    if mode not in ('explain','solve','hint','summarize','generate_quiz'):
+     return self.json({'error':'invalid tutor mode'},400)
    if not question:return self.json({'error':'Câu hỏi không được để trống'},400)
    with db() as c:
     if document_id:
@@ -241,6 +295,8 @@ class H(BaseHTTPRequestHandler):
     session_id=c.execute('INSERT INTO chat_sessions(user_id,document_id,title) VALUES(?,?,?)',(u['id'],document_id,'AI Tutor')).lastrowid
     c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(session_id,'user',question))
     c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(session_id,'assistant',answer)); c.commit()
+   if tutor_contract:
+    return self.json({'conversation_id':conversation_id,'message_id':str(session_id),'role':'assistant','content':answer},200)
    return self.json({'answer':answer,'sources':sources,'session_id':session_id,'mode':'local-rag'},200)
   if path=='/api/upload':
    u=user_from(self)

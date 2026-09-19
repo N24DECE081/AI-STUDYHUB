@@ -143,6 +143,20 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     CHECK(expires_at IS NULL OR expires_at >= started_at)
 );
 
+CREATE TABLE IF NOT EXISTS subscription_changes (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    target_plan_id  INTEGER NOT NULL,
+    billing_cycle   TEXT NOT NULL DEFAULT 'month'
+                    CHECK(billing_cycle IN ('month', 'year')),
+    status          TEXT NOT NULL DEFAULT 'scheduled'
+                    CHECK(status IN ('scheduled', 'applied', 'cancelled')),
+    effective_at    TEXT,
+    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY(target_plan_id) REFERENCES plans(id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS chat_sessions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id         INTEGER NOT NULL,
@@ -217,6 +231,8 @@ CREATE INDEX IF NOT EXISTS ix_enrollments_course_status
     ON course_enrollments(course_id, status);
 CREATE INDEX IF NOT EXISTS ix_subscriptions_user_status
     ON subscriptions(user_id, status);
+CREATE INDEX IF NOT EXISTS ix_subscription_changes_user_status
+    ON subscription_changes(user_id, status);
 CREATE INDEX IF NOT EXISTS ix_chat_sessions_user_updated
     ON chat_sessions(user_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS ix_chat_messages_session_created
