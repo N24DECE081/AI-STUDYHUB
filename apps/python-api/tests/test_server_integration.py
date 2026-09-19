@@ -159,4 +159,28 @@ class ServerIntegrationTest(unittest.TestCase):
         self.assertTrue(result['message_id'])
         self.assertIsInstance(result['content'],str)
 
+    def test_subscription_upgrade_and_downgrade_are_persisted(self):
+        payload=json.dumps({'email':'student@studyhub.local','password':'Student123!'}).encode()
+        req=urllib.request.Request(f'http://127.0.0.1:{self.port}/api/auth/login', data=payload, headers={'Content-Type':'application/json'}, method='POST')
+        with urllib.request.urlopen(req, timeout=2) as r:
+            cookie=r.headers['Set-Cookie'].split(';',1)[0]
+        headers={'Content-Type':'application/json','Cookie':cookie}
+        payload=json.dumps({'plan':'plus','billing_cycle':'month','payment_method':'demo'}).encode()
+        req=urllib.request.Request(f'http://127.0.0.1:{self.port}/api/subscription/checkout',data=payload,headers=headers,method='POST')
+        with urllib.request.urlopen(req, timeout=2) as r:
+            upgraded=json.loads(r.read())
+        self.assertEqual(upgraded['plan'],'plus')
+        self.assertEqual(upgraded['change_type'],'upgrade_applied')
+        payload=json.dumps({'plan':'free','billing_cycle':'month','payment_method':'demo'}).encode()
+        req=urllib.request.Request(f'http://127.0.0.1:{self.port}/api/subscription/checkout',data=payload,headers=headers,method='POST')
+        with urllib.request.urlopen(req, timeout=2) as r:
+            downgrade=json.loads(r.read())
+        self.assertEqual(downgrade['plan'],'plus')
+        self.assertEqual(downgrade['scheduled_change']['plan'],'free')
+        req=urllib.request.Request(f'http://127.0.0.1:{self.port}/api/subscription',headers={'Cookie':cookie})
+        with urllib.request.urlopen(req, timeout=2) as r:
+            current=json.loads(r.read())
+        self.assertEqual(current['plan'],'plus')
+        self.assertEqual(current['scheduled_change']['plan'],'free')
+
 if __name__=='__main__': unittest.main()

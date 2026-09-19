@@ -33,3 +33,6 @@ export async function uploadDocument({ file, title, description, subjectCode }) 
 
 export const askTutor = ({ documentId, question }) => request('/ai/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ document_id: documentId, question }) });
 export const askAiTutor = ({ conversationId, message, mode, fileIds = [] }) => request('/ai-tutor/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation_id: conversationId, message, mode, file_ids: fileIds }) });
+export const getSubscription = () => request('/subscription');
+export const checkoutSubscription = ({ plan, billingCycle, paymentMethod }) => request('/subscription/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan, billing_cycle: billingCycle, payment_method: paymentMethod }) });
+export const cancelSubscription = () => request('/subscription/cancel', { method: 'POST' });
