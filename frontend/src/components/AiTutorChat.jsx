@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 
 const AiTutorChat = ({ currentDocumentContent }) => {
   const [question, setQuestion] = useState('');
@@ -6,7 +6,7 @@ const AiTutorChat = ({ currentDocumentContent }) => {
   const [loading, setLoading] = useState(false);
   const [selectedProject, setSelectedProject] = useState('new-project');
   const [selectedModel, setSelectedModel] = useState('Gemini 2.5 Flash');
-  const [selectedBranch, setSelectedBranch] = useState('main');
+  const [selectedBranch] = useState('main');
   const [showDropdown, setShowDropdown] = useState(false);
 
   const handleSendMessage = async (e) => {

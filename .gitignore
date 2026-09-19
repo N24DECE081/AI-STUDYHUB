@@ -3,3 +3,6 @@ node_modules/
 .env.local
 .env.*.local
 dist/
+**/.venv/
+.git-archive/
+*.pre_phase1

@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="vi">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#07080c">
+  <title>StudyHub — Học tập thông minh</title>
+  <meta name="description" content="StudyHub — không gian học tập tập trung cho sinh viên.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <div class="noise" aria-hidden="true"></div>
+  <div class="glow glow-red" aria-hidden="true"></div>
+  <div class="glow glow-blue" aria-hidden="true"></div>
+
+  <header class="nav" id="topbar">
+    <a class="brand" href="#home" aria-label="StudyHub">
+      <span class="brand-mark">S</span><span>Study<span>Hub</span></span>
+    </a>
+    <nav class="nav-pill" aria-label="Điều hướng chính">
+      <a href="#home" data-route="home">Trang chủ</a>
+      <a href="#library" data-route="library">Kho học liệu <span>⌄</span></a>
+      <a href="#dashboard" data-route="dashboard">Tiến độ</a>
+      <a href="#pricing" data-route="pricing">Gói học</a>
+    </nav>
+    <div class="nav-actions" id="nav-actions"></div>
+    <button class="mobile-menu" id="mobile-menu" aria-label="Mở menu">☰</button>
+  </header>
+
+  <div class="mobile-panel" id="mobile-panel">
+    <a href="#home">Trang chủ</a><a href="#library">Kho học liệu</a><a href="#dashboard">Tiến độ</a><a
+      href="#pricing">Gói học</a>
+    <div id="mobile-auth"></div>
+  </div>
+
+  <main>
+    <section class="screen active" id="screen-home" data-screen="home">
+      <div class="hero container">
+        <div class="hero-proof">
+          <span class="live-dot"></span>
+          <strong>KHÔNG GIAN HỌC TẬP TẬP TRUNG</strong>
+          <span class="sep">•</span><span>STUDYHUB 2026</span>
+        </div>
+        <div class="hero-copy">
+          <h1>Ôn thi<br><span>nhanh hơn</span> với <em>StudyHub</em> ✦</h1>
+          <p>Ghi chú, tài liệu, slide và kế hoạch học tập của bạn — tất cả trong một không gian rõ ràng, tập trung và
+            được thiết kế cho sinh viên.</p>
+          <div class="hero-actions">
+            <button class="btn primary big" onclick="go('library')">Khám phá học liệu <span>↗</span></button>
+            <button class="btn outline big" onclick="openAuth('register')">Tạo không gian học tập</button>
+          </div>
+          <div class="rating-line"><span class="stars">★★★★★</span><b>Học tập có hệ thống</b><span>•</span><span>PDF ·
+              Slide · Notes · Roadmap</span></div>
+        </div>
+        <div class="hero-dashboard" aria-label="Bảng tiến độ minh họa">
+          <div class="dash-top"><span class="mini-label">MY LEARNING SPACE</span><span class="online"><i></i>
+              LIVE</span></div>
+          <div class="dash-main">
+            <div class="dash-left">
+              <span class="mini-label">TUẦN NÀY</span>
+              <strong>76<span>%</span></strong>
+              <p>Tiến độ học tập</p>
+              <div class="progress-line"><i style="width:76%"></i></div>
+              <div class="dash-stat"><span>↑ 18%</span><small>so với tuần trước</small></div>
+            </div>
+            <div class="chart-wrap">
+              <div class="chart-grid"><i style="height:32%"></i><i style="height:48%"></i><i style="height:41%"></i><i
+                  style="height:67%"></i><i style="height:54%"></i><i style="height:82%"></i><i style="height:72%"></i>
+              </div>
+              <span>T2</span><span>T3</span><span>T4</span><span>T5</span><span>T6</span><span>T7</span><span>CN</span>
+            </div>
+          </div>
+          <div class="dash-bottom">
+            <div class="subject-mini"><span class="subject-badge red">DB</span>
+              <div><b>Database Systems</b><small>3 tài liệu mới</small></div><span>↗</span>
+            </div>
+            <div class="subject-mini"><span class="subject-badge blue">AT</span>
+              <div><b>Information Security</b><small>2 bài cần ôn</small></div><span>→</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section class="container section feature-section">
+        <div class="section-head">
+          <div><span class="eyebrow">STUDYHUB WORKFLOW</span>
+            <h2>Từ tài liệu → hiểu bài → tiến bộ.</h2>
+          </div><span class="section-note">Thiết kế để bạn thao tác nhanh.</span>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card featured"><span class="feature-num">01</span>
+            <div class="feature-icon red">↗</div>
+            <h3>Kho học liệu</h3>
+            <p>Đưa PDF, slide, ghi chú và tài liệu môn học về một nơi dễ tìm.</p><button class="text-btn"
+              onclick="go('library')">Mở kho học liệu <span>→</span></button>
+          </article>
+          <article class="feature-card"><span class="feature-num">02</span>
+            <div class="feature-icon blue">◫</div>
+            <h3>Lộ trình học</h3>
+            <p>Chia mục tiêu thành những bước ngắn để biết hôm nay cần học gì.</p><button class="text-btn"
+              onclick="go('dashboard')">Xem tiến độ <span>→</span></button>
+          </article>
+          <article class="feature-card"><span class="feature-num">03</span>
+            <div class="feature-icon navy">✦</div>
+            <h3>AI Tutor-ready</h3>
+            <p>Nền frontend sẵn sàng để nối trợ giảng AI, quiz và flashcard.</p><button class="text-btn"
+              onclick="openInfo()">Xem định hướng <span>→</span></button>
+          </article>
+        </div>
+      </section>
+
+      <section class="container section subject-section">
+        <div class="section-head">
+          <div><span class="eyebrow">KHÁM PHÁ</span>
+            <h2>Môn học nổi bật</h2>
+          </div><button class="text-btn" onclick="go('library')">Xem tất cả <span>→</span></button>
+        </div>
+        <div class="subject-grid" id="subjects"></div>
+      </section>
+
+      <section class="container section pricing-section" id="pricing">
+        <div class="pricing-head">
+          <div>
+            <span class="eyebrow">STUDYHUB PLANS</span>
+            <h2>Chọn gói học tập phù hợp với bạn.</h2>
+            <p>Mở khóa thêm công cụ học tập, AI Tutor và lộ trình cá nhân hóa khi bạn cần.</p>
+          </div>
+          <div class="billing-toggle" role="group" aria-label="Chu kỳ thanh toán">
+            <button class="billing-option active" data-billing="month">Theo tháng</button>
+            <button class="billing-option" data-billing="year">Theo năm <span>-20%</span></button>
+          </div>
+        </div>
+        <div class="pricing-grid">
+          <article class="price-card">
+            <div class="price-card-top">
+              <div class="plan-icon green">⌑</div><span class="plan-tag">Trải nghiệm</span>
+            </div>
+            <span class="plan-kicker">GÓI 1</span>
+            <h3>Miễn phí</h3>
+            <p>Dành cho sinh viên muốn bắt đầu với StudyHub.</p>
+            <div class="price"><strong>0đ</strong><span>/ tháng</span></div>
+            <div class="price-divider"></div>
+            <ul>
+              <li>✓ Kho tài liệu cơ bản</li>
+              <li>✓ Quiz & Flashcard cơ bản</li>
+              <li>✓ AI Tutor giới hạn</li>
+              <li>✓ Theo dõi tiến độ học tập</li>
+            </ul>
+            <button class="btn light full" onclick="selectPlan('free')">Dùng thử miễn phí</button>
+          </article>
+          <article class="price-card featured-plan">
+            <div class="popular">★ ĐƯỢC CHỌN NHIỀU NHẤT</div>
+            <div class="price-card-top">
+              <div class="plan-icon white-icon">★</div><span class="plan-tag dark-tag">GÓI 2</span>
+            </div>
+            <span class="plan-kicker">TIÊU CHUẨN</span>
+            <h3>Tiêu chuẩn</h3>
+            <p>Dành cho người học sử dụng thường xuyên và muốn bứt phá điểm số.</p>
+            <div class="price"><strong data-month="49.000đ" data-year="39.000đ">49.000đ</strong><span>/ tháng</span>
+            </div>
+            <div class="price-divider"></div>
+            <ul>
+              <li>✓ Bao gồm toàn bộ tính năng Gói 1</li>
+              <li>✓ AI Tutor nhiều lượt hỏi mỗi ngày</li>
+              <li>✓ Thư viện Quiz & Flashcard nâng cao</li>
+              <li>✓ Học nhóm và chia sẻ đề thi</li>
+            </ul>
+            <button class="btn white full" onclick="selectPlan('standard')">Bắt đầu ngay →</button>
+          </article>
+          <article class="price-card">
+            <div class="price-card-top">
+              <div class="plan-icon purple">ϟ</div><span class="plan-tag purple-tag">Chuyên sâu</span>
+            </div>
+            <span class="plan-kicker">GÓI 3</span>
+            <h3>Cao cấp</h3>
+            <p>Dành cho người cần học tập cá nhân hóa sâu và luyện thi chuyên biệt.</p>
+            <div class="price"><strong data-month="99.000đ" data-year="79.000đ">99.000đ</strong><span>/ tháng</span>
+            </div>
+            <div class="price-divider"></div>
+            <ul>
+              <li>✓ Bao gồm tất cả tính năng Gói 2</li>
+              <li>✓ AI Tutor không giới hạn 24/7</li>
+              <li>✓ Lộ trình & phân tích điểm yếu riêng</li>
+              <li>✓ Học nhóm nâng cao, livestream giải bài</li>
+            </ul>
+            <button class="btn primary full" onclick="selectPlan('pro')">Nâng cấp Pro</button>
+          </article>
+        </div>
+        <p class="pricing-note">Bạn có thể bắt đầu miễn phí và nâng cấp bất cứ lúc nào. Thanh toán sẽ được tích hợp ở
+          giai đoạn backend tiếp theo.</p>
+      </section>
+
+      <section class="container cta-strip">
+        <div><span class="eyebrow">START YOUR SESSION</span>
+          <h2>Một phiên học tốt bắt đầu từ một không gian tốt.</h2>
+          <p>Tìm đúng tài liệu, tập trung vào một mục tiêu, hoàn thành từng bước.</p>
+        </div>
+        <button class="btn white big" onclick="me?go('library'):openAuth('register')">Bắt đầu học
+          <span>↗</span></button>
+      </section>
+    </section>
+
+    <section class="screen" id="screen-library" data-screen="library">
+      <div class="container page-hero">
+        <div><span class="eyebrow">STUDY LIBRARY</span>
+          <h1>Kho học liệu</h1>
+          <p>Tìm, lọc, mở và tải tài liệu với vài thao tác.</p>
+        </div><button class="btn primary" id="upload-top" onclick="openUpload()">＋ Tải tài liệu</button>
+      </div>
+      <div class="container library-layout">
+        <aside class="filter-panel">
+          <div class="filter-title"><b>Bộ lọc</b><button class="clear-filter" id="clear-filter">Đặt lại</button></div>
+          <label>Tìm kiếm<input id="q" class="field" placeholder="Tên tài liệu, chủ đề..."
+              autocomplete="off"></label><label>Môn học<select id="subject" class="field">
+              <option value="">Tất cả môn</option>
+            </select></label>
+          <div class="filter-tip"><b>Gợi ý</b><span>Thử “SQL”, “security” hoặc tên môn.</span></div>
+        </aside>
+        <div class="library-main">
+          <div class="library-toolbar"><span id="result-count">Đang tải...</span>
+            <div class="view-toggle"><button class="view active" data-view="grid">▦</button><button class="view"
+                data-view="list">☰</button></div>
+          </div>
+          <div class="doc-grid" id="documents"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="screen" id="screen-dashboard" data-screen="dashboard">
+      <div class="container page-hero dashboard-hero">
+        <div><span class="eyebrow">YOUR LEARNING SPACE</span>
+          <h1 id="dash-title">Tiến độ học tập</h1>
+          <p id="dash-subtitle">Tập trung vào bước tiếp theo.</p>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn outline" id="create-course"
+            onclick="openCourseForm()">＋ Tạo course</button><button class="btn primary" onclick="go('library')">Khám phá
+            tài liệu</button></div>
+      </div>
+      <div class="container stats">
+        <div><span>Tiến độ học</span><strong id="stat-progress">0%</strong><small>Đã lưu trong tài khoản</small></div>
+        <div><span>Thời gian học</span><strong>5h 42m</strong><small>7 ngày qua</small></div>
+        <div><span>Tài liệu đã lưu</span><strong id="stat-docs">0</strong><small>Trong StudyHub</small></div>
+        <div><span>Course</span><strong id="stat-courses">0</strong><small>Đang theo dõi</small></div>
+      </div>
+      <div class="container dashboard-grid">
+        <article class="panel roadmap-panel">
+          <div class="panel-head">
+            <div><span class="eyebrow">SAVED PROGRESS</span>
+              <h2>Tiến độ của bạn</h2>
+            </div><span class="badge" id="progress-badge">0 mục</span>
+          </div>
+          <div class="timeline" id="progress-list">
+            <div class="empty">Đăng nhập để lưu tiến độ học tập.</div>
+          </div>
+        </article>
+        <article class="panel focus-panel"><span class="eyebrow">FOCUS</span>
+          <h2>Hôm nay bạn muốn học gì?</h2>
+          <p>Chọn một course để cập nhật phần trăm hoàn thành.</p><div style="display:grid;gap:10px"><button class="btn primary full"
+            onclick="go('library')">Mở kho học liệu</button><button class="btn outline full" onclick="openTutor()">Hỏi AI Tutor</button></div>
+          <div class="progress-label"><span>Tiến độ đã lưu</span><b id="progress-total">0 / 100</b></div>
+          <div class="progress"><i id="progress-total-bar" style="width:0%"></i></div>
+        </article>
+        <article class="panel courses-panel">
+          <div class="panel-head">
+            <div><span class="eyebrow">COURSES</span>
+              <h2>Course gần đây</h2>
+            </div>
+          </div>
+          <div id="course-list">
+            <div class="empty">Chưa có course.</div>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div><strong>StudyHub</strong><span>Học tập tập trung. Tiến bộ có hệ thống.</span></div><span>Python · SQLite ·
+      HTML/CSS/JS</span>
+  </footer>
+  <div class="toast" id="toast"></div>
+  <div class="modal hidden" id="modal"></div>
+  <script src="app.js"></script>
+</body>
+
+</html>

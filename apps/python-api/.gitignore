@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.env
+data/*.db
+uploads/*
+!uploads/.gitkeep
+.DS_Store
+
+# Phase 1 database backups / runtime files
+data/*.db-shm
+data/*.db-wal
+data/*.db.pre_phase1_backup
