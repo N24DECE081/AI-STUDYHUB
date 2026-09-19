@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import robotImg from '../assets/robot-capybara.png';
 
 function FlashcardTab({ currentDocument }) {

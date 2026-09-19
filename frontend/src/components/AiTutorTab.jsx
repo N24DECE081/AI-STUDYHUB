@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import robotImg from '../assets/robot-capybara.png';
 
@@ -22,8 +22,6 @@ function AiTutorTab({ currentDocument }) {
         .then((res) => res.json())
         .then((data) => setMessages(data))
         .catch((err) => console.error("Lỗi tải lịch sử chat:", err));
-    } else {
-      setMessages([]);
     }
   }, [currentDocument]);
 

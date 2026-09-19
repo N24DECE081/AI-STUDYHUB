@@ -1,0 +1,37 @@
+digraph StudyHubDB {
+  graph [rankdir=LR, bgcolor="white", pad="0.25", nodesep="0.45", ranksep="0.75"];
+  node [shape=box, style="rounded,filled", fillcolor="#f7f9fc", color="#0b1f33", fontname="Arial", fontsize=10];
+  edge [color="#8b1e2d", penwidth=1.2, arrowsize=0.7];
+
+  users [label="USERS\nid PK\nfull_name\nemail UNIQUE\npassword_hash\nrole / status"];
+  subjects [label="SUBJECTS\nid PK\ncode UNIQUE\nname"];
+  documents [label="DOCUMENTS\nid PK\nsubject_id FK\nuploaded_by FK\nfile metadata\nstatus / visibility"];
+  courses [label="COURSES\nid PK\nsubject_id FK\ncreated_by FK\ntitle / status"];
+  course_documents [label="COURSE_DOCUMENTS\ncourse_id FK\ndocument_id FK\nsort_order"];
+  course_enrollments [label="COURSE_ENROLLMENTS\nuser_id FK\ncourse_id FK\nstatus"];
+  plans [label="PLANS\nid PK\npricing\nai_daily_limit\nstorage_limit"];
+  subscriptions [label="SUBSCRIPTIONS\nid PK\nuser_id FK\nplan_id FK\nstatus"];
+  chat_sessions [label="CHAT_SESSIONS\nid PK\nuser_id FK\nsubject_id FK\ndocument_id FK"];
+  chat_messages [label="CHAT_MESSAGES\nid PK\nsession_id FK\nrole\ncontent"];
+  document_chunks [label="DOCUMENT_CHUNKS\nid PK\ndocument_id FK\nchunk_index\ncontent\nembedding_key"];
+  user_progress [label="USER_PROGRESS\nid PK\nuser_id FK\ncourse_id/document_id\nprogress_percent"];
+
+  users -> documents [label="uploads"];
+  subjects -> documents [label="contains"];
+  subjects -> courses [label="groups"];
+  users -> courses [label="creates"];
+  courses -> course_documents;
+  documents -> course_documents;
+  users -> course_enrollments;
+  courses -> course_enrollments;
+  users -> subscriptions;
+  plans -> subscriptions;
+  users -> chat_sessions;
+  subjects -> chat_sessions [style=dashed];
+  documents -> chat_sessions [style=dashed];
+  chat_sessions -> chat_messages;
+  documents -> document_chunks;
+  users -> user_progress;
+  courses -> user_progress [style=dashed];
+  documents -> user_progress [style=dashed];
+}

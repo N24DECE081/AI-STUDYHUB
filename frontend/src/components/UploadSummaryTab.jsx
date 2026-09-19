@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 
 function UploadSummaryTab({ onUploadSuccess, currentDocument, setCurrentDocument }) {
@@ -34,7 +34,7 @@ function UploadSummaryTab({ onUploadSuccess, currentDocument, setCurrentDocument
         const errorText = await res.text();
         alert('Lỗi: ' + errorText);
       }
-    } catch (err) {
+    } catch {
       alert('Không thể kết nối Backend!');
     } finally {
       setLoading(false);
