@@ -1,4 +1,4 @@
-import os, subprocess, sys, time, urllib.request, urllib.error, tempfile, json
+import os, subprocess, sys, time, urllib.request, urllib.error, tempfile, json, re
 from pathlib import Path
 import unittest
 
@@ -30,19 +30,17 @@ class ServerIntegrationTest(unittest.TestCase):
             return r.status, r.headers.get_content_type(), r.read()
     def test_real_http_assets_and_api(self):
         status,ctype,body=self.get('/')
-        self.assertEqual(status,200); self.assertEqual(ctype,'text/html'); self.assertIn(b'StudyHub',body)
-        status,ctype,body=self.get('/styles.css')
-        self.assertEqual(status,200); self.assertEqual(ctype,'text/css'); self.assertIn(b'--red',body)
-        status,ctype,body=self.get('/app.js')
-        self.assertEqual(status,200); self.assertEqual(ctype,'application/javascript'); self.assertIn(b'function',body)
+        self.assertEqual(status,200); self.assertEqual(ctype,'text/html'); self.assertIn(b'id="root"',body)
+        self.assertIn(b'/assets/',body)
+        asset=re.search(rb'/assets/[^"\']+\.js',body).group(0)
+        status,ctype,body=self.get(asset.decode())
+        self.assertEqual(status,200); self.assertEqual(ctype,'application/javascript'); self.assertGreater(len(body),100)
         status,ctype,body=self.get('/api/subjects')
         self.assertEqual(status,200); self.assertEqual(ctype,'application/json'); self.assertIn(b'ATTT',body)
         status,ctype,body=self.get('/api/documents')
         self.assertEqual(status,200); self.assertEqual(ctype,'application/json')
-        app_js=self.get('/app.js')[2]
-        self.assertIn(b'function submitUpload', app_js)
-        self.assertIn(b"go('library')", app_js)
-        self.assertIn(b'loadDocs()', app_js)
+        status,ctype,body=self.get('/ai-tutor')
+        self.assertEqual(status,200); self.assertIn(b'id="root"',body)
 
     def test_login_session_and_no_password_leak(self):
         import json

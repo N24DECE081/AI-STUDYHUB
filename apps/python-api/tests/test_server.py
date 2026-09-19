@@ -1,4 +1,4 @@
-import unittest, urllib.request, urllib.error, json, subprocess, time, os, sys
+import unittest, urllib.request, urllib.error, json, subprocess, time, os, sys, re
 
 class StudyHubSmokeTest(unittest.TestCase):
     @classmethod
@@ -23,14 +23,17 @@ class StudyHubSmokeTest(unittest.TestCase):
             with urllib.request.urlopen(req) as r: return r.status,r.headers.get('Content-Type',''),r.read()
         except urllib.error.HTTPError as e: return e.code,e.headers.get('Content-Type',''),e.read()
     def test_home(self):
-        s,ct,b=self.request('/'); self.assertEqual(s,200); self.assertIn('text/html',ct); self.assertIn(b'StudyHub',b)
+        s,ct,b=self.request('/'); self.assertEqual(s,200); self.assertIn('text/html',ct); self.assertIn(b'id="root"',b)
     def test_subjects(self):
         s,ct,b=self.request('/api/subjects'); self.assertEqual(s,200); self.assertGreaterEqual(len(json.loads(b)),4)
     def test_documents(self):
         s,ct,b=self.request('/api/documents'); self.assertEqual(s,200); self.assertGreaterEqual(len(json.loads(b)),3)
-    def test_static_assets(self):
-        for path,ctype in [('/styles.css','text/css'),('/app.js','application/javascript')]:
-            s,ct,b=self.request(path); self.assertEqual(s,200); self.assertIn(ctype,ct); self.assertGreater(len(b),100)
+    def test_spa_entrypoint_and_assets(self):
+        s,ct,b=self.request('/'); self.assertEqual(s,200); self.assertIn('text/html',ct)
+        self.assertIn(b'/assets/',b)
+        asset=re.search(rb'/assets/[^"\']+\.js',b).group(0)
+        s,ct,b=self.request(asset.decode()); self.assertEqual(s,200); self.assertIn('application/javascript',ct); self.assertGreater(len(b),100)
+        s,ct,b=self.request('/ai-tutor'); self.assertEqual(s,200); self.assertIn(b'id="root"',b)
     def test_missing_static_is_404(self):
         s,_,_=self.request('/missing.css'); self.assertEqual(s,404)
     def test_login_does_not_expose_password(self):

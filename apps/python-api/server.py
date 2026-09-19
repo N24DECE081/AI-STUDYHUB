@@ -9,7 +9,7 @@ from backend.app.db.runtime import get_runtime_database
 from backend.app.db.seed import seed as seed_database
 from backend.app.security import authenticate, register as register_user, current_user, revoke_session, SESSION_COOKIE
 
-ROOT=os.path.dirname(os.path.abspath(__file__)); WEB=os.path.join(ROOT,'web'); UP=os.path.join(ROOT,'uploads')
+ROOT=os.path.dirname(os.path.abspath(__file__)); LEGACY_WEB=os.path.join(ROOT,'web'); FRONTEND_DIST=os.path.normpath(os.path.join(ROOT,'..','..','frontend','dist')); WEB=FRONTEND_DIST if os.path.isfile(os.path.join(FRONTEND_DIST,'index.html')) else LEGACY_WEB; UP=os.path.join(ROOT,'uploads')
 os.makedirs(UP,exist_ok=True)
 if not os.environ.get('MYSQL_DATABASE') and os.environ.get('STUDYHUB_DB_PATH'):
  os.makedirs(os.path.dirname(os.environ['STUDYHUB_DB_PATH']),exist_ok=True)
@@ -115,6 +115,10 @@ class H(BaseHTTPRequestHandler):
   if path.startswith('/api/'):
     return self.json({'error':'not found'},404)
   fp=os.path.join(WEB,'index.html' if path=='/' else path.lstrip('/'))
+  # React is a client-side SPA: application routes must return its shell,
+  # while missing files (for example /missing.css) remain a real 404.
+  if not os.path.isfile(fp) and WEB==FRONTEND_DIST and not os.path.splitext(path)[1]:
+   fp=os.path.join(WEB,'index.html')
   if not os.path.isfile(fp): return self.json({'error':'not found'},404)
   ext=os.path.splitext(fp)[1]; ct={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'application/javascript; charset=utf-8','.svg':'image/svg+xml'}.get(ext,'application/octet-stream'); return self.send(200,open(fp,'rb').read(),ct)
  def do_POST(self):
