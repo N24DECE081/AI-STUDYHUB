@@ -1,32 +1,17 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
+html { background: #050608; }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: #f3f0f9; /* Nền tím trắng nhạt dịu mắt */
-  color: #2d264b;
   min-height: 100vh;
   overflow-x: hidden;
   overflow-y: auto;
+  background: #050608;
+  color: #f6f7fb;
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
-/* Scrollbar mượt mà màu tím nhạt */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: rgba(139, 92, 246, 0.05);
-}
-::-webkit-scrollbar-thumb {
-  background: #c4b5fd;
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #a78bfa;
-}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #080d17; }
+::-webkit-scrollbar-thumb { background: #2b4772; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #ef3340; }
