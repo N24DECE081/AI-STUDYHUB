@@ -10,8 +10,9 @@ body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   background-color: #f3f0f9; /* Nền tím trắng nhạt dịu mắt */
   color: #2d264b;
-  height: 100vh;
-  overflow: hidden;
+  min-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* Scrollbar mượt mà màu tím nhạt */

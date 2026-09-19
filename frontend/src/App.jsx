@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import { askTutor, getDocuments, login, logout as apiLogout, register, uploadDocument } from './api';
+import AiTutorLayer from './components/AiTutorLayer';
 
 const SUBJECTS = [{ id: 'CS', name: 'Cấu trúc dữ liệu' }, { id: 'OS', name: 'Hệ điều hành' }, { id: 'SEC', name: 'An toàn thông tin' }, { id: 'WEB', name: 'Lập trình web' }];
 const DOCS = [{ id: 1, title: 'Database Systems', subject: 'CS', description: 'Mô hình dữ liệu, quan hệ và truy vấn SQL.', fileName: 'database-systems.pdf', downloads: 142, notes: 'Ôn chuẩn hoá, SQL JOIN và thiết kế database.' }, { id: 2, title: 'Security Fundamentals', subject: 'SEC', description: 'Kiến thức nền tảng về bảo mật máy tính.', fileName: 'security-fundamentals.pdf', downloads: 96, notes: 'Tập trung CIA triad, mã hoá và bảo mật mạng.' }, { id: 3, title: 'Web Development Roadmap', subject: 'WEB', description: 'Lộ trình xây dựng một dự án web hoàn chỉnh.', fileName: 'web-roadmap.md', downloads: 121, notes: 'Chia lộ trình frontend, backend và triển khai.' }];
@@ -45,5 +46,6 @@ export default function App() {
   {modal === 'account' && <Modal title="Tài khoản của bạn" onClose={() => setModal(null)}><div className="account-summary"><span className="user-avatar large-avatar">{user?.name[0]}</span><div><h4>{user?.name}</h4><p>{user?.email}</p><span className="doc-subject">Gói {PLANS[subscription.plan].name}</span></div></div><div className="modal-actions"><button className="btn btn-ghost" onClick={() => { setModal(null); go('pricing'); }}>Quản lý gói</button><button className="btn btn-outline" onClick={logout}>Đăng xuất</button></div></Modal>}
   {modal === 'cancel' && <Modal title="Hủy gia hạn gói học" onClose={() => setModal(null)}><p className="muted">Gói vẫn hoạt động đến hết chu kỳ hiện tại, sau đó chuyển về Miễn phí.</p><div className="modal-actions"><button className="btn btn-ghost" onClick={() => setModal(null)}>Giữ gói</button><button className="btn btn-outline danger" onClick={() => { setSubscription((x) => ({ ...x, status: 'cancel_at_period_end' })); setModal(null); note('Gói sẽ không tự gia hạn.'); }}>Xác nhận hủy</button></div></Modal>}
   {modal === 'refund' && <Modal title="Yêu cầu hoàn tiền" onClose={() => setModal(null)}><p className="muted">Đây là luồng UI mô phỏng. Khi nối backend, yêu cầu sẽ được gửi tới cổng thanh toán.</p><div className="modal-actions"><button className="btn btn-ghost" onClick={() => setModal(null)}>Quay lại</button><button className="btn btn-outline danger" onClick={() => { setSubscription({ plan: 'free', status: 'refunded' }); setModal(null); note('Đã ghi nhận yêu cầu hoàn tiền (mô phỏng).'); }}>Gửi yêu cầu</button></div></Modal>}
+  <AiTutorLayer activeView={view} selectedDocument={selectedDoc} user={user} />
   {toast && <div className="toast">{toast}</div>}</div>;
 }
