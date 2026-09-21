@@ -1,0 +1,1 @@
+package com.studyhub.repository; import com.studyhub.model.DemoPayment; import org.springframework.data.jpa.repository.JpaRepository; public interface DemoPaymentRepository extends JpaRepository<DemoPayment,Long>{}

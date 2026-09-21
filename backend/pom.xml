@@ -14,6 +14,7 @@
     <description>StudyHub AI Backend</description>
     <properties>
         <java.version>17</java.version>
+        <lombok.version>1.18.40</lombok.version>
     </properties>
     <dependencies>
         <!-- Web & WebFlux -->
@@ -90,6 +91,7 @@
                         <path>
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
@@ -97,6 +99,9 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.studyhub.BackendApplication</mainClass>
+                </configuration>
             </plugin>
         </plugins>
     </build>

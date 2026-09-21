@@ -143,6 +143,20 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     CHECK(expires_at IS NULL OR expires_at >= started_at)
 );
 
+CREATE TABLE IF NOT EXISTS demo_transactions (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id           INTEGER NOT NULL,
+    plan              TEXT NOT NULL CHECK(plan IN ('free', 'plus', 'pro')),
+    amount            INTEGER NOT NULL CHECK(amount >= 0),
+    status            TEXT NOT NULL DEFAULT 'PENDING'
+                      CHECK(status IN ('PENDING', 'SUCCESS', 'FAILED')),
+    payment_method    TEXT NOT NULL DEFAULT 'DEMO'
+                      CHECK(payment_method = 'DEMO'),
+    transaction_code  TEXT NOT NULL UNIQUE,
+    created_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS subscription_changes (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id         INTEGER NOT NULL,
@@ -231,6 +245,8 @@ CREATE INDEX IF NOT EXISTS ix_enrollments_course_status
     ON course_enrollments(course_id, status);
 CREATE INDEX IF NOT EXISTS ix_subscriptions_user_status
     ON subscriptions(user_id, status);
+CREATE INDEX IF NOT EXISTS ix_demo_transactions_user_created
+    ON demo_transactions(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS ix_subscription_changes_user_status
     ON subscription_changes(user_id, status);
 CREATE INDEX IF NOT EXISTS ix_chat_sessions_user_updated

@@ -1,0 +1,4 @@
+package com.studyhub.model;
+import jakarta.persistence.*; import java.time.LocalDateTime;
+@Entity @Table(name="demo_payments", uniqueConstraints=@UniqueConstraint(columnNames="transactionCode"))
+public class DemoPayment { @Id @GeneratedValue(strategy=GenerationType.IDENTITY) private Long id; private Long userId; private String plan; private Long amount; private String status; private String paymentMethod="DEMO"; @Column(unique=true) private String transactionCode; private LocalDateTime createdAt=LocalDateTime.now(); public void setUserId(Long v){userId=v;} public void setPlan(String v){plan=v;} public void setAmount(Long v){amount=v;} public void setStatus(String v){status=v;} public void setTransactionCode(String v){transactionCode=v;} public String getTransactionCode(){return transactionCode;} public String getStatus(){return status;} }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, os, re, secrets, sqlite3, hashlib, mimetypes, html
+import json, os, re, secrets, sqlite3, hashlib, mimetypes, html, time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, quote
 from email.parser import BytesParser
@@ -50,6 +50,14 @@ def require_user(handler):
 
 def session_cookie(token, max_age=7 * 24 * 60 * 60):
     return f'{SESSION_COOKIE}={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'
+
+def demo_transaction_code(conn):
+  stamp = time.strftime('%Y%m%d')
+  for _ in range(10):
+    code = f'DEMO-{stamp}-{secrets.token_hex(3).upper()[:5]}'
+    if not conn.execute('SELECT 1 FROM demo_transactions WHERE transaction_code=?', (code,)).fetchone():
+      return code
+  raise sqlite3.IntegrityError('could not create a unique demo transaction code')
 
 class H(BaseHTTPRequestHandler):
  server_version='StudyHub/1.0'
@@ -166,17 +174,17 @@ class H(BaseHTTPRequestHandler):
     return self.json({'error':error},400)
    user, token, expires_at = result
    return self.json({'ok':True,'user':user,'expires_at':expires_at},201,{'Set-Cookie':session_cookie(token)})
-  if path=='/api/subscription/checkout':
+  if path in ('/api/payment/demo', '/api/subscription/checkout'):
    u=require_user(self)
    if not u:return
    x=json_body(data)
    if not isinstance(x,dict): return self.json({'error':'invalid checkout data'},400)
-   target_code=str(x.get('plan','')).lower(); cycle=str(x.get('billing_cycle','month')).lower(); method=str(x.get('payment_method','')).lower()
-   if target_code not in ('free','plus','pro') or cycle not in ('month','year') or method not in ('card','bank','ewallet','demo'):
+   target_code=str(x.get('plan','')).lower(); cycle=str(x.get('billing_cycle','month')).lower(); method=str(x.get('payment_method','demo')).lower()
+   if target_code not in ('free','plus','pro') or cycle not in ('month','year') or method != 'demo':
     return self.json({'error':'invalid checkout selection'},400)
    names={'free':('free',),'plus':('plus','standard'),'pro':('pro','premium')}; ranks={'free':0,'plus':1,'pro':2}
    with db() as c:
-    plans=[dict(row) for row in c.execute('SELECT id,name FROM plans WHERE status=?',('active',)).fetchall()]
+    plans=[dict(row) for row in c.execute('SELECT id,name,price_monthly,price_yearly FROM plans WHERE status=?',('active',)).fetchall()]
     by_code={code:next((plan for plan in plans if str(plan['name']).lower() in aliases),None) for code,aliases in names.items()}
     target=by_code[target_code]
     if not target:return self.json({'error':'selected plan is unavailable'},400)
@@ -188,9 +196,15 @@ class H(BaseHTTPRequestHandler):
      c.execute('INSERT INTO subscription_changes(user_id,target_plan_id,billing_cycle,status,effective_at) VALUES(?,?,?,?,datetime(\'now\',\'+1 month\'))',(u['id'],target['id'],cycle,'scheduled'))
      c.commit()
      return self.json({'plan':current_code,'status':'active','scheduled_change':{'plan':target_code,'billing_cycle':cycle},'change_type':'downgrade_scheduled'})
+    pending=c.execute("SELECT transaction_code FROM demo_transactions WHERE user_id=? AND status='PENDING'",(u['id'],)).fetchone()
+    if pending:return self.json({'error':'another demo payment is already processing'},409)
+    amount=target['price_yearly'] if cycle == 'year' else target['price_monthly']
+    transaction_code=demo_transaction_code(c)
+    c.execute('INSERT INTO demo_transactions(user_id,plan,amount,status,payment_method,transaction_code) VALUES(?,?,?,?,?,?)',(u['id'],target_code,amount,'PENDING','DEMO',transaction_code))
+    c.execute('UPDATE demo_transactions SET status=? WHERE transaction_code=?',('SUCCESS',transaction_code))
     if active:c.execute('UPDATE subscriptions SET status=? WHERE id=?',('expired',active['id']))
     c.execute('INSERT INTO subscriptions(user_id,plan_id,status) VALUES(?,?,?)',(u['id'],target['id'],'active')); c.commit()
-   return self.json({'plan':target_code,'status':'active','billing_cycle':cycle,'scheduled_change':None,'change_type':'upgrade_applied'})
+   return self.json({'plan':target_code,'status':'active','billing_cycle':cycle,'scheduled_change':None,'change_type':'upgrade_applied','payment_status':'SUCCESS','amount':amount,'payment_method':'DEMO','transaction_code':transaction_code})
   if path=='/api/subscription/cancel':
    u=require_user(self)
    if not u:return

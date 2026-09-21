@@ -228,8 +228,8 @@ The homepage now includes a dedicated **Gói học** section placed after the fe
 
 Plans:
 - Miễn phí — 0đ/tháng
-- Tiêu chuẩn — 49.000đ/tháng (featured)
-- Cao cấp — 99.000đ/tháng
+- Plus — 199.000đ/tháng (featured)
+- Pro — 299.000đ/tháng
 
 The billing toggle supports monthly/yearly display and the plan buttons currently provide a frontend selection flow. Payment processing is intentionally reserved for the backend/payment phase.
 

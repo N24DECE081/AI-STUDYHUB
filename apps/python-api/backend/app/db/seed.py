@@ -36,8 +36,8 @@ def seed(database: Database | None = None) -> None:
             conn.execute(insert_subject, row)
         plans = [
             ("Free", 0, 0, "Core StudyHub learning features", 10, 100),
-            ("Standard", 49000, 470000, "AI Tutor and advanced learning tools", 100, 2048),
-            ("Premium", 99000, 950000, "Deep personalization and advanced AI Tutor", None, 10240),
+            ("Standard", 199000, 1910400, "AI Tutor and advanced learning tools", 100, 2048),
+            ("Premium", 299000, 2870400, "Deep personalization and advanced AI Tutor", None, 10240),
         ]
         insert_plan = (
             "INSERT IGNORE INTO plans(name,price_monthly,price_yearly,description,ai_daily_limit,storage_limit) VALUES(?,?,?,?,?,?)"
@@ -46,6 +46,8 @@ def seed(database: Database | None = None) -> None:
         )
         for row in plans:
             conn.execute(insert_plan, row)
+        conn.execute("UPDATE plans SET price_monthly=?, price_yearly=? WHERE name=?", (199000, 1910400, "Standard"))
+        conn.execute("UPDATE plans SET price_monthly=?, price_yearly=? WHERE name=?", (299000, 2870400, "Premium"))
 
         teacher = conn.execute(
             "SELECT id FROM users WHERE email=?", ("teacher@studyhub.local",)
