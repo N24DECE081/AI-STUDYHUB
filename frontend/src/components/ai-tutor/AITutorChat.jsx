@@ -4,7 +4,7 @@ import AITutorInput from './AITutorInput';
 
 export default function AITutorChat({ conversation, ...props }) {
   const endRef = useRef(null);
-  useEffect(() => endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }), [conversation.messages.length, props.sending]);
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }); }, [conversation.messages.length, props.sending]);
   return <section className="tutor-chat"><header className="tutor-chat-header"><button className="tutor-menu" onClick={props.onOpenSidebar}>☰</button><div><span className="tutor-overline">STUDYHUB AI</span><h1>AI Tutor <em>Nova</em></h1></div><span className="tutor-status"><i /> Sẵn sàng hỗ trợ</span></header>
     <div className="tutor-messages">{conversation.messages.map((message) => <AITutorMessage key={message.id} message={message} onRetry={() => props.onRetry(message)} />)}{props.sending && <div className="tutor-thinking"><i /><i /><i /> Nova đang suy nghĩ…</div>}<div ref={endRef} /></div>
     <AITutorInput {...props} />

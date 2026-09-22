@@ -33,6 +33,15 @@ export async function uploadDocument({ file, title, description, subjectCode }) 
 
 export const askTutor = ({ documentId, question }) => request('/ai/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ document_id: documentId, question }) });
 export const askAiTutor = ({ conversationId, message, mode, fileIds = [] }) => request('/ai-tutor/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation_id: conversationId, message, mode, file_ids: fileIds }) });
+const postJson = (path, payload) => request(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload || {}) });
+export const getTutorAssessment = () => request('/ai-tutor/assessment');
+export const startTutorAssessment = (payload) => postJson('/ai-tutor/assessment/start', payload);
+export const submitTutorAssessment = (payload) => postJson('/ai-tutor/assessment/submit', payload);
+export const getTutorRoadmap = () => request('/ai-tutor/roadmap');
+export const generateTutorRoadmap = (payload) => postJson('/ai-tutor/roadmap', payload);
+export const getTutorExercises = () => request('/ai-tutor/exercises');
+export const submitTutorExercise = (exerciseId, { answer, answerType = 'text' }) => postJson(`/ai-tutor/exercises/${exerciseId}/submit`, { answer, answer_type: answerType });
+export const getTutorSubmissions = () => request('/ai-tutor/submissions');
 export const getSubscription = () => request('/subscription');
 export const checkoutSubscription = ({ plan, billingCycle, paymentMethod }) => request('/subscription/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan, billing_cycle: billingCycle, payment_method: paymentMethod }) });
 export const cancelSubscription = () => request('/subscription/cancel', { method: 'POST' });
