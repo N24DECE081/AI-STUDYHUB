@@ -1,0 +1,1 @@
+Thư mục này lưu trữ mã nguồn Backend Java Spring Boot và giao diện HTML cũ không còn sử dụng làm API mặc định, nhằm mục đích tra cứu lịch sử

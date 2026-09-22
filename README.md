@@ -4,9 +4,9 @@ Monorepo cho StudyHub. Mỗi thành viên chỉ cần làm việc trong đúng t
 
 | Thư mục | Vai trò | Runtime mặc định |
 | --- | --- | --- |
-| `frontend/` | React/Vite UI | `npm run dev` trên cổng 5173 |
+| `frontend/` | React/Vite UI (Giao diện chính) | `npm run dev` trên cổng 5173 |
 | `apps/python-api/` | API chính: auth, session, upload, tiến độ và AI Tutor local-RAG | `python run.py` trên cổng 5000 |
-| `backend/` | Spring Boot thử nghiệm cho Gemini/AI | Không phải API mặc định |
+| `archive/` | Lưu trữ mã nguồn cũ (Spring Boot, Vanilla UI) | Không dùng để chạy |
 
 ## Chạy dự án
 

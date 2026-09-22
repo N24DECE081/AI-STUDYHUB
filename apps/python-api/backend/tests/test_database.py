@@ -11,7 +11,7 @@ EXPECTED_TABLES = {
     "schema_migrations", "auth_sessions",
     "users", "subjects", "documents", "courses", "course_documents",
     "course_enrollments", "plans", "subscriptions", "chat_sessions",
-    "chat_messages", "document_chunks", "user_progress",
+    "chat_messages", "document_chunks", "user_progress","subscription_changes"
 }
 
 

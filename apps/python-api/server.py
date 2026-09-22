@@ -55,12 +55,20 @@ class H(BaseHTTPRequestHandler):
  server_version='StudyHub/1.0'
  def send(self,status=200,body=b'',ctype='application/json',headers=None):
   self.send_response(status); self.send_header('Content-Type',ctype); self.send_header('Cache-Control','no-store');
+  self.send_header('Access-Control-Allow-Origin', 'http://localhost:5173'); self.send_header('Access-Control-Allow-Credentials', 'true');
   if headers:
    for k,v in headers.items(): self.send_header(k,v)
   self.end_headers(); self.wfile.write(body)
  def json(self,obj,status=200,headers=None): self.send(status,json.dumps(obj,ensure_ascii=False).encode(),headers=headers)
  def body(self):
   n=int(self.headers.get('Content-Length','0')); return self.rfile.read(n)
+ def do_OPTIONS(self):
+    self.send_response(204)
+    self.send_header('Access-Control-Allow-Origin', 'http://localhost:5173')
+    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+    self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    self.send_header('Access-Control-Allow-Credentials', 'true')
+    self.end_headers()
  def do_GET(self):
   p=urlparse(self.path); path=p.path
   if path in ('/api/me','/api/auth/me'): return self.json({'user':user_from(self)})
@@ -128,6 +136,17 @@ class H(BaseHTTPRequestHandler):
   if not os.path.isfile(fp): return self.json({'error':'not found'},404)
   ext=os.path.splitext(fp)[1]; ct={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'application/javascript; charset=utf-8','.svg':'image/svg+xml'}.get(ext,'application/octet-stream'); return self.send(200,open(fp,'rb').read(),ct)
  def do_POST(self):
+  content_length = int(self.headers.get('Content-Length', 0))
+
+  # Chặn nếu dung lượng vượt quá 50MB (50 * 1024 * 1024 bytes)
+  if content_length > 52428800:
+    self.send_response(413)
+    self.send_header('Content-Type', 'application/json')
+    self.end_headers()
+    self.wfile.write(b'{"error": "Payload Too Large: Dung luong file vuot qua gioi han 50MB"}')
+    return
+
+
   p=urlparse(self.path); path=p.path; data=self.body();
   if path in ('/api/login','/api/auth/login'):
    try:
