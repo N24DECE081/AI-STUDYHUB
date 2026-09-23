@@ -35,6 +35,15 @@ CREATE INDEX IF NOT EXISTS ix_auth_sessions_user_expires
 CREATE INDEX IF NOT EXISTS ix_auth_sessions_expires
     ON auth_sessions(expires_at);
 
+CREATE TABLE IF NOT EXISTS user_streaks (
+    user_id             INTEGER PRIMARY KEY,
+    current_streak      INTEGER NOT NULL DEFAULT 0 CHECK(current_streak >= 0),
+    last_activity_date  TEXT,
+    recovery_count      INTEGER NOT NULL DEFAULT 0 CHECK(recovery_count >= 0),
+    updated_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS subjects (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     code            TEXT NOT NULL UNIQUE COLLATE NOCASE,

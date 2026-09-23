@@ -36,8 +36,8 @@ def seed(database: Database | None = None) -> None:
             conn.execute(insert_subject, row)
         plans = [
             ("Free", 0, 0, "Core StudyHub learning features", 10, 100),
-            ("Standard", 49000, 470000, "AI Tutor and advanced learning tools", 100, 2048),
-            ("Premium", 99000, 950000, "Deep personalization and advanced AI Tutor", None, 10240),
+            ("Standard", 199000, 1990000, "AI Tutor and advanced learning tools", 100, 2048),
+            ("Premium", 299000, 2990000, "Deep personalization and advanced AI Tutor", None, 10240),
         ]
         insert_plan = (
             "INSERT IGNORE INTO plans(name,price_monthly,price_yearly,description,ai_daily_limit,storage_limit) VALUES(?,?,?,?,?,?)"

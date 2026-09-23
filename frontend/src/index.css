@@ -1,17 +1,23 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap');
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { background: #050608; }
+html { background: #f8fafc; }
 
 body {
   min-height: 100vh;
   overflow-x: hidden;
   overflow-y: auto;
-  background: #050608;
-  color: #f6f7fb;
-  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #f8fafc;
+  color: #0b1d33;
+  font-family: 'Poppins', sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #080d17; }
-::-webkit-scrollbar-thumb { background: #2b4772; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #ef3340; }
+button, input, textarea, select { font-family: inherit; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid rgba(222, 53, 59, .25); outline-offset: 2px; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #eef2f7; }
+::-webkit-scrollbar-thumb { background: #c5cfdb; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #de353b; }

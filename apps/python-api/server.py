@@ -2,6 +2,7 @@
 import json, os, re, secrets, sqlite3, hashlib, mimetypes, html
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, quote
+import unicodedata
 from email.parser import BytesParser
 from email.policy import default
 
@@ -10,6 +11,8 @@ from backend.app.db.seed import seed as seed_database
 from backend.app.security import authenticate, register as register_user, current_user, revoke_session, SESSION_COOKIE
 
 ROOT=os.path.dirname(os.path.abspath(__file__)); WEB=os.path.join(ROOT,'web'); UP=os.path.join(ROOT,'uploads')
+MAX_UPLOAD_BYTES=20 * 1024 * 1024
+ALLOWED_UPLOAD_EXTENSIONS={'.pdf','.txt','.md','.csv','.doc','.docx','.ppt','.pptx'}
 os.makedirs(UP,exist_ok=True)
 if not os.environ.get('MYSQL_DATABASE') and os.environ.get('STUDYHUB_DB_PATH'):
  os.makedirs(os.path.dirname(os.environ['STUDYHUB_DB_PATH']),exist_ok=True)
@@ -20,7 +23,10 @@ def db():
 def init_db():
  database=get_runtime_database()
  database.initialize()
- seed_database(database)
+ with database.connect() as connection:
+  has_users=connection.execute('SELECT 1 FROM users LIMIT 1').fetchone()
+ if not has_users:
+  seed_database(database)
 
 def cookie_value(handler, name):
     raw = handler.headers.get('Cookie', '')
@@ -53,9 +59,12 @@ def session_cookie(token, max_age=7 * 24 * 60 * 60):
 
 class H(BaseHTTPRequestHandler):
  server_version='StudyHub/1.0'
+ def cors_origin(self):
+  origin = self.headers.get('Origin', '')
+  return origin if origin in ('http://localhost:5173', 'http://127.0.0.1:5173') else 'http://localhost:5173'
  def send(self,status=200,body=b'',ctype='application/json',headers=None):
   self.send_response(status); self.send_header('Content-Type',ctype); self.send_header('Cache-Control','no-store');
-  self.send_header('Access-Control-Allow-Origin', 'http://localhost:5173'); self.send_header('Access-Control-Allow-Credentials', 'true');
+  self.send_header('Access-Control-Allow-Origin', self.cors_origin()); self.send_header('Access-Control-Allow-Credentials', 'true');
   if headers:
    for k,v in headers.items(): self.send_header(k,v)
   self.end_headers(); self.wfile.write(body)
@@ -63,12 +72,12 @@ class H(BaseHTTPRequestHandler):
  def body(self):
   n=int(self.headers.get('Content-Length','0')); return self.rfile.read(n)
  def do_OPTIONS(self):
-    self.send_response(204)
-    self.send_header('Access-Control-Allow-Origin', 'http://localhost:5173')
-    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-    self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-    self.send_header('Access-Control-Allow-Credentials', 'true')
-    self.end_headers()
+  self.send_response(204)
+  self.send_header('Access-Control-Allow-Origin', self.cors_origin())
+  self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+  self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  self.send_header('Access-Control-Allow-Credentials', 'true')
+  self.end_headers()
  def do_GET(self):
   p=urlparse(self.path); path=p.path
   if path in ('/api/me','/api/auth/me'): return self.json({'user':user_from(self)})
@@ -101,6 +110,12 @@ class H(BaseHTTPRequestHandler):
         FROM user_progress p LEFT JOIN courses c ON c.id=p.course_id LEFT JOIN subjects s ON s.id=c.subject_id
         LEFT JOIN documents d ON d.id=p.document_id WHERE p.user_id=? ORDER BY p.updated_at DESC''',(u['id'],))]
     return self.json({'items':rows,'summary':{'count':len(rows),'completed':sum(1 for row in rows if row['completed'])}})
+  if path=='/api/streak':
+    u=require_user(self)
+    if not u:return
+    with db() as c:
+     row=c.execute('SELECT current_streak,last_activity_date,recovery_count FROM user_streaks WHERE user_id=?',(u['id'],)).fetchone()
+    return self.json(dict(row) if row else {'current_streak':0,'last_activity_date':None,'recovery_count':0})
   m=re.fullmatch(r'/api/documents/(\d+)',path)
   if m:
     c=db(); r=c.execute('SELECT d.*, d.original_filename AS file_name, d.storage_path AS file_path, d.uploaded_by AS uploader_id, s.code subject_code,s.name subject_name,u.full_name AS uploader FROM documents d JOIN subjects s ON s.id=d.subject_id JOIN users u ON u.id=d.uploaded_by WHERE d.id=?',(m.group(1),)).fetchone(); c.close(); return self.json(dict(r) if r else {'error':'not found'},200 if r else 404)
@@ -139,7 +154,7 @@ class H(BaseHTTPRequestHandler):
   content_length = int(self.headers.get('Content-Length', 0))
 
   # Chặn nếu dung lượng vượt quá 50MB (50 * 1024 * 1024 bytes)
-  if content_length > 52428800:
+  if content_length > MAX_UPLOAD_BYTES + 1024 * 1024:
     self.send_response(413)
     self.send_header('Content-Type', 'application/json')
     self.end_headers()
@@ -185,6 +200,24 @@ class H(BaseHTTPRequestHandler):
     return self.json({'error':error},400)
    user, token, expires_at = result
    return self.json({'ok':True,'user':user,'expires_at':expires_at},201,{'Set-Cookie':session_cookie(token)})
+  if path=='/api/subjects':
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   if not isinstance(x,dict): return self.json({'error':'Dữ liệu môn học không hợp lệ'},400)
+   name=str(x.get('name','')).strip(); description=str(x.get('description','')).strip()
+   raw_code=str(x.get('code','')).strip().upper()
+   if not 2 <= len(name) <= 100:return self.json({'error':'Tên môn học phải từ 2 đến 100 ký tự'},400)
+   if len(description)>500:return self.json({'error':'Mô tả môn học tối đa 500 ký tự'},400)
+   code=re.sub(r'[^A-Z0-9]','',raw_code)
+   if not code:
+    code=''.join(ch for ch in unicodedata.normalize('NFKD',name).upper() if ch.isascii() and ch.isalnum())[:8] or 'SUB'
+   if not 2 <= len(code) <= 12:return self.json({'error':'Mã môn học phải từ 2 đến 12 ký tự'},400)
+   with db() as c:
+    if c.execute('SELECT id FROM subjects WHERE code=?',(code,)).fetchone():return self.json({'error':'Mã môn học đã tồn tại'},409)
+    row=c.execute('INSERT INTO subjects(code,name,description) VALUES(?,?,?)',(code,name,description)).lastrowid
+    c.commit(); subject=c.execute('SELECT id,code,name,description FROM subjects WHERE id=?',(row,)).fetchone()
+   return self.json(dict(subject),201)
   if path=='/api/subscription/checkout':
    u=require_user(self)
    if not u:return
@@ -332,6 +365,13 @@ class H(BaseHTTPRequestHandler):
    if not filepart:return self.json({'error':'Chưa chọn file'},400)
    title=fields.get('title','').strip(); sid=fields.get('subject_id','')
    if not title or not sid:return self.json({'error':'Thiếu tiêu đề hoặc môn học'},400)
+   if len(title)>200:return self.json({'error':'Tiêu đề tối đa 200 ký tự'},400)
+   if len(fields.get('description',''))>2000:return self.json({'error':'Mô tả tối đa 2000 ký tự'},400)
+   filename=filepart[0].strip(); content=filepart[1]
+   extension=os.path.splitext(filename)[1].lower()
+   if not filename or extension not in ALLOWED_UPLOAD_EXTENSIONS:return self.json({'error':'Định dạng file không được hỗ trợ'},400)
+   if not content:return self.json({'error':'File không được rỗng'},400)
+   if len(content)>MAX_UPLOAD_BYTES:return self.json({'error':'File vượt quá giới hạn 10MB'},413)
    try:
     subject_id=int(sid)
    except ValueError:
@@ -339,13 +379,13 @@ class H(BaseHTTPRequestHandler):
    c=db(); subject=c.execute('SELECT id FROM subjects WHERE id=?',(subject_id,)).fetchone()
    if not subject:
     c.close(); return self.json({'error':'Môn học không tồn tại'},400)
-   safe=re.sub(r'[^A-Za-z0-9._-]','_',filepart[0]); stored=f'{secrets.token_hex(8)}_{safe}'
+   safe=re.sub(r'[^A-Za-z0-9._-]','_',filename); stored=f'{secrets.token_hex(8)}_{safe}'
    target=os.path.join(UP,stored)
-   with open(target,'wb') as fh: fh.write(filepart[1])
-   ext=os.path.splitext(filepart[0])[1].lower().lstrip('.') or 'unknown'
-  mime={'.pdf':'application/pdf','.txt':'text/plain','.doc':'application/msword','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.ppt':'application/vnd.ms-powerpoint','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation'}.get(os.path.splitext(filepart[0])[1].lower(),'application/octet-stream')
-  document_id=c.execute('INSERT INTO documents(title,description,original_filename,storage_filename,file_type,mime_type,file_size,storage_path,status,subject_id,uploaded_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(title,fields.get('description',''),filepart[0],stored,ext,mime,len(filepart[1]),os.path.join('uploads',stored),'ready',subject_id,u['id'])).lastrowid
-  c.commit(); c.close(); return self.json({'ok':True,'document_id':document_id,'status':'ready'},201)
+   with open(target,'wb') as fh: fh.write(content)
+   ext=extension.lstrip('.')
+   mime={'.pdf':'application/pdf','.txt':'text/plain','.md':'text/markdown','.csv':'text/csv','.doc':'application/msword','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.ppt':'application/vnd.ms-powerpoint','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation'}.get(extension,'application/octet-stream')
+   document_id=c.execute('INSERT INTO documents(title,description,original_filename,storage_filename,file_type,mime_type,file_size,storage_path,status,subject_id,uploaded_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(title,fields.get('description','').strip(),filename,stored,ext,mime,len(content),os.path.join('uploads',stored),'ready',subject_id,u['id'])).lastrowid
+   c.commit(); c.close(); return self.json({'ok':True,'document_id':document_id,'status':'ready'},201)
   return self.json({'error':'not found'},404)
 
 class StudyHubHTTPServer(ThreadingHTTPServer):

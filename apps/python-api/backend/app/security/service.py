@@ -1,8 +1,41 @@
 """Authentication service: registration, login and safe user serialization."""
 from __future__ import annotations
 
+from datetime import date
+
 from .password import hash_password, verify_password, needs_rehash, normalize_email, validate_email, validate_password
 from .session import create_session, revoke_session, get_user_id
+
+
+def update_streak(conn, user_id: int) -> dict:
+    today = date.today()
+    row = conn.execute("SELECT * FROM user_streaks WHERE user_id=?", (user_id,)).fetchone()
+    if not row:
+        conn.execute(
+            "INSERT INTO user_streaks(user_id,current_streak,last_activity_date) VALUES(?,?,?)",
+            (user_id, 1, today.isoformat()),
+        )
+    else:
+        last_date = date.fromisoformat(row["last_activity_date"]) if row["last_activity_date"] else None
+        gap = (today - last_date).days if last_date else 1
+        streak = row["current_streak"]
+        recoveries = row["recovery_count"]
+        if gap == 0:
+            pass
+        elif gap == 1:
+            streak += 1
+        elif recoveries < 3:
+            streak += 1
+            recoveries += 1
+        else:
+            streak = 0
+            recoveries += 1
+        conn.execute(
+            "UPDATE user_streaks SET current_streak=?,last_activity_date=?,recovery_count=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+            (streak, today.isoformat(), recoveries, user_id),
+        )
+    current = conn.execute("SELECT * FROM user_streaks WHERE user_id=?", (user_id,)).fetchone()
+    return dict(current)
 
 
 def public_user(row) -> dict:
@@ -27,10 +60,13 @@ def authenticate(conn, email: str, password: str):
     if needs_rehash(row["password_hash"]):
         conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), row["id"]))
     conn.execute("UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?", (row["id"],))
+    streak = update_streak(conn, row["id"])
     token, expires_at = create_session(conn, row["id"])
     conn.commit()
     fresh = conn.execute("SELECT * FROM users WHERE id=?", (row["id"],)).fetchone()
-    return (public_user(fresh), token, expires_at), None
+    user = public_user(fresh)
+    user["streak"] = streak
+    return (user, token, expires_at), None
 
 
 def register(conn, name: str, email: str, password: str):
@@ -53,10 +89,13 @@ def register(conn, name: str, email: str, password: str):
             return None, "Email đã tồn tại"
         raise
     user_id = cur.lastrowid
+    streak = update_streak(conn, user_id)
     token, expires_at = create_session(conn, user_id)
     conn.commit()
     row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-    return (public_user(row), token, expires_at), None
+    user = public_user(row)
+    user["streak"] = streak
+    return (user, token, expires_at), None
 
 
 def current_user(conn, token: str | None):
