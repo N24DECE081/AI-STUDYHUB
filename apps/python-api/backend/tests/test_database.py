@@ -9,9 +9,12 @@ from app.db.seed import seed
 
 EXPECTED_TABLES = {
     "schema_migrations", "auth_sessions",
-    "users", "subjects", "documents", "courses", "course_documents",
+    "users", "user_streaks", "subjects", "documents", "courses", "course_documents",
     "course_enrollments", "plans", "subscriptions", "chat_sessions",
-    "chat_messages", "document_chunks", "user_progress","subscription_changes"
+    "chat_messages", "document_chunks", "user_progress", "subscription_changes",
+    # AI Tutor: hội thoại, đánh giá năng lực, lộ trình, bài tập và bài nộp
+    "tutor_conversations", "tutor_messages", "tutor_assessments",
+    "tutor_roadmaps", "tutor_exercises", "tutor_submissions"
 }
 
 

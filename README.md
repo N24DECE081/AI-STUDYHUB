@@ -35,6 +35,33 @@ Mở URL Vite hiển thị, thường là `http://localhost:5173`. Vite tự pro
 - `GET /api/documents`, `GET /api/documents/:id`: kho học liệu.
 - `GET` / `POST /api/progress`: lưu tiến độ theo user.
 - `POST /api/ai/chat`: AI Tutor local-RAG; câu hỏi không hợp lệ hoặc tài liệu không tồn tại trả JSON lỗi an toàn.
+- `POST /api/ai-tutor/chat`, `/assessment/start`, `/assessment/submit`, `/roadmap`, `/exercises`, `/exercises/:id/submit`: luồng AI Tutor (chat, đánh giá năng lực, lộ trình, luyện tập & chấm điểm).
+- `GET /api/ai-tutor/conversations`: lịch sử hội thoại của chính người đang đăng nhập (tin nhắn lưu ở server; frontend cache thêm ở localStorage để hiện ngay).
+
+## AI Tutor (Nova)
+
+Nova trả lời theo hai chế độ, tự chọn khi backend khởi động:
+
+- **Provider thật** (mô hình ngôn ngữ): bật bằng cách tạo `apps/python-api/.env` từ `.env.example` và điền **một** API key
+  (ví dụ `DEEPSEEK_API_KEY=...` hoặc `OPENAI_API_KEY=...`), hoặc đặt `STUDYHUB_AI_PROVIDER` / `STUDYHUB_AI_API_KEY` /
+  `STUDYHUB_AI_BASE_URL` / `STUDYHUB_AI_MODEL`. Có thể dùng Ollama local, khi đó không cần key.
+- **Offline local-RAG**: khi không có key, Nova vẫn trả lời nhưng chỉ dựa trên tài liệu anh tải lên
+  (trích câu liên quan, giải thích, ví dụ, tạo quiz có đáp án kiểm chứng, tóm tắt, chấm điểm tất định).
+  Nếu chưa có tài liệu phù hợp, Nova nói rõ là chưa tìm thấy nội dung và liệt kê tài liệu đang có, **không bịa**.
+
+`GET /api/ai-tutor/engine` cho biết đang chạy chế độ nào và tên model (không bao giờ trả về API key); UI hiển thị badge
+"Nova offline (bám theo tài liệu của bạn)" hoặc tên model ở góc phải trang Trò chuyện.
+
+**Khi model lỗi (hết quota, key bị từ chối, provider sập, mất mạng):** Nova không sập. Backend tự trả lời bằng
+engine offline (kèm dòng cảnh báo lý do trong câu trả lời), badge đổi thành "… — tạm lỗi: <lý do>" và lộ trình/bài tập
+vẫn sinh được. Khi provider hoạt động lại, lần gọi thành công kế tiếp tự xoá cảnh báo — không cần khởi động lại.
+
+**Chấm điểm:** trắc nghiệm và bài tính toán luôn do backend đối chiếu đáp án/số (không thể sai). Bài viết và bài
+lập trình do model chấm theo rubric khi có key (nhận xét cụ thể từng ý); không có key thì backend chấm theo từ khoá.
+Mỗi kết quả có nhãn `graded_by` để UI hiện "Nova (AI) chấm" hay "Chấm tự động".
+
+API key **chỉ** nằm ở backend: frontend không nhận key và không gọi trực tiếp provider. Test tự động đặt
+`STUDYHUB_NO_DOTENV=1` nên không bao giờ đọc `.env` thật hay gọi model tốn tiền.
 
 Thanh toán, hủy gói và hoàn tiền là UI mockup; không được coi là giao dịch thật cho đến khi có payment provider và API riêng.
 

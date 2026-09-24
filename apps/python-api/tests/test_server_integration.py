@@ -4,6 +4,13 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Test phải chạy offline: không đọc .env thật của máy.
+os.environ['STUDYHUB_NO_DOTENV'] = '1'
+for _name in ('DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'GROQ_API_KEY',
+              'MISTRAL_API_KEY', 'TOGETHER_API_KEY', 'XAI_API_KEY', 'ANTHROPIC_API_KEY',
+              'STUDYHUB_AI_PROVIDER', 'STUDYHUB_AI_API_KEY', 'STUDYHUB_AI_BASE_URL', 'STUDYHUB_AI_MODEL'):
+    os.environ.pop(_name, None)
+
 class ServerIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -17,11 +24,12 @@ class ServerIntegrationTest(unittest.TestCase):
         deadline=time.time()+5
         while time.time()<deadline:
             try:
-                with urllib.request.urlopen(f'http://127.0.0.1:{cls.port}/', timeout=0.5): break
+                with urllib.request.urlopen(f'http://127.0.0.1:{cls.port}/api/subjects', timeout=0.5): break
             except Exception: time.sleep(0.1)
         else:
-            out=cls.proc.stdout.read() if cls.proc.stdout else ''
-            raise RuntimeError('server did not start: '+out)
+            cls.proc.terminate()
+            out,_ = cls.proc.communicate(timeout=3)
+            raise RuntimeError('server did not start: '+(out or '')[:2000])
     @classmethod
     def tearDownClass(cls):
         cls.proc.terminate(); cls.proc.wait(timeout=5); cls.tmp.cleanup()
@@ -29,16 +37,18 @@ class ServerIntegrationTest(unittest.TestCase):
         with urllib.request.urlopen(f'http://127.0.0.1:{self.port}{path}', timeout=2) as r:
             return r.status, r.headers.get_content_type(), r.read()
     def test_real_http_assets_and_api(self):
+        status,ctype,body=self.get('/api/subjects')
+        self.assertEqual(status,200); self.assertEqual(ctype,'application/json'); self.assertIn(b'ATTT',body)
+        status,ctype,body=self.get('/api/documents')
+        self.assertEqual(status,200); self.assertEqual(ctype,'application/json')
+        if not (ROOT/'web').is_dir():
+            self.skipTest('vanilla web/ UI is not shipped; the React frontend owns the assets')
         status,ctype,body=self.get('/')
         self.assertEqual(status,200); self.assertEqual(ctype,'text/html'); self.assertIn(b'StudyHub',body)
         status,ctype,body=self.get('/styles.css')
         self.assertEqual(status,200); self.assertEqual(ctype,'text/css'); self.assertIn(b'--red',body)
         status,ctype,body=self.get('/app.js')
         self.assertEqual(status,200); self.assertEqual(ctype,'application/javascript'); self.assertIn(b'function',body)
-        status,ctype,body=self.get('/api/subjects')
-        self.assertEqual(status,200); self.assertEqual(ctype,'application/json'); self.assertIn(b'ATTT',body)
-        status,ctype,body=self.get('/api/documents')
-        self.assertEqual(status,200); self.assertEqual(ctype,'application/json')
         app_js=self.get('/app.js')[2]
         self.assertIn(b'function submitUpload', app_js)
         self.assertIn(b"go('library')", app_js)
