@@ -1,7 +1,277 @@
-.ai-tutor-page{--ink:#111827;--red:#c62828;--blue:#174ea6;--paper:#f7f9fc;--line:#dbe3ef;display:grid;grid-template-columns:276px minmax(0,1fr);min-height:calc(100vh - 76px);background:var(--paper);color:var(--ink);border-top:1px solid var(--line)}
-.tutor-sidebar{background:#101827;color:#eef5ff;padding:20px 14px;display:flex;flex-direction:column;gap:15px}.tutor-sidebar-head{display:flex;justify-content:space-between;align-items:center}.tutor-brand{display:flex;align-items:center;gap:8px;font-size:19px}.tutor-brand .ai-tutor-icon{color:#f04b4b}.tutor-mobile-close,.tutor-menu{display:none}.tutor-new{border:1px solid #f05252;background:#d82f32;color:#fff;border-radius:9px;padding:11px 12px;text-align:left;font-weight:700;cursor:pointer}.tutor-search{display:flex;gap:8px;align-items:center;background:#202c3e;border:1px solid #324258;border-radius:8px;padding:0 9px;color:#aab9cd}.tutor-search input{min-width:0;width:100%;padding:9px 0;background:transparent;border:0;outline:0;color:#fff}.tutor-conversation-list{display:grid;gap:4px;overflow:auto}.tutor-conversation{display:flex;gap:2px;padding:3px;border-radius:8px}.tutor-conversation.active{background:#263750}.tutor-conversation>button:first-child{min-width:0;flex:1;border:0;background:transparent;text-align:left;color:#e5ecf7;padding:8px;cursor:pointer}.tutor-conversation strong,.tutor-conversation small{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.tutor-conversation strong{font-size:13px}.tutor-conversation small{font-size:11px;color:#9eb1ca;margin-top:3px}.tutor-delete{align-self:center;border:0;background:transparent;color:#b5c2d3;font-size:20px;cursor:pointer;padding:3px 7px}.tutor-delete:hover{color:#ff7b7b}
-.tutor-chat{min-width:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;min-height:calc(100vh - 76px);max-height:calc(100vh - 76px);background:linear-gradient(180deg,#fff 0%,#f8faff 100%)}.tutor-chat-header{padding:21px clamp(20px,5vw,68px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px}.tutor-overline{font-size:10px;letter-spacing:.12em;font-weight:800;color:var(--red)}.tutor-chat h1{font-size:25px;margin:2px 0 0}.tutor-chat h1 em{font-style:normal;color:var(--red)}.tutor-status{margin-left:auto;color:#52705b;font-size:13px}.tutor-status i{display:inline-block;width:8px;height:8px;border-radius:50%;background:#35a46a;margin-right:5px}.tutor-messages{overflow-y:auto;padding:28px max(22px,calc((100% - 768px)/2));display:flex;flex-direction:column;gap:20px}.tutor-message{position:relative;max-width:100%;display:grid;gap:7px}.tutor-message-label{font-size:12px;font-weight:800;color:#536176}.tutor-message-content{width:fit-content;max-width:min(100%,680px);line-height:1.62;font-size:15px}.tutor-message-content p{margin:0 0 10px}.tutor-message.user{align-items:end}.tutor-message.user .tutor-message-label{margin-right:8px}.tutor-message.user .tutor-message-content{background:#173f83;color:#fff;border-radius:16px 16px 3px 16px;padding:11px 14px}.tutor-message.assistant .tutor-message-content{background:#fff;border:1px solid var(--line);box-shadow:0 5px 18px rgba(17,35,68,.05);border-radius:4px 16px 16px 16px;padding:13px 15px}.tutor-code-block{margin:12px 0;overflow:auto;background:#101827;color:#e4ecf9;padding:14px;border-radius:8px}.inline-code{background:#edf2fa;color:#a61b1b;padding:2px 5px;border-radius:4px}.tutor-copy,.tutor-link{border:0;background:transparent;color:var(--blue);font-size:12px;font-weight:700;cursor:pointer;padding:0}.tutor-copy{width:fit-content;margin-left:4px}.tutor-error{color:#b42318}.tutor-thinking{color:#56667d;font-size:13px}.tutor-thinking i{display:inline-block;width:6px;height:6px;background:#c62828;border-radius:50%;margin:0 2px;animation:tutor-bounce .9s infinite alternate}.tutor-thinking i:nth-child(2){animation-delay:.2s}.tutor-thinking i:nth-child(3){animation-delay:.4s}@keyframes tutor-bounce{to{transform:translateY(-4px);opacity:.35}}
-.tutor-input-shell{margin:0 max(16px,calc((100% - 768px)/2)) 19px;background:#fff;border:1px solid #cdd9e9;box-shadow:0 10px 28px rgba(21,47,90,.12);border-radius:14px;padding:10px 12px}.tutor-mode-row{display:flex;gap:5px;overflow-x:auto;padding-bottom:8px}.tutor-mode-row button{white-space:nowrap;border:1px solid #dce4ef;background:#f8fafc;border-radius:99px;padding:5px 9px;font-size:11px;color:#49566c;cursor:pointer}.tutor-mode-row button.active{background:#172e5c;border-color:#172e5c;color:#fff}.tutor-input-shell textarea{display:block;width:100%;resize:none;outline:0;border:0;line-height:1.5;font:inherit;padding:4px 1px;max-height:160px}.tutor-input-actions{display:flex;align-items:center;gap:8px}.tutor-file-upload{display:flex;align-items:center;gap:5px;min-width:0;overflow:auto}.tutor-attach{flex:none;border:0;background:transparent;color:#174ea6;font-weight:700;cursor:pointer;padding:6px 3px}.tutor-file-chip{white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis;font-size:11px;background:#edf3fc;border-radius:20px;padding:4px 7px}.tutor-file-chip button{border:0;background:transparent;font-size:16px;line-height:10px;color:#be2525;cursor:pointer}.tutor-keyboard-tip{margin-left:auto;font-size:11px;color:#77849a}.tutor-send{border:0;border-radius:8px;background:#c62828;color:#fff;padding:8px 14px;font-weight:800;cursor:pointer}.tutor-send:disabled{opacity:.55;cursor:not-allowed}
+/* Giao diện AI Tutor theo skin chung của StudyHub: nền sáng #f8fafc, navy #0b1d33,
+   đỏ #de353b, thẻ trắng viền #e4ebf2, radius 12-14px, bóng nhẹ — khớp index.css/App.css. */
 
-.ai-tutor-page{--ink:#eaf1ff;--paper:#0a101c;--line:#273852;background:radial-gradient(circle at 70% 0,#182d55 0,#0a101c 46%,#080d16 100%)}.tutor-chat{background:transparent}.tutor-chat-header{border-color:#273852;background:rgba(10,17,29,.55)}.tutor-chat h1{color:#f3f7ff}.tutor-message-label{color:#9fb0ca}.tutor-message.assistant .tutor-message-content{background:#111d31;color:#e6effc;border-color:#2c405f;box-shadow:0 8px 22px rgba(0,0,0,.2)}.tutor-message.user .tutor-message-content{background:linear-gradient(135deg,#2353a3,#18376d)}.tutor-input-shell{background:#101c30;border-color:#334966;box-shadow:0 14px 32px rgba(0,0,0,.35)}.tutor-mode-row button{background:#17263d;color:#aec0da;border-color:#334966}.tutor-mode-row button.active{background:#b92835;border-color:#df4450}.tutor-input-shell textarea{background:transparent;color:#eef5ff}.tutor-file-chip{background:#1a2c47;color:#d9e7fb}.tutor-keyboard-tip{color:#8296b2}.tutor-attach{color:#8eb7ff}.tutor-send{background:linear-gradient(135deg,#e13b44,#a91d32)}.inline-code{background:#223552;color:#ffb0ae}.tutor-code-block{background:#070c15;border:1px solid #263b59}.tutor-status{color:#91cda9}
-@media(max-width:720px){.ai-tutor-page{display:block;min-height:calc(100vh - 64px)}.tutor-sidebar{position:fixed;z-index:30;top:0;bottom:0;left:0;width:276px;transform:translateX(-105%);transition:transform .25s ease;box-shadow:8px 0 26px rgba(0,0,0,.26)}.tutor-sidebar.open{transform:translateX(0)}.tutor-mobile-close,.tutor-menu{display:inline-block;border:0;background:transparent;color:inherit;font-size:21px;cursor:pointer}.tutor-menu{color:#173f83}.tutor-chat{min-height:calc(100vh - 64px);max-height:calc(100vh - 64px)}.tutor-chat-header{padding:14px 17px}.tutor-status{display:none}.tutor-messages{padding:19px 16px}.tutor-input-shell{margin:0 10px 10px}.tutor-keyboard-tip{display:none}.tutor-input-actions{align-items:flex-end}.tutor-file-upload{max-width:55%}.tutor-send{padding:8px 10px}}
+.ai-tutor-page{--ink:#0b1d33;--red:#de353b;--blue:#174ea6;--paper:#f8fafc;--line:#e4ebf2;--muted:#75869a;--soft:#f1f5f9;--soft-ink:#64768b;--ok:#15a57b;--ok-bg:#e8f7ef;--warn:#8a5a00;--warn-bg:#fff8e6;--danger:#c62828;--danger-bg:#fff0f0;--tutor-vh:calc(100vh - 72px);width:100%;max-width:1180px;margin:0 auto;padding:24px clamp(16px,3vw,34px);display:grid;grid-template-columns:288px minmax(0,1fr);gap:20px;min-height:var(--tutor-vh);background:transparent;color:var(--ink);font-family:'Poppins',sans-serif}
+
+/* ---------- Sidebar hội thoại ---------- */
+.tutor-sidebar{background:#fff;color:var(--ink);border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 30px rgba(20,44,72,.04);padding:18px 14px;display:flex;flex-direction:column;gap:14px;max-height:calc(var(--tutor-vh) - 48px);overflow:auto;align-self:start}
+.tutor-sidebar-head{display:flex;justify-content:space-between;align-items:center}
+.tutor-brand{display:flex;align-items:center;gap:8px;font:700 17px 'Playfair Display',Georgia,serif;color:var(--ink);letter-spacing:0}
+.tutor-brand .ai-tutor-icon{color:var(--red);width:18px;height:18px}
+.tutor-mobile-close,.tutor-menu{display:none}
+.tutor-new{border:0;background:var(--red);color:#fff;border-radius:7px;padding:11px 13px;text-align:left;font-size:12px;font-weight:800;cursor:pointer;box-shadow:0 8px 18px rgba(222,53,59,.18);transition:transform .18s,box-shadow .18s}
+.tutor-new:hover{transform:translateY(-1px)}
+.tutor-search{display:flex;gap:8px;align-items:center;background:var(--soft);border:1px solid var(--line);border-radius:9px;padding:0 10px;color:var(--soft-ink)}
+.tutor-search input{min-width:0;width:100%;padding:9px 0;background:transparent;border:0;outline:0;color:var(--ink);font-size:12px}
+.tutor-conversation-list{display:grid;gap:3px;overflow:auto}
+.tutor-conversation{display:flex;gap:2px;padding:3px;border-radius:9px;border:1px solid transparent}
+.tutor-conversation:hover{background:#f7f9fc}
+.tutor-conversation.active{background:var(--danger-bg);border-color:#f4d3d4}
+.tutor-conversation>button:first-child{min-width:0;flex:1;border:0;background:transparent;text-align:left;color:var(--ink);padding:8px;cursor:pointer}
+.tutor-conversation strong,.tutor-conversation small{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.tutor-conversation strong{font-size:12.5px;font-weight:700}
+.tutor-conversation small{font-size:11px;color:var(--muted);margin-top:3px}
+.tutor-delete{align-self:center;border:0;background:transparent;color:#a3b1c2;font-size:19px;cursor:pointer;padding:3px 7px;line-height:1}
+.tutor-delete:hover{color:var(--red)}
+
+/* ---------- Khung chat ---------- */
+.tutor-main{min-width:0;display:grid;grid-template-rows:auto minmax(0,1fr);height:calc(var(--tutor-vh) - 48px)}
+.tutor-main>.tutor-chat{min-height:0;max-height:none;height:auto}
+.tutor-chat{min-width:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 30px rgba(20,44,72,.04);overflow:hidden}
+.tutor-chat-header{padding:18px clamp(16px,3vw,26px);border-bottom:1px solid #eef2f7;display:flex;align-items:center;gap:16px;background:#fff}
+.tutor-overline{font-size:9px;letter-spacing:.16em;font-weight:800;color:#788b9f;text-transform:uppercase}
+.tutor-chat h1{font:700 25px/1.15 'Playfair Display',Georgia,serif;margin:4px 0 0;color:var(--ink);letter-spacing:0}
+.tutor-chat h1 em{font-style:normal;color:var(--red)}
+.tutor-status{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--ok);background:var(--ok-bg);border:1px solid #cdeade;border-radius:999px;padding:6px 11px;cursor:help;white-space:nowrap}
+.tutor-status i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin:0}
+.tutor-status.offline{color:var(--warn);background:var(--warn-bg);border-color:#f0e5c7}
+.tutor-status.offline i{background:#e0a24e}
+
+/* ---------- Tin nhắn ---------- */
+.tutor-messages{overflow-y:auto;padding:26px max(20px,calc((100% - 720px)/2));display:flex;flex-direction:column;gap:18px;background:#fbfcfe;min-width:0}
+.tutor-message{position:relative;max-width:100%;min-width:0;display:grid;gap:6px}
+.tutor-message-label{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.tutor-message-content{width:fit-content;max-width:min(100%,660px);min-width:0;line-height:1.68;font-size:14px;color:#243950;overflow-wrap:break-word}
+.tutor-message-content p{margin:0 0 10px}
+.tutor-message.user{align-items:end}
+.tutor-message.user .tutor-message-label{margin-right:8px}
+.tutor-message.user .tutor-message-content{background:var(--ink);color:#fff;border-radius:14px 14px 4px 14px;padding:11px 14px}
+.tutor-message.assistant .tutor-message-content{background:#fff;border:1px solid var(--line);box-shadow:0 8px 22px rgba(20,44,72,.05);border-radius:4px 14px 14px 14px;padding:13px 15px}
+.tutor-code-block{margin:12px 0;overflow:auto;background:var(--ink);color:#e6eefc;padding:14px;border-radius:10px;font-size:12.5px;max-width:100%}
+.inline-code{background:var(--soft);color:#b3261e;padding:2px 5px;border-radius:5px;font-size:12.5px}
+.tutor-copy,.tutor-link{border:0;background:transparent;color:var(--red);font-size:11px;font-weight:800;cursor:pointer;padding:0}
+.tutor-copy{width:fit-content;margin-left:4px}
+.tutor-copy:hover,.tutor-link:hover{text-decoration:underline}
+.tutor-error{color:var(--danger)}
+.tutor-thinking{color:var(--muted);font-size:12.5px}
+.tutor-thinking i{display:inline-block;width:6px;height:6px;background:var(--red);border-radius:50%;margin-right:3px;animation:tutor-blink 1.1s infinite}
+.tutor-thinking i:nth-child(2){animation-delay:.18s}
+.tutor-thinking i:nth-child(3){animation-delay:.36s}
+@keyframes tutor-blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+
+/* ---------- Ô nhập ---------- */
+.tutor-input-shell{margin:0 max(16px,calc((100% - 720px)/2)) 18px;background:#fff;border:1px solid #dce5ee;box-shadow:0 10px 26px rgba(20,44,72,.07);border-radius:14px;padding:10px 12px}
+.tutor-starters{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px}
+.tutor-starters button{white-space:nowrap;border:1px dashed var(--line);background:#fbfcfe;border-radius:999px;padding:6px 12px;font-size:11.5px;font-weight:600;color:var(--soft-ink);cursor:pointer;text-align:left}
+.tutor-starters button:hover{border-style:solid;border-color:#d9a1a4;color:var(--red);background:#fff8f8}
+.tutor-route{margin-left:7px;border:1px solid var(--line);background:#f4f7fb;border-radius:999px;padding:1px 8px;font-size:10.5px;font-weight:800;color:var(--soft-ink);letter-spacing:.02em}
+.tutor-input-shell textarea{display:block;width:100%;resize:none;outline:0;border:0;line-height:1.55;font:inherit;font-size:13px;color:var(--ink);padding:4px 1px;max-height:160px;background:transparent}
+.tutor-input-shell textarea::placeholder{color:#9aa8ba}
+.tutor-input-actions{display:flex;align-items:center;gap:8px}
+.tutor-file-upload{display:flex;align-items:center;gap:5px;min-width:0;overflow:auto}
+.tutor-attach{flex:none;border:0;background:transparent;color:var(--red);font-size:12px;font-weight:800;cursor:pointer;padding:6px 3px}
+.tutor-file-chip{white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis;font-size:11px;background:var(--soft);color:var(--soft-ink);border:1px solid var(--line);border-radius:999px;padding:4px 8px}
+.tutor-file-chip button{border:0;background:transparent;font-size:15px;line-height:10px;color:var(--danger);cursor:pointer}
+.tutor-keyboard-tip{margin-left:auto;font-size:11px;color:#9aa8ba}
+.tutor-send{border:0;border-radius:7px;background:var(--red);color:#fff;padding:9px 15px;font-size:12px;font-weight:800;cursor:pointer;box-shadow:0 8px 18px rgba(222,53,59,.18)}
+.tutor-send:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
+
+/* ---------- Tab Trò chuyện / Lộ trình / Luyện tập ---------- */
+.tutor-tabs{display:flex;gap:6px;align-items:center;padding:9px clamp(12px,2vw,16px);border:1px solid var(--line);border-radius:14px;background:#fff;box-shadow:0 12px 30px rgba(20,44,72,.04)}
+.tutor-tabs button{border:1px solid transparent;background:transparent;color:var(--soft-ink);font:inherit;font-size:12px;font-weight:800;padding:8px 13px;border-radius:999px;cursor:pointer}
+.tutor-tabs button:hover{background:#f7f9fc;color:var(--red)}
+.tutor-tabs button.active{background:var(--danger-bg);border-color:#f2c9cb;color:var(--red)}
+.tutor-tabs .tutor-menu{margin-left:auto}
+
+/* ---------- Khung chung cho panel ---------- */
+.tutor-panel{overflow-y:auto;min-height:0;padding:20px clamp(16px,3vw,28px) 34px;display:flex;flex-direction:column;gap:16px;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 30px rgba(20,44,72,.04)}
+.tutor-panel-error{margin:0}
+.tutor-hint{margin:0;color:var(--muted);font-size:12px}
+.tutor-steps{display:flex;flex-wrap:wrap;gap:6px}
+.tutor-steps button{border:1px solid var(--line);background:#fff;color:var(--soft-ink);border-radius:999px;padding:6px 11px;font-size:11px;font-weight:700;cursor:pointer}
+.tutor-steps button:hover{border-color:#d9a1a4;color:var(--red)}
+.tutor-steps button.active{background:var(--ink);border-color:var(--ink);color:#fff}
+.tutor-steps button:disabled{opacity:.6;cursor:progress}
+.tutor-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 19px;display:grid;gap:12px;box-shadow:0 12px 30px rgba(20,44,72,.04)}
+.tutor-card h3{margin:0;font:700 19px 'Playfair Display',Georgia,serif;color:var(--ink)}
+.tutor-card h4{margin:0;font-size:13px;color:var(--ink)}
+.tutor-card-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tutor-card-actions .tutor-hint{margin-right:auto}
+.tutor-primary{border:0;border-radius:7px;background:var(--red);color:#fff;font-size:12px;font-weight:800;padding:10px 16px;cursor:pointer;box-shadow:0 8px 18px rgba(222,53,59,.18)}
+.tutor-primary:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
+.tutor-secondary{border:1px solid var(--line);background:#f5f7fa;color:#32465d;border-radius:7px;padding:10px 15px;font-size:12px;font-weight:800;cursor:pointer}
+.tutor-secondary:hover{border-color:#d9a1a4;color:var(--red)}
+.tutor-secondary:disabled{opacity:.55;cursor:not-allowed}
+
+/* ---------- Biểu mẫu: đánh giá / lộ trình / luyện tập ---------- */
+.tutor-form-grid{display:grid;gap:11px;grid-template-columns:repeat(auto-fit,minmax(226px,1fr))}
+.tutor-form-grid label{display:grid;gap:5px;font-size:11px;font-weight:800;color:var(--soft-ink)}
+.tutor-form-grid input,.tutor-form-grid select,.tutor-answer-input{background:#fff;border:1px solid #dce5ee;border-radius:9px;padding:10px 11px;color:var(--ink);font:inherit;font-size:13px;outline:0;width:100%;box-sizing:border-box}
+.tutor-form-grid input:focus,.tutor-form-grid select:focus,.tutor-answer-input:focus{border-color:var(--red);box-shadow:0 0 0 3px rgba(222,53,59,.12)}
+.tutor-answer-input.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.55}
+
+/* ---------- Quiz / trắc nghiệm ---------- */
+.tutor-quiz{margin:0;padding-left:18px;display:grid;gap:16px}
+.tutor-quiz li{display:grid;gap:8px}
+.tutor-quiz-head{display:flex;align-items:center;gap:8px}
+.tutor-quiz-prompt{margin:0;font-weight:700;font-size:13.5px;color:var(--ink)}
+.tutor-quiz-score{margin-left:auto;font-size:11.5px;color:var(--muted)}
+.tutor-options{display:grid;gap:6px}
+.tutor-options label{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line);background:#fff;border-radius:10px;padding:10px 11px;font-size:13px;color:#243950;cursor:pointer}
+.tutor-options label:hover{border-color:#d9a1a4}
+.tutor-options label.active{border-color:var(--red);background:var(--danger-bg)}
+.tutor-options input{margin-top:2px;accent-color:var(--red)}
+
+/* ---------- Nhãn, mức độ, điểm ---------- */
+.tutor-chip{display:inline-block;background:var(--soft);color:var(--soft-ink);border:1px solid var(--line);border-radius:999px;padding:3px 9px;font-size:11px;font-weight:700;white-space:nowrap}
+.tutor-level{border-radius:999px;padding:4px 11px;font-size:11px;font-weight:800;background:var(--soft);color:var(--soft-ink);white-space:nowrap}
+.tutor-level.beginner{background:#eef4fb;color:#2c5f96}
+.tutor-level.intermediate{background:var(--warn-bg);color:var(--warn)}
+.tutor-level.advanced{background:#f3edff;color:#5b3fb0}
+.tutor-result-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tutor-two-col{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(236px,1fr))}
+.tutor-grade-block{border:1px solid var(--line);border-radius:11px;padding:11px 13px;background:#fff}
+.tutor-grade-block h4{margin:0 0 6px;font-size:12px;color:var(--soft-ink)}
+.tutor-grade-block ul{margin:0;padding-left:17px;display:grid;gap:4px;font-size:12.5px;color:#243950}
+.tutor-grade-block.ok{border-color:#cdeade;background:#fbfefc}
+.tutor-grade-block.warn{border-color:#f0e5c7;background:#fffdf7}
+.tutor-grade-block.info{border-color:#dbe7f6;background:#fbfdff}
+
+/* ---------- Lộ trình học ---------- */
+.tutor-roadmap{display:grid;gap:14px}
+.tutor-roadmap-head{display:grid;gap:10px;border:0;border-radius:14px;padding:22px 23px;background:linear-gradient(115deg,#35249c 0%,#4b2aaa 44%,#203e96 100%);color:#fff;box-shadow:0 16px 34px rgba(41,40,130,.18)}
+.tutor-roadmap-head h3{margin:3px 0 0;font:700 21px 'Playfair Display',Georgia,serif;color:#fff}
+.tutor-roadmap-head p{margin:0;color:rgba(255,255,255,.8);font-size:12.5px;line-height:1.6}
+.tutor-roadmap-meta{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.tutor-roadmap-head .tutor-chip{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.24);color:#fff}
+.tutor-progress{display:flex;align-items:center;gap:11px;flex-wrap:wrap;font-size:12px;color:var(--soft-ink)}
+.tutor-progress .tutor-score-bar{flex:1;min-width:150px}
+.tutor-adapt-note{margin:0;border-left:3px solid var(--red);background:var(--danger-bg);padding:10px 13px;border-radius:0 10px 10px 0;font-size:12.5px;color:#7a2f33}
+.tutor-modules{margin:0;padding-left:0;list-style:none;display:grid;gap:12px}
+.tutor-modules>li{border:1px solid var(--line);border-radius:13px;padding:14px 16px;background:#fff;display:grid;gap:10px;box-shadow:0 8px 22px rgba(20,44,72,.04)}
+.tutor-module-head{display:flex;align-items:center;gap:10px}
+.tutor-module-head h4{margin:0;font-size:14.5px;color:var(--ink)}
+.tutor-module-head .tutor-level{margin-left:auto}
+.tutor-lessons{margin:0;padding-left:0;list-style:none;display:grid;gap:10px}
+.tutor-lessons>li{border:1px solid #eef2f7;border-radius:11px;padding:11px 13px;background:#fbfcfe;display:grid;gap:5px}
+.tutor-lessons strong{font-size:13.5px;color:var(--ink)}
+.tutor-objectives{margin:0;padding-left:17px;display:grid;gap:3px;font-size:12px;color:var(--soft-ink)}
+.tutor-example{margin:0;font-size:12px;color:#2f6f52}
+
+/* ---------- Luyện tập ---------- */
+.tutor-practice-head{display:grid;gap:10px}
+.tutor-filters{display:flex;gap:6px;flex-wrap:wrap}
+.tutor-filters button{border:1px solid var(--line);background:#fff;color:var(--soft-ink);border-radius:999px;padding:6px 12px;font-size:11.5px;font-weight:700;cursor:pointer}
+.tutor-filters button:hover{border-color:#d9a1a4;color:var(--red)}
+.tutor-filters button.active{background:var(--ink);border-color:var(--ink);color:#fff}
+.tutor-exercise-group{display:grid;gap:8px}
+.tutor-exercise-group>h4{margin:6px 0 0;font-size:13px;color:var(--soft-ink)}
+.tutor-exercise{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden;box-shadow:0 8px 22px rgba(20,44,72,.04)}
+.tutor-exercise.open{border-color:#e8b4b6}
+.tutor-exercise-head{display:flex;align-items:center;gap:10px;width:100%;border:0;background:transparent;color:var(--ink);text-align:left;padding:12px 14px;cursor:pointer;font:inherit}
+.tutor-exercise-head:hover{background:#fbfcfe}
+.tutor-exercise-head strong{flex:1;min-width:0;font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tutor-exercise-body{display:grid;gap:11px;padding:0 14px 15px}
+.tutor-exercise-prompt{margin:0;font-size:13.5px;color:var(--ink);font-weight:600;line-height:1.6}
+.tutor-grade-pill{border-radius:999px;padding:3px 9px;font-size:11px;font-weight:800;background:var(--soft);color:var(--soft-ink);white-space:nowrap}
+.tutor-grade-pill.ok{background:var(--ok-bg);color:var(--ok)}
+.tutor-grade-pill.off{background:var(--danger-bg);color:var(--danger)}
+.tutor-grade-pill.todo{background:#eef2f7;color:#7b8ba0}
+.tutor-history{margin:0;padding-left:0;list-style:none;display:grid;gap:6px;font-size:12.5px;color:#243950}
+.tutor-history li{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+
+/* ---------- Kết quả chấm điểm ---------- */
+.tutor-grading{border:1px solid var(--line);border-radius:13px;background:#fff;padding:16px 17px;display:grid;gap:11px;box-shadow:0 12px 30px rgba(20,44,72,.05)}
+.tutor-grading-head{display:flex;align-items:flex-start;gap:11px}
+.tutor-grading-head h3{margin:3px 0 0;font:700 17px 'Playfair Display',Georgia,serif;color:var(--ink)}
+.tutor-grade-badge{margin-left:auto;border-radius:999px;padding:5px 12px;font-size:11px;font-weight:900;background:var(--soft);color:var(--soft-ink);white-space:nowrap}
+.tutor-grade-badge.excellent{background:var(--ok-bg);color:var(--ok)}
+.tutor-grade-badge.very-good{background:#e6f4f6;color:#0f6f82}
+.tutor-grade-badge.good{background:#eef4fb;color:#2c5f96}
+.tutor-grade-badge.pass{background:var(--warn-bg);color:var(--warn)}
+.tutor-grade-badge.needs-improvement{background:var(--danger-bg);color:var(--danger)}
+.tutor-score-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--soft-ink)}
+.tutor-score-row strong{font-size:23px;color:var(--ink)}
+.tutor-score-bar{flex:1;min-width:110px;height:8px;border-radius:999px;background:#e9eef4;overflow:hidden}
+.tutor-score-bar i{display:block;height:100%;background:linear-gradient(90deg,#de353b,#f0a13a);transition:width .3s ease}
+.tutor-score-percent{font-weight:800;color:var(--ink)}
+.tutor-flag{border-radius:999px;padding:2px 9px;font-size:11px;font-weight:800}
+.tutor-flag.ok{background:var(--ok-bg);color:var(--ok)}
+.tutor-flag.off{background:var(--danger-bg);color:var(--danger)}
+.tutor-flag.by{background:#eef4fb;color:#2c5f96;font-weight:700}
+.tutor-grade-feedback{font-size:13.5px;color:#243950;line-height:1.68}
+.tutor-grade-feedback p{margin:0 0 8px}
+.tutor-grade-grid{display:grid;gap:9px;grid-template-columns:repeat(auto-fit,minmax(206px,1fr))}
+.tutor-suggested{border:1px dashed #dce5ee;border-radius:11px;padding:10px 13px;font-size:13px;color:#243950;background:#fbfcfe}
+.tutor-suggested summary{cursor:pointer;font-weight:800;color:var(--soft-ink)}
+.tutor-grade-actions{display:flex;gap:9px;flex-wrap:wrap}
+
+/* ---------- Khối mã & công thức ---------- */
+.tutor-code-wrap{position:relative;max-width:100%;min-width:0}
+.tutor-code-copy{position:absolute;top:8px;right:8px;border:1px solid #2f4463;background:#16233a;color:#a8c6ee;border-radius:7px;padding:3px 8px;font-size:10.5px;font-weight:700;cursor:pointer}
+.tutor-code-copy:hover{background:#1d2f4c;color:#fff}
+.tutor-math{overflow-x:auto}
+.tutor-message-content .katex{color:var(--ink);font-size:1.04em}
+
+/* ---------- Quiz do Nova tạo ngay trong chat ---------- */
+.tutor-quiz-card{margin-top:10px;border:1px solid var(--line);border-radius:12px;background:#fbfcfe;padding:14px 15px;display:grid;gap:12px;max-width:min(100%,660px)}
+.tutor-quiz-card-head{display:flex;align-items:center;gap:9px}
+.tutor-quiz-card-head h4{margin:0;font-size:13.5px;font-weight:800;color:var(--ink)}
+.tutor-quiz-card-head .tutor-chip{margin-left:auto}
+.tutor-quiz-list{margin:0;padding-left:0;list-style:none;display:grid;gap:14px}
+.tutor-quiz-list>li{display:grid;gap:7px;border-left:3px solid transparent;padding-left:10px}
+.tutor-quiz-list>li.right{border-left-color:var(--ok)}
+.tutor-quiz-list>li.wrong{border-left-color:var(--red)}
+.tutor-quiz-card .tutor-quiz-prompt{font-size:13.5px;font-weight:600;color:var(--ink)}
+.tutor-quiz-card .tutor-options label{background:#fff}
+.tutor-quiz-card .tutor-options label.correct{border-color:var(--ok);background:var(--ok-bg)}
+.tutor-quiz-card .tutor-options label.incorrect{border-color:var(--red);background:var(--danger-bg)}
+.tutor-quiz-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tutor-quiz-actions .tutor-hint{margin-right:auto}
+
+/* ---------- Markdown trong câu trả lời ---------- */
+.tutor-message-content table,.tutor-grade-feedback table,.tutor-suggested table{border-collapse:collapse;margin:10px 0;font-size:13px;display:block;overflow-x:auto;max-width:100%}
+.tutor-message-content th,.tutor-message-content td,.tutor-suggested th,.tutor-suggested td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top;color:#243950}
+.tutor-message-content th,.tutor-suggested th{background:var(--soft);color:var(--ink);font-weight:800;white-space:nowrap}
+.tutor-message-content tbody tr:nth-child(even) td{background:#fbfcfe}
+.tutor-message-content blockquote{margin:10px 0;padding:9px 13px;border-left:3px solid var(--red);background:var(--danger-bg);border-radius:0 10px 10px 0;color:#7a2f33}
+.tutor-message-content blockquote p{color:inherit;margin:0}
+.tutor-message-content ul,.tutor-message-content ol{margin:0 0 10px;padding-left:20px}
+.tutor-message-content li{margin:3px 0}
+.tutor-message-content h2,.tutor-message-content h3,.tutor-message-content h4{margin:14px 0 7px;line-height:1.32;color:var(--ink)}
+.tutor-message-content h2{font:700 18px 'Playfair Display',Georgia,serif}
+.tutor-message-content h3{font-size:15.5px;font-weight:800}
+.tutor-message-content h4{font-size:14px;font-weight:800}
+.tutor-message-content a{color:var(--blue)}
+
+/* ---------- Màn hình nhỏ ---------- */
+@media(max-width:900px){.ai-tutor-page{grid-template-columns:244px minmax(0,1fr);gap:14px;padding:18px 14px}}
+@media(max-width:720px){
+ .ai-tutor-page{--tutor-vh:calc(100vh - 64px);display:block;padding:12px}
+ .tutor-sidebar{position:fixed;z-index:30;top:0;bottom:0;left:0;width:276px;max-height:none;border-radius:0 14px 14px 0;transform:translateX(-105%);transition:transform .25s ease;box-shadow:8px 0 26px rgba(12,35,61,.16)}
+ .tutor-sidebar.open{transform:translateX(0)}
+ .tutor-mobile-close,.tutor-menu{display:inline-block;border:0;background:transparent;color:inherit;font-size:20px;cursor:pointer}
+ .tutor-menu{color:var(--ink)}
+ .tutor-main{height:calc(var(--tutor-vh) - 24px)}
+ .tutor-main>.tutor-chat{min-height:0}
+ .tutor-chat-header{padding:14px 15px}
+ .tutor-chat h1{font-size:21px}
+ .tutor-status{display:none}
+ .tutor-tabs{padding:8px 12px}
+ .tutor-tabs button{font-size:11.5px;padding:7px 10px}
+ .tutor-chat-header .tutor-menu{display:none}
+ .tutor-messages{padding:18px 15px}
+ .tutor-input-shell{margin:0 10px 10px}
+ .tutor-keyboard-tip{display:none}
+ .tutor-input-actions{align-items:flex-end}
+ .tutor-file-upload{max-width:55%}
+ .tutor-send{padding:9px 12px}
+ .tutor-panel{padding:16px 14px 28px}
+ .tutor-exercise-head{flex-wrap:wrap;row-gap:4px}
+ .tutor-exercise-head strong{flex:1 1 100%;order:9;white-space:normal;overflow:visible}
+ .tutor-exercise-head .tutor-hint{font-size:11px}
+ .tutor-grading-head{flex-wrap:wrap}
+ .tutor-message-content h2{font-size:17px}
+ .tutor-message-content h3{font-size:15px}
+ .tutor-roadmap-head{padding:18px 17px}
+}

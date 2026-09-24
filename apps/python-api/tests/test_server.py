@@ -1,22 +1,57 @@
 import unittest, urllib.request, urllib.error, json, subprocess, time, os, sys, tempfile
+from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+
+# Test phải chạy offline: không đọc .env thật của máy.
+os.environ['STUDYHUB_NO_DOTENV'] = '1'
+
+for _name in (
+    'DEEPSEEK_API_KEY',
+    'OPENAI_API_KEY',
+    'OPENROUTER_API_KEY',
+    'GROQ_API_KEY',
+    'STUDYHUB_AI_PROVIDER',
+    'STUDYHUB_AI_API_KEY',
+    'STUDYHUB_AI_BASE_URL',
+    'STUDYHUB_AI_MODEL',
+):
+    os.environ.pop(_name, None)
 class StudyHubSmokeTest(unittest.TestCase):
+    """Smoke test for the vanilla ``web/`` preview UI inside the Python API.
+
+    The React frontend is the real UI and ``web/`` is no longer shipped, so the
+    suite skips instead of hanging on a server that cannot serve ``/``.
+    """
+
     @classmethod
     def setUpClass(cls):
+        if not (ROOT/'web').is_dir():
+            raise unittest.SkipTest('vanilla web/ UI is not part of this checkout; React frontend is the UI')
         cls.port=8766
         cls.tmp=tempfile.TemporaryDirectory()
         env=os.environ.copy(); env['STUDYHUB_PORT']=str(cls.port); env['PYTHONUNBUFFERED']='1'
-        env['STUDYHUB_DB_MODE']='sqlite'; env['STUDYHUB_DB_PATH']=os.path.join(cls.tmp.name,'smoke.db')
-        env.pop('MYSQL_DATABASE',None)
-        cls.proc=subprocess.Popen([sys.executable,'server.py'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+        env['STUDYHUB_DB_MODE'] = 'sqlite'
+        env['STUDYHUB_DB_PATH'] = os.path.join(cls.tmp.name, 'smoke.db')
+
+        env.pop('MYSQL_DATABASE', None)
+
+        cls.proc = subprocess.Popen(
+           [sys.executable, str(ROOT / 'server.py')],
+           cwd=str(ROOT),
+           stdout=subprocess.PIPE,
+           stderr=subprocess.STDOUT,
+           env=env
+)      
         deadline=time.time()+5
         while time.time()<deadline:
             try:
-                urllib.request.urlopen(f'http://127.0.0.1:{cls.port}/',timeout=.4).close(); break
+                urllib.request.urlopen(f'http://127.0.0.1:{cls.port}/api/subjects',timeout=.4).close(); break
             except Exception: time.sleep(.1)
         else:
-            out=cls.proc.stdout.read().decode(errors='replace') if cls.proc.stdout else ''
-            raise RuntimeError('server did not start: '+out)
+            cls.proc.terminate()
+            out,_=cls.proc.communicate(timeout=3)
+            raise RuntimeError('server did not start: '+(out or b'').decode(errors='replace')[:2000])
     @classmethod
     def tearDownClass(cls):
         cls.proc.terminate(); cls.proc.wait(timeout=3); cls.tmp.cleanup()

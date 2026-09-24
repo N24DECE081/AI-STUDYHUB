@@ -13,6 +13,25 @@ from email.policy import default
 from backend.app.db.runtime import get_runtime_database
 from backend.app.db.seed import seed as seed_database
 from backend.app.security import authenticate, register as register_user, current_user, revoke_session, SESSION_COOKIE
+from backend.app.ai_tutor import (
+    EngineError as TutorEngineError,
+    GradingError as TutorGradingError,
+    RoadmapError as TutorRoadmapError,
+    adapt as adapt_roadmap,
+    build_assessment_questions,
+    build_exercises,
+    build_roadmap,
+    get_engine,
+    grade_exercise,
+    start_assessment,
+    summarize_answers,
+)
+from backend.app.ai_tutor import config as tutor_config
+from backend.app.ai_tutor import engine as tutor_engine
+from backend.app.ai_tutor import repository as tutor_store
+from backend.app.ai_tutor.roadmap import normalize_level, normalize_pace
+
+tutor_config.load_env()
 
 ROOT=os.path.dirname(os.path.abspath(__file__))
 def load_local_env(path):
@@ -111,6 +130,139 @@ def require_user(handler):
 
 def session_cookie(token, max_age=7 * 24 * 60 * 60):
     return f'{SESSION_COOKIE}={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'
+
+def document_text(row):
+    path=row['storage_path']
+    fp=path if os.path.isabs(path) else os.path.join(ROOT,path)
+    if os.path.exists(fp) and os.path.splitext(fp)[1].lower() in ('.txt','.md','.csv','.log'):
+        return open(fp,'r',encoding='utf-8',errors='replace').read()
+    return ''
+
+def tutor_context(file_ids, question, limit=3, fallback=False):
+    """Retrieve the document context server-side; the client never sends answers.
+
+    `fallback` is for requests about the library itself (summarize / quiz with no
+    topic words): there the newest documents are the intended material, not an
+    unrelated guess, so no fake context is created.
+    """
+    tokens=[token.lower() for token in re.findall(r'\w+',question) if len(token)>2]
+    with db() as c:
+        ids=[]
+        for raw in (file_ids or [])[:5]:
+            try: ids.append(int(raw))
+            except (TypeError,ValueError): continue
+        if ids:
+            marks=','.join('?' for _ in ids)
+            rows=c.execute(f'SELECT id,title,description,storage_path FROM documents WHERE id IN ({marks})',ids).fetchall()
+        else:
+            rows=c.execute('SELECT id,title,description,storage_path FROM documents ORDER BY created_at DESC').fetchall()
+    scored=[]
+    for row in rows:
+        text=document_text(row)
+        haystack=(row['title']+' '+(row['description'] or '')+' '+text).lower()
+        scored.append((sum(haystack.count(token) for token in tokens),row,text))
+    scored.sort(key=lambda item:item[0],reverse=True)
+    matched=[item for item in scored if item[0]>0][:limit]
+    if matched:
+        picked=matched
+    elif ids or fallback:
+        picked=scored[:limit]
+    else:
+        picked=[]
+    parts=[]; sources=[]
+    for _,row,text in picked:
+        source=text or row['description'] or row['title']
+        # One titled block per document: paragraphs stay inside it (blank lines
+        # separate documents, not paragraphs), so every quote keeps its source.
+        body=re.sub(r'\n\s*\n+','\n',source[:1200].strip())
+        parts.append(f"{row['title']}: {body}")
+        sources.append({'id':row['id'],'title':row['title']})
+    return '\n\n'.join(parts), sources
+
+def chat_quiz(engine, topic, context):
+    """Sinh quiz trắc nghiệm CÓ CẤU TRÚC để UI render thành câu hỏi bấm chọn được.
+
+    Có model thì model đặt câu hỏi từ tài liệu; không có model (hết quota, mất mạng)
+    thì bản offline chắt câu hỏi và đáp án từ chính tài liệu — không bịa. Trả (None, '')
+    khi không dựng được quiz, để route rơi về câu trả lời dạng văn bản.
+    """
+    try:
+        data=engine.complete_json(task='quiz',payload={'topic':topic,'context':context[:6000],'question_count':4})
+    except Exception:
+        return None,''
+    if not isinstance(data,dict): return None,''
+    questions=[]
+    for item in (data.get('questions') or [])[:5]:
+        if not isinstance(item,dict): continue
+        prompt=str(item.get('question') or '').strip()
+        options=[str(option).strip() for option in (item.get('options') or []) if str(option).strip()]
+        if not prompt or len(options)<2: continue
+        try: answer_index=int(item.get('answer_index') or 0)
+        except (TypeError,ValueError): continue
+        if not 0<=answer_index<len(options): continue
+        options=options[:4]
+        if answer_index>=len(options): continue
+        try: max_score=int(item.get('max_score') or 10)
+        except (TypeError,ValueError): max_score=10
+        questions.append({'question':prompt[:400],'options':options,'answer_index':answer_index,
+                          'max_score':max(1,min(max_score,100))})
+    if not questions: return None,''
+    title=str(data.get('topic') or topic or 'Tài liệu của bạn').strip()[:120]
+    return {'topic':title,'questions':questions},title
+
+def public_roadmap(row, exercises, progress):
+    payload=row.get('payload') or {}
+    if not isinstance(payload,dict): payload={}
+    by_lesson={}
+    for item in exercises:
+        by_lesson.setdefault(str(item.get('lesson_key') or ''),[]).append(str(item.get('id')))
+    for module in payload.get('modules') or []:
+        for lesson in module.get('lessons') or []:
+            lesson['exercise_ids']=by_lesson.get(str(lesson.get('key')),[])
+    return {
+        'roadmap_id': str(row.get('id')),
+        'title': payload.get('title') or row.get('title'),
+        'summary': payload.get('summary') or row.get('summary') or '',
+        'subject': payload.get('subject') or row.get('subject'),
+        'goal': payload.get('goal') or row.get('goal'),
+        'current_level': payload.get('current_level') or row.get('difficulty'),
+        'target_level': payload.get('target_level') or row.get('difficulty'),
+        'pace': payload.get('pace') or 'steady',
+        'topics': payload.get('topics') or [],
+        'modules': payload.get('modules') or [],
+        'focus_weaknesses': payload.get('focus_weaknesses') or [],
+        'adaptation_note': payload.get('adaptation_note') or row.get('adaptation_note'),
+        'average_score': payload.get('average_score'),
+        'version': row.get('version') or 1,
+        'exercises': [tutor_store.to_public(item) for item in exercises],
+        'progress': progress,
+    }
+
+def public_submission(row):
+    def load(value):
+        try: return json.loads(value) if value else []
+        except (TypeError,ValueError): return []
+    return {
+        'submission_id': str(row.get('id')),
+        'exercise_id': str(row.get('exercise_id')),
+        'exercise_type': row.get('exercise_type'),
+        'topic': row.get('topic'),
+        'difficulty': row.get('difficulty'),
+        'answer': row.get('answer'),
+        'answer_type': row.get('answer_type'),
+        'score': row.get('score'),
+        'max_score': row.get('max_score'),
+        'percentage': row.get('percentage'),
+        'grade': row.get('grade'),
+        'is_correct': bool(row.get('is_correct')),
+        'feedback': row.get('feedback'),
+        'strengths': load(row.get('strengths')),
+        'weaknesses': load(row.get('weaknesses')),
+        'missing_points': load(row.get('missing_points')),
+        'suggested_answer': row.get('suggested_answer'),
+        'recommended_review': load(row.get('recommended_review')),
+        'created_at': row.get('created_at'),
+    }
 
 def extract_document_text(path):
     """Read the common study formats without requiring an external AI service."""
@@ -215,11 +367,27 @@ def subscription_effective_at(billing_cycle='month', now=None):
 
 class H(BaseHTTPRequestHandler):
  server_version='StudyHub/1.0'
- def cors_origin(self):
-  origin = self.headers.get('Origin', '')
-  configured=os.environ.get('STUDYHUB_CORS_ORIGINS')
-  allowed={value.strip().rstrip('/') for value in configured.split(',') if value.strip()} if configured is not None else DEFAULT_CORS_ORIGINS
-  return origin if origin in allowed else None
+ def cors_headers(self):
+    """Echo lại Origin nếu được phép."""
+    allowed = [item.strip() for item in os.environ.get('STUDYHUB_CORS_ORIGINS', '').split(',') if item.strip()]
+    origin = self.headers.get('Origin', '')
+
+    if origin and (origin in allowed or '*' in allowed):
+        if '*' in allowed:
+            self.send_header('Access-Control-Allow-Origin', '*')
+        else:
+            self.send_header('Access-Control-Allow-Origin', origin)
+
+    self.send_header('Vary', 'Origin')
+    self.send_header('Access-Control-Allow-Credentials', 'true')
+
+
+def cors_origin(self):
+    origin = self.headers.get('Origin', '')
+    configured = os.environ.get('STUDYHUB_CORS_ORIGINS', '')
+    allowed = [value.strip() for value in configured.split(',') if value.strip()]
+
+    return origin if origin in allowed else None
  def send(self,status=200,body=b'',ctype='application/json',headers=None):
   self.send_response(status); self.send_header('Content-Type',ctype); self.send_header('Cache-Control','no-store');
   origin=self.cors_origin()
@@ -252,18 +420,36 @@ class H(BaseHTTPRequestHandler):
   if n < 0: raise ValueError('invalid Content-Length')
   return self.rfile.read(n)
  def do_OPTIONS(self):
-  if not self.gateway_access(): return
-  origin=self.cors_origin()
-  if self.headers.get('Origin') and not origin:
-   self.send_response(403); self.send_header('Cache-Control','no-store'); self.end_headers(); return
-  self.send_response(204)
-  if origin:
-   self.send_header('Access-Control-Allow-Origin', origin)
-   self.send_header('Vary','Origin')
-   self.send_header('Access-Control-Allow-Credentials', 'true')
-  self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-  self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-  self.end_headers()
+    if not self.gateway_access():
+        return
+
+    origin = self.cors_origin()
+
+    # Reject requests with an invalid Origin
+    if self.headers.get('Origin') and not origin:
+        self.send_response(403)
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        return
+
+    self.send_response(204)
+
+    # CORS headers
+    if origin:
+        self.send_header('Access-Control-Allow-Origin', origin)
+        self.send_header('Vary', 'Origin')
+        self.send_header('Access-Control-Allow-Credentials', 'true')
+
+    self.send_header(
+        'Access-Control-Allow-Methods',
+        'GET, POST, PUT, DELETE, OPTIONS'
+    )
+    self.send_header(
+        'Access-Control-Allow-Headers',
+        'Content-Type, Authorization'
+    )
+
+    self.end_headers()
  def do_GET(self):
   if not self.gateway_access(): return
   p=urlparse(self.path); path=p.path
@@ -362,6 +548,61 @@ class H(BaseHTTPRequestHandler):
     if not view:
      c.execute('UPDATE documents SET downloads=downloads+1 WHERE id=?',(m.group(1),)); c.commit()
     c.close(); data=open(fp,'rb').read(); disposition='inline' if view else 'attachment'; fallback=re.sub(r'[^A-Za-z0-9._-]','_',r['original_filename']) or 'download'; encoded=quote(r['original_filename'],safe=''); return self.send(200,data,mimetypes.guess_type(fp)[0] or 'application/octet-stream',{'Content-Disposition':f'{disposition}; filename="{fallback}"; filename*=UTF-8\'\'{encoded}'})
+  if path=='/api/ai-tutor/engine':
+   u=require_user(self)
+   if not u:return
+   status=tutor_config.engine_status()
+   health=tutor_engine.PROVIDER_HEALTH
+   if status.get('engine')=='provider' and not health.get('ok',True):
+    # Mô hình đang lỗi (hết quota, key sai, mạng): Nova tự trả lời từ tài liệu.
+    reason=health.get('reason') or 'không rõ nguyên nhân'
+    status['degraded']=True
+    status['degraded_reason']=reason
+    status['label']=f'{status["label"]} — tạm lỗi: {reason}'
+    status['hint']='Nova đang trả lời từ tài liệu của bạn cho tới khi mô hình hoạt động lại.'
+   return self.json(status,200)
+  if path=='/api/ai-tutor/assessment':
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    row=tutor_store.latest_assessment(c,u['id'])
+   plan=start_assessment({})
+   return self.json({'questions':plan['questions'],'assessment':tutor_store.to_public_assessment(row)},200)
+  if path=='/api/ai-tutor/roadmap':
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    row=tutor_store.latest_roadmap(c,u['id'])
+    if not row:
+     return self.json({'roadmap_id':None,'modules':[],'exercises':[],
+       'progress':{'total_exercises':0,'graded':0,'average_percentage':0,'completed':False}},200)
+    rows=tutor_store.exercises_for_roadmap(c,row['id'])
+    progress=tutor_store.progress_for_roadmap(c,row['id'],u['id'])
+   return self.json(public_roadmap(row,rows,progress),200)
+  if path=='/api/ai-tutor/exercises':
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    row=tutor_store.latest_roadmap(c,u['id'])
+    if not row:
+     return self.json({'roadmap_id':None,'exercises':[],
+       'progress':{'total_exercises':0,'graded':0,'average_percentage':0,'completed':False}},200)
+    rows=tutor_store.exercises_for_roadmap(c,row['id'])
+    progress=tutor_store.progress_for_roadmap(c,row['id'],u['id'])
+   return self.json({'roadmap_id':str(row['id']),'exercises':[tutor_store.to_public(item) for item in rows],
+     'progress':progress},200)
+  if path=='/api/ai-tutor/submissions':
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    items=tutor_store.recent_submissions(c,u['id'],20)
+   return self.json({'items':[public_submission(item) for item in items]},200)
+  if path=='/api/ai-tutor/conversations':
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    conversations=tutor_store.conversations_for(c,u['id'])
+   return self.json({'conversations':conversations},200)
   if path.startswith('/api/'):
     return self.json({'error':'not found'},404)
   fp=os.path.join(WEB,'index.html' if path=='/' else path.lstrip('/'))
@@ -576,15 +817,22 @@ class H(BaseHTTPRequestHandler):
         progress_id=c.execute(f'INSERT INTO user_progress(user_id,{target},progress_percent,last_position,completed) VALUES(?,?,?,?,?)',(u['id'],raw_id,progress,last_position,int(completed))).lastrowid
       c.commit(); row=c.execute('SELECT * FROM user_progress WHERE id=?',(progress_id,)).fetchone()
      return self.json(dict(row),200)
-  if path in ('/api/ai/chat','/api/chat','/api/ai-tutor/chat'):
+  if path in ('/api/ai/chat','/api/chat'):
    u=require_user(self)
    if not u:return
-   x=json_body(data)
-   if not isinstance(x,dict):return self.json({'error':'Dữ liệu câu hỏi không hợp lệ'},400)
-   tutor_contract=path=='/api/ai-tutor/chat'
-   question=(x.get('message','') if tutor_contract else x.get('question','')).strip()
-   document_id=x.get('document_id')
+   x = json_body(data)
+   if not isinstance(x, dict):return self.json({'error': 'Dữ liệu câu hỏi không hợp lệ'}, 400)
+   tutor_contract = path == '/api/ai-tutor/chat'
+   question = (
+    x.get('message', '')
+    if tutor_contract
+    else x.get('question', '')
+).strip()
+
+    document_id = x.get('document_id')
+
    if tutor_contract:
+    # code xử lý AI Tutor ở đây
     file_ids=x.get('file_ids',[])
     if isinstance(file_ids,list) and file_ids:
      document_id=file_ids[0]
@@ -626,9 +874,155 @@ class H(BaseHTTPRequestHandler):
     session_id=c.execute('INSERT INTO chat_sessions(user_id,document_id,title) VALUES(?,?,?)',(u['id'],document_id,'AI Tutor')).lastrowid
     c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(session_id,'user',question))
     c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(session_id,'assistant',answer)); c.commit()
-   if tutor_contract:
-    return self.json({'conversation_id':conversation_id,'message_id':str(session_id),'role':'assistant','content':answer},200)
    return self.json({'answer':answer,'sources':sources,'session_id':session_id,'mode':'local-rag'},200)
+  if path=='/api/ai-tutor/chat':
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   if not isinstance(x,dict): return self.json({'error':'Dữ liệu AI Tutor không hợp lệ'},400)
+   mode=str(x.get('mode') or 'auto').lower()
+   message=str(x.get('message') or '').strip()
+   if not message:return self.json({'error':'Câu hỏi không được để trống'},400)
+   # Khung chat một ô: người học không chọn chế độ nữa, Nova tự đọc câu hỏi để quyết
+   # định giải thích / giải bài / gợi ý / tóm tắt / tạo quiz. Vẫn nhận chế độ tường minh
+   # cho client cũ và cho test.
+   if mode in ('', 'auto', 'tu_dong'):
+    mode=tutor_engine.detect_mode(message)
+   if mode not in ('explain','solve','hint','summarize','generate_quiz'):
+    return self.json({'error':'invalid tutor mode'},400)
+   file_ids=x.get('file_ids') if isinstance(x.get('file_ids'),list) else []
+   conversation_key=str(x.get('conversation_id') or '').strip() or secrets.token_hex(16)
+   context,sources=tutor_context(file_ids,message,fallback=mode in ('summarize','generate_quiz'))
+   engine=get_engine()
+   with db() as c:
+    conversation=tutor_store.conversation_for(c,u['id'],conversation_key,mode=mode,title=message[:60])
+    conversation_id=int(conversation['id']); conversation_title=str(conversation['title'] or '')
+    history=tutor_store.history(c,conversation_id,8)
+   quiz=None; quiz_topic=''
+   if mode=='generate_quiz':
+    quiz,quiz_topic=chat_quiz(engine,message,context)
+   try:
+    if quiz:
+     answer=(f'## Quiz nhanh: {quiz_topic}\n\n'
+             f'{len(quiz["questions"])} câu hỏi bám theo tài liệu. Chọn đáp án rồi bấm **Kiểm tra** để xem kết quả.')
+    else:
+     answer=engine.answer(mode=mode,question=message,context=context,history=history)
+   except TutorEngineError as error:
+    return self.json({'error':f'AI Tutor tạm thời không trả lời được: {error}','retryable':True},502)
+   health=tutor_engine.PROVIDER_HEALTH
+   degraded=bool(getattr(engine,'name','')=='provider-resilient' and not health.get('ok',True))
+   with db() as c:
+    tutor_store.add_message(c,conversation_id,'user',message,mode)
+    message_id=tutor_store.add_message(c,conversation_id,'assistant',answer,mode,payload=quiz)
+    if conversation_title in ('','Cuộc hội thoại mới'):
+     tutor_store.rename_conversation(c,conversation_id,message[:60])
+   return self.json({'conversation_id':conversation_key,'message_id':str(message_id),'role':'assistant','content':answer,'sources':sources,'mode':mode,
+     'quiz':quiz,
+     'engine_degraded':degraded,'engine_degraded_reason':health.get('reason','') if degraded else ''},200)
+  if path=='/api/ai-tutor/assessment/start':
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   if not isinstance(x,dict): return self.json({'error':'Dữ liệu đánh giá không hợp lệ'},400)
+   return self.json(start_assessment(x),200)
+  if path=='/api/ai-tutor/assessment/submit':
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   if not isinstance(x,dict): return self.json({'error':'Dữ liệu đánh giá không hợp lệ'},400)
+   answers=x.get('answers') if isinstance(x.get('answers'),list) else []
+   if not answers:return self.json({'error':'Cần trả lời ít nhất một câu hỏi đánh giá'},400)
+   subject=str(x.get('subject') or '').strip(); goal=str(x.get('goal') or '').strip()
+   if not subject:return self.json({'error':'Thiếu môn học / chủ đề'},400)
+   if not goal:return self.json({'error':'Thiếu mục tiêu học tập'},400)
+   summary=summarize_answers(answers,build_assessment_questions({
+     'subject':subject,'topics':x.get('topics') if isinstance(x.get('topics'),list) else []}))
+   target=normalize_level(x.get('target_level'),'intermediate')
+   pace=normalize_pace(x.get('pace'))
+   try: study_time=int(x.get('study_time') or 0)
+   except (TypeError,ValueError): study_time=0
+   if study_time<=0: study_time={'slow':120,'steady':240,'fast':420}[pace]
+   with db() as c:
+    assessment_id=tutor_store.create_assessment(c,u['id'],subject=subject,goal=goal,
+      current_level=summary['level'],target_level=target,study_time=study_time,pace=pace,
+      strengths=summary['strengths'],weaknesses=summary['weaknesses'],
+      score_percent=summary['percentage'],answers=answers)
+   return self.json({'assessment_id':str(assessment_id),'subject':subject,'goal':goal,
+     'current_level':summary['level'],'target_level':target,'score_percent':summary['percentage'],
+     'score':summary['score'],'max_score':summary['max_score'],'strengths':summary['strengths'],
+     'weaknesses':summary['weaknesses'],'detail':summary['detail'],'pace':pace,
+     'study_time':study_time,'topics':x.get('topics') if isinstance(x.get('topics'),list) else []},201)
+  if path=='/api/ai-tutor/roadmap':
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   if not isinstance(x,dict): return self.json({'error':'Dữ liệu lộ trình không hợp lệ'},400)
+   with db() as c:
+    assessment=tutor_store.latest_assessment(c,u['id'])
+   subject=str(x.get('subject') or assessment.get('subject') or '').strip()
+   goal=str(x.get('goal') or assessment.get('goal') or '').strip()
+   if not subject or not goal:
+    return self.json({'error':'Cần hoàn thành phần đánh giá trước khi tạo lộ trình'},400)
+   payload={'subject':subject,'goal':goal,
+     'current_level':x.get('current_level') or assessment.get('current_level'),
+     'target_level':x.get('target_level') or assessment.get('target_level'),
+     'pace':x.get('pace') or assessment.get('pace') or 'steady',
+     'study_time':x.get('study_time') or assessment.get('study_time') or 240,
+     'strengths':x.get('strengths') if isinstance(x.get('strengths'),list) else assessment.get('strengths') or [],
+     'weaknesses':x.get('weaknesses') if isinstance(x.get('weaknesses'),list) else assessment.get('weaknesses') or [],
+     'topics':x.get('topics') if isinstance(x.get('topics'),list) else []}
+   engine=get_engine()
+   try:
+    built=build_roadmap(payload,engine=engine)
+    exercises=build_exercises(built,payload,engine=engine)
+   except (TutorRoadmapError,TutorEngineError) as error:
+    return self.json({'error':f'Không tạo được lộ trình: {error}','retryable':True},502)
+   assessment_id=None
+   if x.get('assessment_id'):
+    try: assessment_id=int(x['assessment_id'])
+    except (TypeError,ValueError): assessment_id=None
+   if assessment_id is None and assessment.get('id'): assessment_id=int(assessment['id'])
+   with db() as c:
+    roadmap_id=tutor_store.create_roadmap(c,u['id'],assessment_id,subject=subject,goal=goal,
+      difficulty=built['current_level'],title=built['title'],summary=built['summary'],payload=built)
+    tutor_store.replace_exercises(c,roadmap_id,u['id'],exercises)
+    row=tutor_store.latest_roadmap(c,u['id'])
+    rows=tutor_store.exercises_for_roadmap(c,roadmap_id)
+    progress=tutor_store.progress_for_roadmap(c,roadmap_id,u['id'])
+   return self.json(public_roadmap(row,rows,progress),201)
+  m=re.fullmatch(r'/api/ai-tutor/exercises/(\d+)/submit',path)
+  if m:
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   if not isinstance(x,dict): return self.json({'error':'Dữ liệu bài làm không hợp lệ'},400)
+   answer=str(x.get('answer') or '').strip()
+   answer_type=str(x.get('answer_type') or 'text').lower()
+   with db() as c:
+    exercise=tutor_store.get_exercise(c,int(m.group(1)))
+    if not exercise or int(exercise.get('user_id') or 0)!=int(u['id']):
+     return self.json({'error':'exercise not found'},404)
+    roadmap_row=c.execute('SELECT * FROM tutor_roadmaps WHERE id=?',(exercise['roadmap_id'],)).fetchone()
+   engine=get_engine()
+   try:
+    result=grade_exercise(exercise,answer,answer_type=answer_type,engine=engine)
+   except TutorGradingError as error:
+    return self.json({'error':f'Không chấm được bài làm: {error}','retryable':True},422)
+   adapted=None; progress={'total_exercises':0,'graded':0,'average_percentage':0,'completed':False}
+   with db() as c:
+    submission_id=tutor_store.add_submission(c,exercise['id'],u['id'],answer=answer,answer_type=answer_type,result=result)
+    submissions=tutor_store.submissions_for_roadmap(c,exercise['roadmap_id'],u['id'])
+    progress=tutor_store.progress_for_roadmap(c,exercise['roadmap_id'],u['id'])
+    if roadmap_row:
+     stored=json.loads(roadmap_row['payload']) if roadmap_row['payload'] else {}
+     if stored:
+      adapted=adapt_roadmap(stored,submissions)
+      tutor_store.update_roadmap(c,exercise['roadmap_id'],adapted,adapted.get('adaptation_note'))
+   response=tutor_store.submission_payload(submission_id,exercise,result)
+   if adapted:
+    response['adaptation']={'note':adapted.get('adaptation_note'),'average_score':adapted.get('average_score')}
+   response['progress']=progress
+   return self.json(response,201)
   if path=='/api/upload':
    u=user_from(self)
    if not u: return self.json({'error':'Bạn cần đăng nhập để upload tài liệu'},401)
@@ -711,7 +1105,11 @@ class StudyHubHTTPServer(ThreadingHTTPServer):
 def main():
     init_db()
     port=int(os.environ.get('STUDYHUB_PORT','5000'))
-    print(f'StudyHub running at http://127.0.0.1:{port}')
-    with StudyHubHTTPServer(('127.0.0.1', port), H) as server:
+    host=os.environ.get('STUDYHUB_HOST','127.0.0.1')
+    status=tutor_config.engine_status()
+    detail=f" ({status['provider']} · {status['model']})" if status['engine']=='provider' else ' — chưa cấu hình provider key'
+    print(f'AI Tutor engine: {status["engine"]}{detail}')
+    print(f'StudyHub running at http://{host}:{port}')
+    with StudyHubHTTPServer((host, port), H) as server:
         server.serve_forever()
 if __name__=='__main__':main()

@@ -13,13 +13,27 @@ async function readError(response) {
 }
 
 async function request(path, options = {}) {
-  const response = await fetch(`${apiBase}${path}`, {
-    credentials: "include",
-    ...options,
-  });
+  let response;
+  try {
+    response = await fetch(`${apiBase}${path}`, {
+      credentials: "include",
+      ...options,
+    });
+  } catch {
+    throw new Error(
+      "Không kết nối được máy chủ StudyHub. Kiểm tra backend rồi thử lại.",
+    );
+  }
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
+
+const postJson = (path, payload) =>
+  request(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
 
 export const login = (email, password) =>
   request("/auth/login", {
@@ -121,3 +135,24 @@ export const checkoutSubscription = ({ plan, billingCycle }) =>
   });
 export const cancelSubscription = () =>
   request("/subscription/cancel", { method: "POST" });
+
+// --- AI Tutor: lịch sử hội thoại, đánh giá năng lực, lộ trình, luyện tập, trạng thái engine ---
+export const getMe = () => request("/auth/me");
+export const getTutorEngine = () => request("/ai-tutor/engine");
+export const getTutorConversations = () => request("/ai-tutor/conversations");
+export const getTutorAssessment = () => request("/ai-tutor/assessment");
+export const startTutorAssessment = (payload) =>
+  postJson("/ai-tutor/assessment/start", payload);
+export const submitTutorAssessment = (payload) =>
+  postJson("/ai-tutor/assessment/submit", payload);
+export const getTutorRoadmap = () => request("/ai-tutor/roadmap");
+export const generateTutorRoadmap = (payload) =>
+  postJson("/ai-tutor/roadmap", payload);
+export const getTutorExercises = () => request("/ai-tutor/exercises");
+export const submitTutorExercise = (exerciseId, { answer, answerType = "text" }) =>
+  postJson(`/ai-tutor/exercises/${exerciseId}/submit`, {
+    answer,
+    answer_type: answerType,
+  });
+export const getTutorSubmissions = () => request("/ai-tutor/submissions");
+
