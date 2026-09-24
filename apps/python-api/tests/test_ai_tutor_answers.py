@@ -681,6 +681,38 @@ class ModeInstructionTests(unittest.TestCase):
         self.assertIn('options', prompt)
 
 
+class AutoModeTests(unittest.TestCase):
+    """Khung chat một ô: Nova tự đọc câu hỏi để chọn cách trả lời."""
+
+    def test_questions_map_to_the_right_answer_style(self):
+        cases = [
+            ('Stack là gì?', 'explain'),
+            ('giải thích giúp mình kế thừa trong Java', 'explain'),
+            ('tại sao dùng queue trong duyệt theo mức', 'explain'),
+            ('Stack khác Queue thế nào?', 'explain'),
+            ('Giải bài này giúp mình: cho mảng [5, 2, 9, 1]', 'solve'),
+            ('Cho mình đáp án của bài này', 'solve'),
+            ('Tính giúp mình 2^10 bằng bao nhiêu', 'solve'),
+            ('Gợi ý cho mình cách làm, đừng cho đáp án', 'hint'),
+            ('chỉ gợi ý thôi nhé', 'hint'),
+            ('Tóm tắt tài liệu mình đã tải lên', 'summarize'),
+            ('tài liệu này nói gì', 'summarize'),
+            ('Tạo quiz 4 câu về Stack và Queue', 'generate_quiz'),
+            ('ra đề trắc nghiệm cho mình ôn', 'generate_quiz'),
+        ]
+        for question, expected in cases:
+            with self.subTest(question=question):
+                self.assertEqual(engine.detect_mode(question), expected)
+
+    def test_asking_to_explain_a_solution_still_explains(self):
+        """"giải thích bài này" phải là giải thích, không được bắt nhầm thành giải bài."""
+        self.assertEqual(engine.detect_mode('giải thích bài này giúp mình'), 'explain')
+
+    def test_plain_question_defaults_to_explaining_without_leaking_answers(self):
+        self.assertEqual(engine.detect_mode('cho mảng [5, 2, 9, 1], sắp xếp tăng dần bằng nổi bọt'), 'explain')
+        self.assertEqual(engine.detect_mode(''), 'explain')
+
+
 class ChatQuizTests(unittest.TestCase):
     """Chế độ Tạo quiz trả câu hỏi CÓ CẤU TRÚC để UI bấm chọn, không phải văn bản."""
 

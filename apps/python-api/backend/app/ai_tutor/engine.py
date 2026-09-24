@@ -290,6 +290,38 @@ def question_intent(question: str) -> str:
     return 'general'
 
 
+# Luật nhận diện ý định cho khung chat MỘT Ô: người học gõ gì cũng được, Nova tự
+# chọn cách trả lời phù hợp. Thứ tự quan trọng — luật cụ thể đứng trước luật chung,
+# và phải kiểm "giải thích" TRƯỚC "giải bài" để không bắt nhầm câu xin định nghĩa.
+AUTO_MODE_RULES = (
+    ('generate_quiz', r'tạo\s+quiz|ra\s+đề|làm\s+quiz|cho\s+(mình\s+)?(bài\s+)?quiz|quiz|trắc\s+nghiệm|'
+                      r'đố\s+(mình|em|tôi)|kiểm\s+tra\s+(kiến\s+thức|hiểu\s+biết)|luyện\s+tập\s+trắc'),
+    ('hint', r'gợi\s+ý|hint|đừng\s+(cho|đưa)\s+(mình\s+)?đáp\s+án|không\s+(cho|đưa)\s+đáp\s+án|'
+             r'chỉ\s+(hướng|gợi)|gợi\s+mở|hướng\s+dẫn\s+(mình|em|tôi)\s+tự|để\s+(mình|em|tôi)\s+tự|'
+             r'cho\s+(mình|em|tôi)\s+tự\s+làm|manh\s+mối'),
+    ('summarize', r'tóm\s+tắt|summary|tổng\s+hợp\s+lại|nội\s+dung\s+chính|ý\s+chính|tài\s+liệu\s+(này|đó|mình)\s+'
+                  r'(nói|có)\s+gì|có\s+gì\s+trong\s+tài\s+liệu|điểm\s+chính'),
+    ('explain', r'giải\s+thích|định\s+nghĩa|\blà\s+gì\b|khái\s+niệm|tại\s+sao|vì\s+sao|\bwhy\b|'
+                r'khác\s+(gì|nhau|biệt)|so\s+sánh|phân\s+biệt|nguyên\s+lý|cơ\s+chế'),
+    ('solve', r'giải\s+(bài|giúp|hộ|dùm|đi)\b|lời\s+giải|bài\s+giải|đáp\s+án|đáp\s+số|kết\s+quả\s+(là|cuối|bằng)|'
+              r'tính\s+(giúp|toán|ra|hộ)|sắp\s+xếp\s+(giúp|hộ|dùm)|cho\s+mình\s+(kết\s+quả|xem\s+lời)|'
+              r'hướng\s+giải|kết\s+luận\s+giúp|\bsolve\b'),
+)
+
+
+def detect_mode(question: str) -> str:
+    """Chọn cách trả lời cho khung chat một ô (không bắt người học chọn chế độ).
+
+    Mặc định là 'explain' — câu hỏi kiến thức phải được giải thích, không đưa đáp án
+    khi người học chưa xin; ai muốn lời giải/đáp số thì nói rõ "giải bài", "đáp án".
+    """
+    lowered = (question or '').lower()
+    for mode, pattern in AUTO_MODE_RULES:
+        if re.search(pattern, lowered):
+            return mode
+    return 'explain'
+
+
 def focus_terms(question: str, limit: int = 8) -> list[str]:
     """Content terms of the question, without interrogative filler words."""
     ordered: list[str] = []

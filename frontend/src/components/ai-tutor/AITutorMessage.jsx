@@ -30,12 +30,16 @@ const MARKDOWN_COMPONENTS = {
   pre({ children }) { return <TutorCodeBlock>{children}</TutorCodeBlock>; },
 };
 
+// Nova tự chọn cách trả lời; nhãn này cho người học biết nó đã hiểu câu hỏi theo hướng nào.
+const MODE_LABELS = { explain: 'Giải thích', solve: 'Giải bài', hint: 'Gợi ý', summarize: 'Tóm tắt', generate_quiz: 'Quiz' };
+
 export default function AITutorMessage({ message, onRetry }) {
   const copy = async () => {
     try { await navigator.clipboard.writeText(message.content); } catch { /* Clipboard can be unavailable on non-secure origins. */ }
   };
+  const modeLabel = message.role === 'assistant' && !message.error ? MODE_LABELS[message.mode] : null;
   return <article className={`tutor-message ${message.role}`}>
-    <div className="tutor-message-label">{message.role === 'user' ? 'Bạn' : 'Nova'}</div>
+    <div className="tutor-message-label">{message.role === 'user' ? 'Bạn' : 'Nova'}{modeLabel ? <span className="tutor-route">{modeLabel}</span> : null}</div>
     <div className="tutor-message-content">
       {message.error ? <><p className="tutor-error">{message.error}</p><button className="tutor-link" onClick={onRetry}>Thử lại</button></> : <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={MARKDOWN_COMPONENTS}>{message.content}</ReactMarkdown>}
     </div>

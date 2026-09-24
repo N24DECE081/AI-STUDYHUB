@@ -559,11 +559,16 @@ class H(BaseHTTPRequestHandler):
    if not u:return
    x=json_body(data)
    if not isinstance(x,dict): return self.json({'error':'Dữ liệu AI Tutor không hợp lệ'},400)
-   mode=str(x.get('mode') or 'explain').lower()
-   if mode not in ('explain','solve','hint','summarize','generate_quiz'):
-    return self.json({'error':'invalid tutor mode'},400)
+   mode=str(x.get('mode') or 'auto').lower()
    message=str(x.get('message') or '').strip()
    if not message:return self.json({'error':'Câu hỏi không được để trống'},400)
+   # Khung chat một ô: người học không chọn chế độ nữa, Nova tự đọc câu hỏi để quyết
+   # định giải thích / giải bài / gợi ý / tóm tắt / tạo quiz. Vẫn nhận chế độ tường minh
+   # cho client cũ và cho test.
+   if mode in ('', 'auto', 'tu_dong'):
+    mode=tutor_engine.detect_mode(message)
+   if mode not in ('explain','solve','hint','summarize','generate_quiz'):
+    return self.json({'error':'invalid tutor mode'},400)
    file_ids=x.get('file_ids') if isinstance(x.get('file_ids'),list) else []
    conversation_key=str(x.get('conversation_id') or '').strip() or secrets.token_hex(16)
    context,sources=tutor_context(file_ids,message,fallback=mode in ('summarize','generate_quiz'))
