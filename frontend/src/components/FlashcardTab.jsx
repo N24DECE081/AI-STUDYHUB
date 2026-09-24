@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AI_SERVICE_URL } from '../config';
 import robotImg from '../assets/robot-capybara.png';
 
 function FlashcardTab({ currentDocument }) {
@@ -13,7 +14,7 @@ function FlashcardTab({ currentDocument }) {
     setFlippedCards({});
 
     try {
-      const res = await fetch('http://localhost:8081/api/documents/flashcards', {
+      const res = await fetch(`${AI_SERVICE_URL}/api/documents/flashcards`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ context: currentDocument.extractedText }),

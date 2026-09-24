@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-import json, os, re, secrets, sqlite3, hashlib, mimetypes, html
+import json, os, re, secrets, sqlite3, hashlib, mimetypes, html, zipfile
+from datetime import datetime, timezone
+from calendar import monthrange
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, quote
 import unicodedata
+import math, threading, time
+import xml.etree.ElementTree as ET
 from email.parser import BytesParser
 from email.policy import default
 
@@ -10,9 +14,60 @@ from backend.app.db.runtime import get_runtime_database
 from backend.app.db.seed import seed as seed_database
 from backend.app.security import authenticate, register as register_user, current_user, revoke_session, SESSION_COOKIE
 
-ROOT=os.path.dirname(os.path.abspath(__file__)); WEB=os.path.join(ROOT,'web'); UP=os.path.join(ROOT,'uploads')
+ROOT=os.path.dirname(os.path.abspath(__file__))
+def load_local_env(path):
+ if not os.path.isfile(path): return
+ with open(path,encoding='utf-8') as env_file:
+  for raw_line in env_file:
+   line=raw_line.strip()
+   if not line or line.startswith('#'): continue
+   key,separator,value=line.partition('=')
+   if not separator or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',key.strip()): continue
+   value=value.strip()
+   if len(value)>=2 and value[0]==value[-1] and value[0] in ('"',"'"):
+    value=value[1:-1]
+   os.environ.setdefault(key.strip(),value)
+load_local_env(os.path.join(ROOT,'.env'))
+WEB=os.path.join(ROOT,'web')
+if not os.path.isdir(WEB):
+ WEB=os.path.normpath(os.path.join(ROOT,'..','..','archive','web'))
+configured_upload_dir=os.environ.get('STUDYHUB_UPLOAD_DIR','').strip()
+UP=os.path.abspath(configured_upload_dir) if configured_upload_dir else os.path.join(ROOT,'uploads')
 MAX_UPLOAD_BYTES=20 * 1024 * 1024
+UPLOAD_MULTIPART_OVERHEAD_BYTES=1024 * 1024
+def positive_int_env(name, default):
+ try: return max(1, int(os.environ.get(name, default)))
+ except (TypeError, ValueError): return default
+
+class TokenBucketRateLimiter:
+ def __init__(self, requests_per_minute, burst, max_keys=10000, clock=time.monotonic):
+  self.rate=max(1,requests_per_minute)/60.0; self.burst=max(1,burst); self.max_keys=max(1,max_keys); self.clock=clock
+  self.buckets={}; self.lock=threading.Lock()
+ def consume(self,key):
+  now=self.clock()
+  with self.lock:
+   tokens,updated=self.buckets.get(key,(float(self.burst),now))
+   tokens=min(float(self.burst),tokens+max(0,now-updated)*self.rate)
+   allowed=tokens>=1
+   if allowed: tokens-=1
+   elif self.rate: retry=max(1,math.ceil((1-tokens)/self.rate))
+   if key not in self.buckets and len(self.buckets)>=self.max_keys:
+    self.buckets.pop(next(iter(self.buckets)))
+   self.buckets[key]=(tokens,now)
+   return allowed, (0 if allowed else retry), max(0,int(tokens))
+
+API_RATE_LIMIT=positive_int_env('STUDYHUB_API_RATE_LIMIT_PER_MINUTE',120)
+API_BURST=positive_int_env('STUDYHUB_API_BURST',30)
+AUTH_RATE_LIMIT=positive_int_env('STUDYHUB_AUTH_RATE_LIMIT_PER_MINUTE',10)
+AUTH_BURST=positive_int_env('STUDYHUB_AUTH_BURST',5)
+api_rate_limiter=TokenBucketRateLimiter(API_RATE_LIMIT,API_BURST)
+auth_rate_limiter=TokenBucketRateLimiter(AUTH_RATE_LIMIT,AUTH_BURST)
 ALLOWED_UPLOAD_EXTENSIONS={'.pdf','.txt','.md','.csv','.doc','.docx','.ppt','.pptx'}
+DEFAULT_CORS_ORIGINS={
+ 'http://localhost:5173','http://127.0.0.1:5173',
+ 'http://localhost:5174','http://127.0.0.1:5174',
+ 'http://localhost:5175','http://127.0.0.1:5175',
+}
 os.makedirs(UP,exist_ok=True)
 if not os.environ.get('MYSQL_DATABASE') and os.environ.get('STUDYHUB_DB_PATH'):
  os.makedirs(os.path.dirname(os.environ['STUDYHUB_DB_PATH']),exist_ok=True)
@@ -44,7 +99,7 @@ def user_from(handler):
 def json_body(raw):
     try:
         return json.loads(raw or b'{}')
-    except json.JSONDecodeError:
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return None
 
 def require_user(handler):
@@ -57,28 +112,160 @@ def require_user(handler):
 def session_cookie(token, max_age=7 * 24 * 60 * 60):
     return f'{SESSION_COOKIE}={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'
 
+def extract_document_text(path):
+    """Read the common study formats without requiring an external AI service."""
+    ext=os.path.splitext(path)[1].lower()
+    if not os.path.exists(path):
+        return ''
+    if ext in ('.txt','.md','.csv','.log'):
+        return open(path,'r',encoding='utf-8',errors='replace').read()
+    if ext in ('.docx','.pptx'):
+        try:
+            with zipfile.ZipFile(path) as archive:
+                names=[name for name in archive.namelist() if (ext=='.docx' and name=='word/document.xml') or (ext=='.pptx' and name.startswith('ppt/slides/slide') and name.endswith('.xml'))]
+                chunks=[]
+                for name in sorted(names):
+                    root=ET.fromstring(archive.read(name))
+                    chunks.append(' '.join(node.text or '' for node in root.iter() if node.tag.rsplit('}',1)[-1]=='t'))
+                return '\n'.join(chunks)
+        except (OSError, zipfile.BadZipFile, ET.ParseError):
+            return ''
+    if ext=='.pdf':
+        try:
+            from pypdf import PdfReader
+            return '\n'.join(page.extract_text() or '' for page in PdfReader(path).pages)
+        except Exception:
+            # Keep the demo useful when the optional PDF parser is unavailable.
+            # Most text-only PDFs expose readable Tj/TJ operators in their streams.
+            try:
+                raw=open(path,'rb').read().decode('latin-1',errors='ignore')
+                chunks=re.findall(r'\(([^()]*)\)\s*Tj',raw,re.S)
+                return '\n'.join(chunk.replace('\\n','\n').replace('\\(', '(').replace('\\)', ')') for chunk in chunks)
+            except OSError:
+                return ''
+    return ''
+
+def quiz_candidates(text):
+    clean=re.sub(r'\s+',' ',text or '').strip()
+    parts=[part.strip(' -•\t') for part in re.split(r'(?<=[.!?])\s+|\n+',text or '')]
+    parts=[re.sub(r'\s+',' ',part).strip() for part in parts if len(re.sub(r'\s+',' ',part).strip())>=25]
+    if not parts and clean:
+        parts=[clean]
+    unique=[]
+    for part in parts:
+        if part not in unique:
+            unique.append(part[:360])
+    return unique
+
+def build_quiz_questions(documents):
+    candidates=[]
+    for document in documents:
+        text=extract_document_text(document['absolute_path'])
+        for index, sentence in enumerate(quiz_candidates(text)):
+            candidates.append({'text':sentence,'title':document['title'],'document_id':document['id'],'locator':f'Đoạn {index+1}'})
+    if not candidates:
+        return []
+    # A small local-RAG generator keeps the demo usable even when no external AI process is running.
+    stopwords={'the','and','with','from','this','that','được','trong','của','cho','và','là','các','một','những','theo','này'}
+    questions=[]
+    for index, item in enumerate(candidates[:30]):
+        words=re.findall(r'[A-Za-zÀ-ỹ0-9][A-Za-zÀ-ỹ0-9_-]{3,}',item['text'])
+        keyword=next((word for word in words if word.lower() not in stopwords), 'nội dung chính')
+        pool=[]
+        for candidate in candidates:
+            value=candidate['text'][:260]
+            if value not in pool: pool.append(value)
+            if len(pool)>=4: break
+        while len(pool)<4:
+            pool.append(f'Tài liệu không đề cập đến lựa chọn này ({len(pool)+1}).')
+        correct=item['text'][:260]
+        if correct in pool: pool.remove(correct)
+        pool.insert(0,correct)
+        correct_index=index % 4
+        correct_value=pool[0]
+        pool[0],pool[correct_index]=pool[correct_index],pool[0]
+        questions.append({'question':f'Theo tài liệu, phát biểu nào sau đây đúng về “{keyword}”?','options':pool,'correct_index':correct_index,'explanation':f'Đáp án được trích từ tài liệu “{item["title"]}”, {item["locator"]}: {correct_value}','document_id':item['document_id'],'source_title':item['title'],'source_locator':item['locator']})
+    return questions
+
+def public_quiz_payload(payload, quiz_id=None, created_at=None):
+    """Return only quiz fields the client needs before submitting answers."""
+    questions=[]
+    for question in payload.get('questions',[]):
+        questions.append({key:question[key] for key in (
+            'id','question','options','document_id','source_title','source_locator'
+        ) if key in question})
+    result={key:payload[key] for key in ('kind','title','document_ids','question_count') if key in payload}
+    result['questions']=questions
+    if quiz_id is not None: result['id']=quiz_id
+    if created_at is not None: result['created_at']=created_at
+    return result
+
+def subscription_effective_at(billing_cycle='month', now=None):
+    """Calculate a calendar-month/year boundary without database-specific SQL."""
+    if billing_cycle not in ('month','year'):
+        raise ValueError('billing_cycle must be month or year')
+    current=now or datetime.now(timezone.utc)
+    months=12 if billing_cycle=='year' else 1
+    month_index=current.month-1+months
+    year=current.year+month_index//12
+    month=month_index%12+1
+    day=min(current.day,monthrange(year,month)[1])
+    effective=current.replace(year=year,month=month,day=day)
+    return effective.strftime('%Y-%m-%d %H:%M:%S')
+
 class H(BaseHTTPRequestHandler):
  server_version='StudyHub/1.0'
  def cors_origin(self):
   origin = self.headers.get('Origin', '')
-  return origin if origin in ('http://localhost:5173', 'http://127.0.0.1:5173') else 'http://localhost:5173'
+  configured=os.environ.get('STUDYHUB_CORS_ORIGINS')
+  allowed={value.strip().rstrip('/') for value in configured.split(',') if value.strip()} if configured is not None else DEFAULT_CORS_ORIGINS
+  return origin if origin in allowed else None
  def send(self,status=200,body=b'',ctype='application/json',headers=None):
   self.send_response(status); self.send_header('Content-Type',ctype); self.send_header('Cache-Control','no-store');
-  self.send_header('Access-Control-Allow-Origin', self.cors_origin()); self.send_header('Access-Control-Allow-Credentials', 'true');
+  origin=self.cors_origin()
+  if origin:
+   self.send_header('Access-Control-Allow-Origin', origin); self.send_header('Access-Control-Allow-Credentials', 'true'); self.send_header('Vary','Origin')
+   self.send_header('Access-Control-Expose-Headers','Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining')
+  if getattr(self,'gateway_rate_headers',None):
+   for key,value in self.gateway_rate_headers.items(): self.send_header(key,value)
   if headers:
    for k,v in headers.items(): self.send_header(k,v)
   self.end_headers(); self.wfile.write(body)
  def json(self,obj,status=200,headers=None): self.send(status,json.dumps(obj,ensure_ascii=False).encode(),headers=headers)
+ def gateway_access(self):
+  path=urlparse(self.path).path
+  if path!='/api' and not path.startswith('/api/'): return True
+  client_ip=self.client_address[0]
+  allowed,retry,remaining=api_rate_limiter.consume(client_ip)
+  limit=API_RATE_LIMIT
+  if self.command=='POST' and path in ('/api/login','/api/auth/login','/api/register','/api/auth/register'):
+   auth_allowed,auth_retry,auth_remaining=auth_rate_limiter.consume(client_ip)
+   if not auth_allowed: allowed,retry,remaining,limit=False,auth_retry,0,AUTH_RATE_LIMIT
+   elif auth_remaining<remaining: remaining,limit=auth_remaining,AUTH_RATE_LIMIT
+  self.gateway_rate_headers={'X-RateLimit-Limit':str(limit),'X-RateLimit-Remaining':str(remaining)}
+  if not allowed:
+   return self.json({'error':'Request rate limit exceeded','code':'rate_limited','retry_after_seconds':retry},429,{'Retry-After':str(retry),'X-RateLimit-Limit':str(limit),'X-RateLimit-Remaining':'0'})
+  return True
  def body(self):
-  n=int(self.headers.get('Content-Length','0')); return self.rfile.read(n)
+  try: n=int(self.headers.get('Content-Length','0'))
+  except (TypeError,ValueError): raise ValueError('invalid Content-Length')
+  if n < 0: raise ValueError('invalid Content-Length')
+  return self.rfile.read(n)
  def do_OPTIONS(self):
+  if not self.gateway_access(): return
+  origin=self.cors_origin()
+  if self.headers.get('Origin') and not origin:
+   self.send_response(403); self.send_header('Cache-Control','no-store'); self.end_headers(); return
   self.send_response(204)
-  self.send_header('Access-Control-Allow-Origin', self.cors_origin())
+  if origin:
+   self.send_header('Access-Control-Allow-Origin', origin)
+   self.send_header('Vary','Origin')
+   self.send_header('Access-Control-Allow-Credentials', 'true')
   self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
   self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-  self.send_header('Access-Control-Allow-Credentials', 'true')
   self.end_headers()
  def do_GET(self):
+  if not self.gateway_access(): return
   p=urlparse(self.path); path=p.path
   if path in ('/api/me','/api/auth/me'): return self.json({'user':user_from(self)})
   if path=='/api/subjects':
@@ -116,6 +303,36 @@ class H(BaseHTTPRequestHandler):
     with db() as c:
      row=c.execute('SELECT current_streak,last_activity_date,recovery_count FROM user_streaks WHERE user_id=?',(u['id'],)).fetchone()
     return self.json(dict(row) if row else {'current_streak':0,'last_activity_date':None,'recovery_count':0})
+  if path=='/api/quizzes/history':
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    sessions=c.execute("SELECT id,title,created_at FROM chat_sessions WHERE user_id=? AND title LIKE 'QUIZ_CARD:%' ORDER BY created_at DESC,id DESC",(u['id'],)).fetchall()
+    history=[]
+    for session in sessions:
+     message=c.execute("SELECT content FROM chat_messages WHERE session_id=? AND role='assistant' ORDER BY id DESC LIMIT 1",(session['id'],)).fetchone()
+     if not message:continue
+     try:payload=json.loads(message['content'])
+     except (TypeError,json.JSONDecodeError):continue
+     attempts=[]
+     for attempt in c.execute("SELECT content,created_at FROM chat_messages WHERE session_id=? AND role='user' ORDER BY id DESC",(session['id'],)).fetchall():
+      try:
+       value=json.loads(attempt['content'])
+       if value.get('kind')=='quiz_attempt': attempts.append({'score':value.get('score',0),'total':value.get('total',payload.get('question_count',0)),'score_10':round((value.get('score',0)*10)/max(value.get('total',1),1),2),'score_30':round((value.get('score',0)*30)/max(value.get('total',1),1),2),'created_at':attempt['created_at']})
+      except (TypeError,json.JSONDecodeError):pass
+     history.append({'id':session['id'],'title':payload.get('title',session['title'].replace('QUIZ_CARD:','')),'document_ids':payload.get('document_ids',[]),'question_count':payload.get('question_count',len(payload.get('questions',[]))),'created_at':session['created_at'],'attempts':attempts})
+   return self.json({'items':history})
+  m=re.fullmatch(r'/api/quizzes/(\d+)',path)
+  if m:
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    quiz=c.execute("SELECT id,title,created_at FROM chat_sessions WHERE id=? AND user_id=? AND title LIKE 'QUIZ_CARD:%'",(m.group(1),u['id'])).fetchone()
+    if not quiz:return self.json({'error':'Quiz không tồn tại'},404)
+    message=c.execute("SELECT content FROM chat_messages WHERE session_id=? AND role='assistant' ORDER BY id DESC LIMIT 1",(quiz['id'],)).fetchone()
+   if not message:return self.json({'error':'Quiz chưa có câu hỏi'},422)
+   payload=json.loads(message['content'])
+   return self.json(public_quiz_payload(payload,quiz['id'],quiz['created_at']))
   m=re.fullmatch(r'/api/documents/(\d+)',path)
   if m:
     c=db(); r=c.execute('SELECT d.*, d.original_filename AS file_name, d.storage_path AS file_path, d.uploaded_by AS uploader_id, s.code subject_code,s.name subject_name,u.full_name AS uploader FROM documents d JOIN subjects s ON s.id=d.subject_id JOIN users u ON u.id=d.uploaded_by WHERE d.id=?',(m.group(1),)).fetchone(); c.close(); return self.json(dict(r) if r else {'error':'not found'},200 if r else 404)
@@ -151,18 +368,77 @@ class H(BaseHTTPRequestHandler):
   if not os.path.isfile(fp): return self.json({'error':'not found'},404)
   ext=os.path.splitext(fp)[1]; ct={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'application/javascript; charset=utf-8','.svg':'image/svg+xml'}.get(ext,'application/octet-stream'); return self.send(200,open(fp,'rb').read(),ct)
  def do_POST(self):
-  content_length = int(self.headers.get('Content-Length', 0))
-
-  # Chặn nếu dung lượng vượt quá 50MB (50 * 1024 * 1024 bytes)
-  if content_length > MAX_UPLOAD_BYTES + 1024 * 1024:
-    self.send_response(413)
-    self.send_header('Content-Type', 'application/json')
-    self.end_headers()
-    self.wfile.write(b'{"error": "Payload Too Large: Dung luong file vuot qua gioi han 50MB"}')
-    return
-
-
-  p=urlparse(self.path); path=p.path; data=self.body();
+  if not self.gateway_access(): return
+  try:
+   content_length=int(self.headers.get('Content-Length','0'))
+  except (TypeError,ValueError):
+   return self.json({'error':'Content-Length không hợp lệ'},400)
+  if content_length < 0:
+   return self.json({'error':'Content-Length không hợp lệ'},400)
+  if content_length > MAX_UPLOAD_BYTES + UPLOAD_MULTIPART_OVERHEAD_BYTES:
+   return self.json({'error':f'Payload vượt quá giới hạn upload {MAX_UPLOAD_BYTES // (1024 * 1024)}MB'},413)
+  try:
+   p=urlparse(self.path); path=p.path; data=self.body()
+  except ValueError:
+   return self.json({'error':'Content-Length không hợp lệ'},400)
+  if path=='/api/quizzes/generate':
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   raw_ids=x.get('document_ids',[]) if isinstance(x,dict) else []
+   if not isinstance(raw_ids,list) or not raw_ids or len(raw_ids)>20:
+    return self.json({'error':'Hãy chọn từ 1 đến 20 tài liệu để tạo Quiz'},400)
+   try: document_ids=list(dict.fromkeys(int(value) for value in raw_ids))
+   except (TypeError,ValueError): return self.json({'error':'Danh sách tài liệu không hợp lệ'},400)
+   placeholders=','.join('?' for _ in document_ids)
+   with db() as c:
+    rows=c.execute(f'''SELECT d.id,d.title,d.description,d.storage_path,d.original_filename,s.name subject_name
+      FROM documents d JOIN subjects s ON s.id=d.subject_id WHERE d.id IN ({placeholders})''',document_ids).fetchall()
+    by_id={row['id']:row for row in rows}
+    if len(by_id)!=len(document_ids): return self.json({'error':'Một hoặc nhiều tài liệu không tồn tại'},404)
+    docs=[]
+    for document_id in document_ids:
+     row=by_id[document_id]
+     absolute_path=row['storage_path'] if os.path.isabs(row['storage_path']) else os.path.join(ROOT,row['storage_path'])
+     docs.append({'id':row['id'],'title':row['title'],'absolute_path':absolute_path})
+    questions=build_quiz_questions(docs)
+    if not questions:return self.json({'error':'Không đọc được nội dung tài liệu để tạo Quiz. Hãy dùng PDF/Word có text hoặc file TXT/MD.'},422)
+    title='Quiz Card: '+', '.join(row['title'] for row in rows[:2])
+    for index, question in enumerate(questions): question['id']=f'q{index+1}'
+    quiz_payload={'kind':'quiz','title':title,'document_ids':document_ids,'question_count':len(questions),'questions':questions}
+    session_title='QUIZ_CARD:'+json.dumps({'title':title,'document_ids':document_ids},ensure_ascii=False)
+    quiz_id=c.execute('INSERT INTO chat_sessions(user_id,document_id,title) VALUES(?,?,?)',(u['id'],document_ids[0],session_title)).lastrowid
+    c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(quiz_id,'assistant',json.dumps(quiz_payload,ensure_ascii=False)))
+    c.commit()
+   public_questions=[{key:value for key,value in question.items() if key!='correct_index' and key not in ('explanation',)} for question in questions]
+   return self.json({'id':quiz_id,'title':title,'document_ids':document_ids,'question_count':len(questions),'questions':public_questions},201)
+  m=re.fullmatch(r'/api/quizzes/(\d+)/submit',path)
+  if m:
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   answers=x.get('answers',{}) if isinstance(x,dict) else {}
+   if not isinstance(answers,dict):return self.json({'error':'Đáp án không hợp lệ'},400)
+   with db() as c:
+    quiz=c.execute("SELECT id FROM chat_sessions WHERE id=? AND user_id=? AND title LIKE 'QUIZ_CARD:%'",(m.group(1),u['id'])).fetchone()
+    if not quiz:return self.json({'error':'Quiz không tồn tại'},404)
+    message=c.execute("SELECT content FROM chat_messages WHERE session_id=? AND role='assistant' ORDER BY id DESC LIMIT 1",(quiz['id'],)).fetchone()
+    if not message:return self.json({'error':'Quiz chưa có câu hỏi'},422)
+    quiz_payload=json.loads(message['content']); rows=quiz_payload.get('questions',[])
+    if not rows:return self.json({'error':'Quiz chưa có câu hỏi'},422)
+    items=[]; score=0
+    for row in rows:
+     raw=answers.get(str(row['id']),answers.get(row['id']))
+     try:selected=int(raw)
+     except (TypeError,ValueError):selected=None
+     correct=selected is not None and selected==row['correct_index']
+     score += int(correct)
+     items.append({'id':row['id'],'question':row['question'],'selected_index':selected,'correct_index':row['correct_index'],'correct':correct,'explanation':row['explanation'],'source_document_id':row['document_id'],'source_title':row.get('source_title'),'source_locator':row['source_locator'],'options':row['options']})
+    attempt_payload={'kind':'quiz_attempt','score':score,'total':len(rows),'answers':answers}
+    attempt_id=c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(quiz['id'],'user',json.dumps(attempt_payload,ensure_ascii=False))).lastrowid
+    c.commit()
+   total=len(rows)
+   return self.json({'attempt_id':attempt_id,'score':score,'total':total,'score_30':round(score*30/total,2),'score_10':round(score*10/total,2),'weak_count':sum(1 for item in items if not item['correct']),'weak_items':[item for item in items if not item['correct']],'items':items},200)
   if path in ('/api/login','/api/auth/login'):
    try:
     x=json.loads(data or '{}')
@@ -194,7 +470,9 @@ class H(BaseHTTPRequestHandler):
    with db() as c:
     try:
      result, error = register_user(c, name, email, pw)
-    except sqlite3.IntegrityError:
+    except Exception as exc:
+     if not isinstance(exc,sqlite3.IntegrityError) and getattr(exc,'errno',None)!=1062:
+      raise
      result, error = None, 'Email đã tồn tại'
    if error:
     return self.json({'error':error},400)
@@ -223,8 +501,8 @@ class H(BaseHTTPRequestHandler):
    if not u:return
    x=json_body(data)
    if not isinstance(x,dict): return self.json({'error':'invalid checkout data'},400)
-   target_code=str(x.get('plan','')).lower(); cycle=str(x.get('billing_cycle','month')).lower(); method=str(x.get('payment_method','')).lower()
-   if target_code not in ('free','plus','pro') or cycle not in ('month','year') or method not in ('card','bank','ewallet','demo'):
+   target_code=str(x.get('plan','')).lower(); cycle=str(x.get('billing_cycle','month')).lower()
+   if target_code not in ('free','plus','pro') or cycle not in ('month','year'):
     return self.json({'error':'invalid checkout selection'},400)
    names={'free':('free',),'plus':('plus','standard'),'pro':('pro','premium')}; ranks={'free':0,'plus':1,'pro':2}
    with db() as c:
@@ -237,12 +515,11 @@ class H(BaseHTTPRequestHandler):
     if current_code==target_code:return self.json({'error':'this is already your current plan'},409)
     c.execute('UPDATE subscription_changes SET status=? WHERE user_id=? AND status=?',('cancelled',u['id'],'scheduled'))
     if ranks[target_code] < ranks[current_code]:
-     c.execute('INSERT INTO subscription_changes(user_id,target_plan_id,billing_cycle,status,effective_at) VALUES(?,?,?,?,datetime(\'now\',\'+1 month\'))',(u['id'],target['id'],cycle,'scheduled'))
+     effective_at=subscription_effective_at(cycle)
+     c.execute('INSERT INTO subscription_changes(user_id,target_plan_id,billing_cycle,status,effective_at) VALUES(?,?,?,?,?)',(u['id'],target['id'],cycle,'scheduled',effective_at))
      c.commit()
-     return self.json({'plan':current_code,'status':'active','scheduled_change':{'plan':target_code,'billing_cycle':cycle},'change_type':'downgrade_scheduled'})
-    if active:c.execute('UPDATE subscriptions SET status=? WHERE id=?',('expired',active['id']))
-    c.execute('INSERT INTO subscriptions(user_id,plan_id,status) VALUES(?,?,?)',(u['id'],target['id'],'active')); c.commit()
-   return self.json({'plan':target_code,'status':'active','billing_cycle':cycle,'scheduled_change':None,'change_type':'upgrade_applied'})
+     return self.json({'plan':current_code,'status':'active','scheduled_change':{'plan':target_code,'billing_cycle':cycle,'effective_at':effective_at},'change_type':'downgrade_scheduled'})
+   return self.json({'error':'Cổng thanh toán chưa được tích hợp. Yêu cầu demo không thu tiền và không kích hoạt gói trả phí.','mode':'demo','payment_status':'not_configured'},501)
   if path=='/api/subscription/cancel':
    u=require_user(self)
    if not u:return
@@ -251,8 +528,9 @@ class H(BaseHTTPRequestHandler):
     active=c.execute('SELECT s.id,p.name FROM subscriptions s JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? AND s.status=? ORDER BY s.id DESC LIMIT 1',(u['id'],'active')).fetchone()
     if not active or str(active['name']).lower()=='free':return self.json({'error':'no paid subscription to cancel'},409)
     c.execute('UPDATE subscription_changes SET status=? WHERE user_id=? AND status=?',('cancelled',u['id'],'scheduled'))
-    c.execute('INSERT INTO subscription_changes(user_id,target_plan_id,billing_cycle,status,effective_at) VALUES(?,?,?,?,datetime(\'now\',\'+1 month\'))',(u['id'],free['id'],'month','scheduled')); c.commit()
-   return self.json({'ok':True,'change_type':'cancellation_scheduled','scheduled_change':{'plan':'free'}})
+    effective_at=subscription_effective_at('month')
+    c.execute('INSERT INTO subscription_changes(user_id,target_plan_id,billing_cycle,status,effective_at) VALUES(?,?,?,?,?)',(u['id'],free['id'],'month','scheduled',effective_at)); c.commit()
+   return self.json({'ok':True,'change_type':'cancellation_scheduled','scheduled_change':{'plan':'free','effective_at':effective_at}})
   if path=='/api/courses':
     u=require_user(self)
     if not u:return
@@ -302,9 +580,10 @@ class H(BaseHTTPRequestHandler):
    u=require_user(self)
    if not u:return
    x=json_body(data)
+   if not isinstance(x,dict):return self.json({'error':'Dữ liệu câu hỏi không hợp lệ'},400)
    tutor_contract=path=='/api/ai-tutor/chat'
-   question=(x.get('message','') if tutor_contract else x.get('question','')).strip() if isinstance(x,dict) else ''
-   document_id=x.get('document_id') if isinstance(x,dict) else None
+   question=(x.get('message','') if tutor_contract else x.get('question','')).strip()
+   document_id=x.get('document_id')
    if tutor_contract:
     file_ids=x.get('file_ids',[])
     if isinstance(file_ids,list) and file_ids:
@@ -371,25 +650,63 @@ class H(BaseHTTPRequestHandler):
    extension=os.path.splitext(filename)[1].lower()
    if not filename or extension not in ALLOWED_UPLOAD_EXTENSIONS:return self.json({'error':'Định dạng file không được hỗ trợ'},400)
    if not content:return self.json({'error':'File không được rỗng'},400)
-   if len(content)>MAX_UPLOAD_BYTES:return self.json({'error':'File vượt quá giới hạn 10MB'},413)
+   if len(content)>MAX_UPLOAD_BYTES:return self.json({'error':f'File vượt quá giới hạn {MAX_UPLOAD_BYTES // (1024 * 1024)}MB'},413)
    try:
     subject_id=int(sid)
    except ValueError:
     return self.json({'error':'Môn học không hợp lệ'},400)
-   c=db(); subject=c.execute('SELECT id FROM subjects WHERE id=?',(subject_id,)).fetchone()
+   c=db()
+   try:
+    subject=c.execute('SELECT id FROM subjects WHERE id=?',(subject_id,)).fetchone()
+   except Exception:
+    c.close(); return self.json({'error':'Không thể kiểm tra môn học'},500)
    if not subject:
     c.close(); return self.json({'error':'Môn học không tồn tại'},400)
    safe=re.sub(r'[^A-Za-z0-9._-]','_',filename); stored=f'{secrets.token_hex(8)}_{safe}'
    target=os.path.join(UP,stored)
-   with open(target,'wb') as fh: fh.write(content)
    ext=extension.lstrip('.')
    mime={'.pdf':'application/pdf','.txt':'text/plain','.md':'text/markdown','.csv':'text/csv','.doc':'application/msword','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.ppt':'application/vnd.ms-powerpoint','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation'}.get(extension,'application/octet-stream')
-   document_id=c.execute('INSERT INTO documents(title,description,original_filename,storage_filename,file_type,mime_type,file_size,storage_path,status,subject_id,uploaded_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(title,fields.get('description','').strip(),filename,stored,ext,mime,len(content),os.path.join('uploads',stored),'ready',subject_id,u['id'])).lastrowid
-   c.commit(); c.close(); return self.json({'ok':True,'document_id':document_id,'status':'ready'},201)
+   try:
+    with open(target,'wb') as fh: fh.write(content)
+    storage_path=target if configured_upload_dir else os.path.join('uploads',stored)
+    document_id=c.execute('INSERT INTO documents(title,description,original_filename,storage_filename,file_type,mime_type,file_size,storage_path,status,subject_id,uploaded_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(title,fields.get('description','').strip(),filename,stored,ext,mime,len(content),storage_path,'ready',subject_id,u['id'])).lastrowid
+    c.commit()
+   except Exception as error:
+    cleanup_errors=[]
+    try: c.rollback()
+    except Exception as cleanup_error: cleanup_errors.append(cleanup_error)
+    try:
+     if os.path.exists(target): os.remove(target)
+    except OSError as cleanup_error: cleanup_errors.append(cleanup_error)
+    c.close()
+    if cleanup_errors: self.log_error('upload cleanup failed after %r: %r',error,cleanup_errors)
+    return self.json({'error':'Không thể lưu tài liệu'},500)
+   c.close(); return self.json({'ok':True,'document_id':document_id,'status':'ready'},201)
   return self.json({'error':'not found'},404)
 
 class StudyHubHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
+    request_queue_size = 64
+    daemon_threads = True
+    def __init__(self, server_address, RequestHandlerClass, max_concurrent=None):
+        self.request_slots = threading.BoundedSemaphore(max_concurrent or positive_int_env('STUDYHUB_MAX_CONCURRENT_REQUESTS',32))
+        super().__init__(server_address, RequestHandlerClass)
+    def process_request(self, request, client_address):
+        if not self.request_slots.acquire(blocking=False):
+            body=json.dumps({'error':'API gateway is busy','code':'gateway_overloaded'}).encode()
+            response=(b'HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json; charset=utf-8\r\n'
+                      b'Cache-Control: no-store\r\nRetry-After: 1\r\nConnection: close\r\nContent-Length: '+str(len(body)).encode()+b'\r\n\r\n'+body)
+            try: request.sendall(response)
+            except OSError: pass
+            finally: self.shutdown_request(request)
+            return
+        try: super().process_request(request, client_address)
+        except Exception:
+            self.request_slots.release()
+            raise
+    def process_request_thread(self, request, client_address):
+        try: super().process_request_thread(request, client_address)
+        finally: self.request_slots.release()
 
 def main():
     init_db()

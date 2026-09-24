@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AI_SERVICE_URL } from '../config';
 
 const AiTutorChat = ({ currentDocumentContent }) => {
   const [question, setQuestion] = useState('');
@@ -21,7 +22,7 @@ const AiTutorChat = ({ currentDocumentContent }) => {
     setAnswer(''); 
 
     try {
-      const response = await fetch('http://localhost:8081/api/ai/chat-stream', {
+      const response = await fetch(`${AI_SERVICE_URL}/api/ai/chat-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

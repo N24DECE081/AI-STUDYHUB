@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { AI_SERVICE_URL } from '../config';
 import robotImg from '../assets/robot-capybara.png';
 
 function AiTutorTab({ currentDocument }) {
@@ -18,7 +19,7 @@ function AiTutorTab({ currentDocument }) {
 
   useEffect(() => {
     if (currentDocument && currentDocument.id) {
-      fetch(`http://localhost:8081/api/documents/${currentDocument.id}/messages`)
+      fetch(`${AI_SERVICE_URL}/api/documents/${currentDocument.id}/messages`)
         .then((res) => res.json())
         .then((data) => setMessages(data))
         .catch((err) => console.error("Lỗi tải lịch sử chat:", err));
@@ -42,7 +43,7 @@ function AiTutorTab({ currentDocument }) {
     ]);
 
     try {
-      const response = await fetch('http://localhost:8081/api/documents/chat-stream', {
+      const response = await fetch(`${AI_SERVICE_URL}/api/documents/chat-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -16,8 +16,11 @@ import {
   uploadDocument,
 } from "./api";
 import AITutorPage from "./components/ai-tutor/AITutorPage";
+import QuizWorkspace from "./components/QuizWorkspace";
+import LearningRoadmapPage from "./components/LearningRoadmapPage";
 import {
   ArrowRightIcon,
+  AcademicCapIcon,
   BookOpenIcon,
   CalendarDaysIcon,
   CheckIcon,
@@ -229,7 +232,9 @@ export default function App() {
   const [documents, setDocuments] = useState([]);
   const [quizDecks, setQuizDecks] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem("studyhub-quiz-decks")) || [];
+      const storedUser = JSON.parse(localStorage.getItem("studyhub-user"));
+      const userKey = storedUser && String(storedUser.id || storedUser.email || "");
+      return userKey ? JSON.parse(localStorage.getItem(`studyhub-quiz-decks:${userKey}`)) || [] : [];
     } catch {
       return [];
     }
@@ -253,7 +258,6 @@ export default function App() {
   });
   const [pendingPlan, setPendingPlan] = useState(null);
   const [billingCycle] = useState("month");
-  const [paymentMethod, setPaymentMethod] = useState("card");
   const subjectOptions = subjects;
   const average = progress.length
     ? Math.round(
@@ -305,47 +309,60 @@ export default function App() {
       setSubjects([]);
     }
   };
-  const loadProgress = async () => {
-    try {
-      const result = await getProgress();
-      setProgress(
-        (result.items || []).map((item) => ({
+  const userKey = user ? String(user.id || user.email || "") : "";
+  useEffect(() => {
+    let active = true;
+    const refreshUserData = async () => {
+      // Clear every user-scoped view before loading the next account. This prevents
+      // a previous account's documents from flashing while the new request runs.
+      setDocuments([]);
+      setSubjects([]);
+      setProgress([]);
+      setStreak({ current_streak: 0, recovery_count: 0, last_activity_date: null });
+      setSubscription({ plan: "free", status: "active" });
+      setFilter("all");
+      setSearch("");
+      setSelectedDocument(null);
+      if (!userKey) {
+        setQuizDecks([]);
+        return;
+      }
+      try {
+        setQuizDecks(JSON.parse(localStorage.getItem(`studyhub-quiz-decks:${userKey}`)) || []);
+      } catch {
+        setQuizDecks([]);
+      }
+      const [documentsResult, subjectsResult, progressResult, streakResult, subscriptionResult] = await Promise.allSettled([
+        getDocuments(),
+        getSubjects(),
+        getProgress(),
+        getStreak(),
+        getSubscription(),
+      ]);
+      if (!active) return;
+      if (documentsResult.status === "fulfilled") setDocuments(documentsResult.value);
+      if (subjectsResult.status === "fulfilled") setSubjects(subjectsResult.value);
+      if (progressResult.status === "fulfilled") {
+        setProgress((progressResult.value.items || []).map((item) => ({
           id: item.id,
           title: item.course_title || item.document_title || "Mục học tập",
           subject: item.subject_code || "",
           percent: item.progress_percent || 0,
           minutes: 0,
-        })),
-      );
-    } catch {
-      setProgress([]);
-    }
-  };
-  const loadStreak = async () => {
-    try {
-      setStreak(await getStreak());
-    } catch {
-      setStreak({ current_streak: 0, recovery_count: 0, last_activity_date: null });
-    }
-  };
-  const loadSubscription = async () => {
-    try {
-      saveSubscription(await getSubscription());
-    } catch {
-      setSubscription({ plan: "free", status: "active" });
-    }
-  };
-  useEffect(() => {
-    if (!user) return undefined;
-    const timer = window.setTimeout(() => {
-      void loadDocuments();
-      void loadSubjects();
-      void loadProgress();
-      void loadStreak();
-      void loadSubscription();
-    }, 0);
-    return () => window.clearTimeout(timer); // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+        })));
+      }
+      if (streakResult.status === "fulfilled") setStreak(streakResult.value);
+      if (subscriptionResult.status === "fulfilled") {
+        setSubscription(subscriptionResult.value);
+        localStorage.setItem(`studyhub-subscription:${userKey}`, JSON.stringify(subscriptionResult.value));
+      }
+    };
+    const timer = window.setTimeout(() => void refreshUserData(), 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [userKey]);
   useRevealOnScroll(`${view}-${documents.length}-${quizDecks.length}`);
   useEffect(() => {
     let active = true;
@@ -400,6 +417,12 @@ export default function App() {
               data.get("email"),
               data.get("password"),
             );
+      // Clear old user's data first before saving new user
+      setDocuments([]);
+      setProgress([]);
+      setSubjects([]);
+      setSubscription({ plan: "free", status: "active" });
+      // Now save the new user (this triggers effect to load their data)
       saveUser(result.user || result);
       if (result.user?.streak) setStreak(result.user.streak);
       setModal(null);
@@ -457,6 +480,7 @@ export default function App() {
   };
   const submitQuizDeck = (event) => {
     event.preventDefault();
+    if (requireLogin()) return;
     const data = new FormData(event.currentTarget);
     const deck = {
       id: crypto.randomUUID(),
@@ -467,14 +491,13 @@ export default function App() {
     if (!deck.name) return notify("Tên bộ thẻ không được để trống.");
     const next = [...quizDecks, deck];
     setQuizDecks(next);
-    localStorage.setItem("studyhub-quiz-decks", JSON.stringify(next));
+    localStorage.setItem(`studyhub-quiz-decks:${userKey}`, JSON.stringify(next));
     setModal(null);
     notify("Đã tạo bộ thẻ ghi nhớ mới.");
   };
   const requestPlan = (plan) => {
     if (requireLogin() || plan === subscription.plan) return;
     setPendingPlan(plan);
-    setPaymentMethod("card");
     setModal("plan");
   };
   const confirmPlan = async () => {
@@ -482,7 +505,6 @@ export default function App() {
       const result = await checkoutSubscription({
         plan: pendingPlan,
         billingCycle,
-        paymentMethod,
       });
       saveSubscription(result);
       setModal(null);
@@ -511,23 +533,25 @@ export default function App() {
   return (
     <div className="studyhub-app">
       <header className="topbar">
-        <button className="brand-wrap" onClick={() => go("home")}>
-          <span className="brand-mark">S</span>
+        <button className="brand-wrap" onClick={() => go("home")} aria-label="StudyHub - Trang chủ">
+          <span className="brand-mark"><AcademicCapIcon aria-hidden="true" /></span>
           <span className="brand-text">
             Study<span>Hub</span>
           </span>
         </button>
-        <nav className="nav-menu">
+        <nav className="nav-menu" aria-label="Điều hướng chính">
           {[
             ["home", "Trang chủ"],
             ["library", "Kho học liệu"],
             ["quiz", "Quiz Card"],
+            ["roadmap", "Lộ trình học"],
             ["dashboard", "Tiến độ"],
             ["tutor", "AI Tutor"],
             ["pricing", "Gói học"],
           ].map(([id, label]) => (
             <button
               key={id}
+              type="button"
               className={view === id ? "nav-item active" : "nav-item"}
               onClick={() => go(id)}
             >
@@ -586,16 +610,16 @@ export default function App() {
             <section className="hero-section">
               <div className="hero-copy">
                 <span className="eyebrow">
-                  STUDYHUB · HỌC CÁ NHÂN CÓ ĐỊNH HƯỚNG
+                  STUDYHUB · NỀN TẢNG HỌC CÁ NHÂN CÓ ĐỊNH HƯỚNG
                 </span>
                 <h1>
                   Học sâu hơn.
                   <br />
                   <span>Tiến bộ rõ hơn.</span>
                 </h1>
-                <p>
-                  Tổ chức tài liệu, theo dõi tiến độ và trao đổi với Nova — AI
-                  Tutor luôn đặt bài học của bạn làm trung tâm.
+                <p className="hero-tagline">
+                  Nền tảng AI giúp sinh viên tổ chức tài liệu, tạo Quiz thông minh, xây lộ trình cá nhân và trao đổi trực tiếp với Nova AI Tutor.
+
                 </p>
                 <div className="hero-actions">
                   <button
@@ -612,6 +636,11 @@ export default function App() {
                     <BookOpenIcon aria-hidden="true" className="btn-icon" />
                     Mở kho học liệu
                   </button>
+                </div>
+                <div className="hero-badges">
+                  <span className="hero-badge" onClick={() => go("quiz")}><RectangleStackIcon aria-hidden="true" /> Quiz Card AI</span>
+                  <span className="hero-badge" onClick={() => go("roadmap")}><SparklesIcon aria-hidden="true" /> Lộ trình cá nhân</span>
+                  <span className="hero-badge" onClick={() => go("dashboard")}><BoltIcon aria-hidden="true" /> Theo dõi tiến độ</span>
                 </div>
               </div>
               <div className="hero-visual">
@@ -632,6 +661,14 @@ export default function App() {
                     <div className="mini-item">
                       <strong>{progress.length}</strong>
                       <small>mục đang học</small>
+                    </div>
+                    <div className="mini-item">
+                      <strong>{quizDecks.length}</strong>
+                      <small>bộ Quiz</small>
+                    </div>
+                    <div className="mini-item">
+                      <strong>{user ? streak.current_streak : 0}</strong>
+                      <small>ngày streak</small>
                     </div>
                   </div>
                 </div>
@@ -658,14 +695,20 @@ export default function App() {
                   ],
                   [
                     "02",
-                    "Theo dõi nhịp học",
-                    "Cập nhật tiến độ từng chủ đề quan trọng.",
-                    "dashboard",
+                    "Ôn tập Quiz Card",
+                    "Tạo bộ thẻ ghi nhớ và Quiz từ tài liệu với AI.",
+                    "quiz",
                   ],
                   [
                     "03",
-                    "Hỏi Nova",
-                    "Nhận giải thích, gợi ý, tóm tắt hoặc quiz.",
+                    "Theo dõi nhịp học",
+                    "Xem lộ trình, cập nhật tiến độ từng chủ đề.",
+                    "roadmap",
+                  ],
+                  [
+                    "04",
+                    "Hỏi Nova AI",
+                    "Nhận giải thích, gợi ý, tóm tắt từ Nova.",
                     "tutor",
                   ],
                 ].map(([num, title, detail, target]) => (
@@ -778,6 +821,7 @@ export default function App() {
                 <PlusIcon aria-hidden="true" /> Tạo Bộ Thẻ Mới
               </button>
             </header>
+            <QuizWorkspace documents={documents} user={user} />
             {quizDecks.length ? (
               <div className="quiz-deck-grid reveal-stagger">
                 {quizDecks.map((deck) => (
@@ -799,6 +843,9 @@ export default function App() {
               </section>
             )}
           </section>
+        )}
+        {view === "roadmap" && (
+          <LearningRoadmapPage documents={documents} subjects={subjects} />
         )}
         {view === "dashboard" && (
           <section className="page">
@@ -831,6 +878,11 @@ export default function App() {
                 <strong>{documents.length}</strong>
                 <small>trong kho cá nhân</small>
               </div>
+            </div>
+            <div className="dashboard-quick-actions">
+              <button className="btn btn-outline" onClick={() => go("quiz")}><RectangleStackIcon aria-hidden="true" className="btn-icon" /> Quiz Card</button>
+              <button className="btn btn-outline" onClick={() => go("roadmap")}><SparklesIcon aria-hidden="true" className="btn-icon" /> Lộ trình học</button>
+              <button className="btn btn-outline" onClick={() => go("pricing")}><BoltIcon aria-hidden="true" className="btn-icon" /> Gói học</button>
             </div>
             <section className="panel-card progress-panel">
               <div className="panel-head">
@@ -913,6 +965,7 @@ export default function App() {
                     {plan.items.map((item) => (
                       <li key={item}><CheckIcon aria-hidden="true" />{item}</li>
                     ))}
+                    {plan.excluded.length > 0 && <li className="excluded-divider">Chưa có trong gói này</li>}
                     {plan.excluded.map((item) => (
                       <li className="is-excluded" key={item}><XMarkIcon aria-hidden="true" />{item}</li>
                     ))}
@@ -1045,8 +1098,8 @@ export default function App() {
               <select id="upload-subject" name="subject">
                 {!subjectOptions.length && <option value="">Hãy thêm môn học trước</option>}
                 {subjectOptions.map((subject) => (
-                  <option value={subject.id} key={subject.id}>
-                    {subject.id} · {subject.name}
+                  <option value={subject.code} key={subject.id}>
+                    {subject.code} · {subject.name}
                   </option>
                 ))}
               </select>
@@ -1127,22 +1180,11 @@ export default function App() {
             <strong>{PLANS[pendingPlan].name}</strong>.
           </p>
           <p className="muted">
-            Việc thanh toán thực tế chưa được khởi tạo tại giao diện này.
-            Backend sẽ xử lý an toàn khi tích hợp cổng thanh toán.
+            Đây là luồng demo. StudyHub chưa kết nối cổng thanh toán, vì vậy
+            yêu cầu này không thu tiền và không kích hoạt quyền lợi gói trả phí.
           </p>
-          <label className="checkout-field">
-            Phương thức thanh toán
-            <select
-              value={paymentMethod}
-              onChange={(event) => setPaymentMethod(event.target.value)}
-            >
-              <option value="card">Thẻ (demo)</option>
-              <option value="bank">Chuyển khoản (demo)</option>
-              <option value="ewallet">Ví điện tử (demo)</option>
-            </select>
-          </label>
           <button className="btn btn-primary full" onClick={confirmPlan}>
-            Xác nhận yêu cầu
+            Gửi yêu cầu demo
           </button>
         </Modal>
       )}

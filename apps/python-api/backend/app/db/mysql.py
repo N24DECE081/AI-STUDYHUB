@@ -8,10 +8,36 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import date, datetime
 from contextlib import contextmanager
 from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+
+
+def _normalize_row(row):
+    if row is None:
+        return None
+    return {
+        key: value.strftime("%Y-%m-%d %H:%M:%S") if isinstance(value, datetime)
+        else value.strftime("%Y-%m-%d") if isinstance(value, date)
+        else value
+        for key, value in row.items()
+    }
+
+
+class MySQLCursor:
+    def __init__(self, cursor):
+        self.cursor = cursor
+
+    def __getattr__(self, name):
+        return getattr(self.cursor, name)
+
+    def fetchone(self):
+        return _normalize_row(self.cursor.fetchone())
+
+    def fetchall(self):
+        return [_normalize_row(row) for row in self.cursor.fetchall()]
 
 
 class MySQLConnection:
@@ -27,7 +53,7 @@ class MySQLConnection:
     def execute(self, sql: str, params=()):
         cursor = self.connection.cursor(dictionary=True)
         cursor.execute(self._sql(sql), tuple(params))
-        return cursor
+        return MySQLCursor(cursor)
 
     def commit(self):
         self.connection.commit()
@@ -90,25 +116,49 @@ class MySQLDatabase:
     def _mysql_statements():
         schema = SCHEMA_PATH.read_text(encoding="utf-8")
         schema = schema.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "INT AUTO_INCREMENT PRIMARY KEY")
-        schema = schema.replace("COLLATE NOCASE", "COLLATE utf8mb4_general_ci")
-        schema = schema.replace(" TEXT", " LONGTEXT")
+        # The database default is utf8mb4_general_ci, matching SQLite's
+        # case-insensitive uniqueness without placing a COLLATE clause after
+        # SQLite's column-level UNIQUE syntax.
+        schema = schema.replace("COLLATE NOCASE", "")
+        schema = re.sub(r"\bTEXT\b", "LONGTEXT", schema)
+        # MySQL cannot index LONGTEXT or use CURRENT_TIMESTAMP defaults on it.
+        indexed_varchars = {
+            "email": "VARCHAR(320)", "code": "VARCHAR(32)", "name": "VARCHAR(100)",
+            "storage_filename": "VARCHAR(255)", "token_hash": "VARCHAR(64)",
+            "original_filename": "VARCHAR(255)", "file_type": "VARCHAR(32)",
+            "mime_type": "VARCHAR(127)", "role": "VARCHAR(20)", "status": "VARCHAR(20)",
+            "visibility": "VARCHAR(20)", "billing_cycle": "VARCHAR(10)",
+        }
+        for column, mysql_type in indexed_varchars.items():
+            schema = re.sub(rf"(\b{column}\s+)LONGTEXT\b", rf"\g<1>{mysql_type}", schema)
         schema = re.sub(
-            r"\b(email|code|name|storage_filename|token_hash)\s+LONGTEXT",
-            r"\1 VARCHAR(255)",
+            r"\b(created_at|updated_at|last_seen_at|applied_at|started_at|expires_at|last_login_at|effective_at|enrolled_at|completed_at)\s+LONGTEXT\b",
+            lambda match: f"{match.group(1)} DATETIME",
             schema,
+        )
+        schema = re.sub(
+            r"\bupdated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            "updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+            schema,
+        )
+        schema = re.sub(
+            r"(CREATE TABLE IF NOT EXISTS subscriptions\s*\(.*?)(\n\);)",
+            lambda match: f"{match.group(1)},\n    active_user_id BIGINT GENERATED ALWAYS AS (CASE WHEN status IN ('pending','active') THEN user_id ELSE NULL END) STORED{match.group(2)}",
+            schema,
+            flags=re.IGNORECASE | re.DOTALL,
         )
         schema = schema.replace("INSERT OR IGNORE", "INSERT IGNORE")
         schema = schema.replace("CREATE INDEX IF NOT EXISTS", "CREATE INDEX")
         schema = schema.replace("CREATE UNIQUE INDEX IF NOT EXISTS", "CREATE UNIQUE INDEX")
         schema = re.sub(
-            r"CREATE UNIQUE INDEX ux_user_progress_(?:course|document).*?;",
-            "",
+            r"CREATE UNIQUE INDEX ux_user_progress_(course|document)\s+ON user_progress\((user_id,\s*(course_id|document_id))\)\s+WHERE\s+(?:course_id|document_id)\s+IS\s+NOT\s+NULL;",
+            r"CREATE UNIQUE INDEX ux_user_progress_\1 ON user_progress(\2);",
             schema,
-            flags=re.IGNORECASE | re.DOTALL,
+            flags=re.IGNORECASE,
         )
         schema = re.sub(
             r"CREATE UNIQUE INDEX ux_active_subscription_per_user.*?;",
-            "CREATE INDEX ix_active_subscription_per_user ON subscriptions(user_id);",
+            "CREATE UNIQUE INDEX ux_active_subscription_per_user ON subscriptions(active_user_id);",
             schema,
             flags=re.IGNORECASE | re.DOTALL,
         )

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AI_SERVICE_URL } from '../config';
 import robotImg from '../assets/robot-capybara.png';
 
 function QuizTab({ currentDocument }) {
@@ -15,7 +16,7 @@ function QuizTab({ currentDocument }) {
     setShowResults(false);
 
     try {
-      const res = await fetch('http://localhost:8081/api/documents/quiz', {
+      const res = await fetch(`${AI_SERVICE_URL}/api/documents/quiz`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ context: currentDocument.extractedText }),

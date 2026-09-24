@@ -1,10 +1,13 @@
-import unittest, urllib.request, urllib.error, json, subprocess, time, os, sys
+import unittest, urllib.request, urllib.error, json, subprocess, time, os, sys, tempfile
 
 class StudyHubSmokeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.port=8766
+        cls.tmp=tempfile.TemporaryDirectory()
         env=os.environ.copy(); env['STUDYHUB_PORT']=str(cls.port); env['PYTHONUNBUFFERED']='1'
+        env['STUDYHUB_DB_MODE']='sqlite'; env['STUDYHUB_DB_PATH']=os.path.join(cls.tmp.name,'smoke.db')
+        env.pop('MYSQL_DATABASE',None)
         cls.proc=subprocess.Popen([sys.executable,'server.py'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
         deadline=time.time()+5
         while time.time()<deadline:
@@ -16,7 +19,7 @@ class StudyHubSmokeTest(unittest.TestCase):
             raise RuntimeError('server did not start: '+out)
     @classmethod
     def tearDownClass(cls):
-        cls.proc.terminate(); cls.proc.wait(timeout=3)
+        cls.proc.terminate(); cls.proc.wait(timeout=3); cls.tmp.cleanup()
     def request(self,path,method='GET',data=None,headers=None):
         req=urllib.request.Request(f'http://127.0.0.1:{self.port}'+path,data=data,headers=headers or {},method=method)
         try:

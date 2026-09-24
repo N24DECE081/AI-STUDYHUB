@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { askAiTutor, uploadDocument } from '../../api';
+import { askAiTutor, getSubjects, uploadDocument } from '../../api';
 import AITutorSidebar from './AITutorSidebar';
 import AITutorChat from './AITutorChat';
 import './ai-tutor.css';
@@ -20,7 +20,7 @@ export default function AITutorPage({ selectedDocument }) {
   const updateConversation = (id, updater) => save(conversations.map((item) => item.id === id ? updater(item) : item));
   const createConversation = () => { const next = freshConversation(); save([next, ...conversations]); setActiveId(next.id); setFiles([]); setDrawer(false); };
   const deleteConversation = (id) => { const next = conversations.filter((item) => item.id !== id); if (!next.length) { createConversation(); return; } save(next); if (id === activeId) setActiveId(next[0].id); };
-  const upload = async (file) => { const placeholder = { id: newId(), name: `${file.name} đang tải…`, uploading: true }; setFiles((current) => [...current, placeholder]); try { const result = await uploadDocument({ file, title: file.name.replace(/\.[^.]+$/, ''), description: 'Tài liệu dùng trong AI Tutor', subjectCode: 'CS' }); setFiles((current) => current.map((item) => item.id === placeholder.id ? { id: String(result.id || result.document_id), name: file.name } : item)); } catch (error) { setFiles((current) => current.map((item) => item.id === placeholder.id ? { ...item, name: `${file.name} — tải thất bại`, error: error.message } : item)); } };
+  const upload = async (file) => { const placeholder = { id: newId(), name: `${file.name} đang tải…`, uploading: true }; setFiles((current) => [...current, placeholder]); try { const subjects = await getSubjects(); const subject = subjects[0]; if (!subject) throw new Error('Chưa có môn học để gắn tài liệu.'); const result = await uploadDocument({ file, title: file.name.replace(/\.[^.]+$/, ''), description: 'Tài liệu dùng trong AI Tutor', subjectCode: subject.code }); setFiles((current) => current.map((item) => item.id === placeholder.id ? { id: String(result.id || result.document_id), name: file.name } : item)); } catch (error) { setFiles((current) => current.map((item) => item.id === placeholder.id ? { ...item, name: `${file.name} — tải thất bại`, error: error.message } : item)); } };
   const send = async (retryMessage) => {
     const text = retryMessage?.original || draft.trim(); if (!text || sending) return;
     const userMessage = { id: newId(), role: 'user', content: text };

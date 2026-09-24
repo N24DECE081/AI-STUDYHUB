@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AI_SERVICE_URL } from '../config';
 import ReactMarkdown from 'react-markdown';
 
 function UploadSummaryTab({ onUploadSuccess, currentDocument, setCurrentDocument }) {
@@ -20,7 +21,7 @@ function UploadSummaryTab({ onUploadSuccess, currentDocument, setCurrentDocument
 
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:8081/api/documents/upload', {
+      const res = await fetch(`${AI_SERVICE_URL}/api/documents/upload`, {
         method: 'POST',
         body: formData,
       });

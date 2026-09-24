@@ -1,11 +1,7 @@
-// Dùng cùng hostname với trang đang mở (localhost <-> localhost, 127.0.0.1 <-> 127.0.0.1)
-// để cookie phiên đăng nhập (SameSite=Lax) không bị trình duyệt coi là cross-site và bị chặn.
-const defaultApiHost =
-  typeof window !== "undefined" && window.location.hostname
-    ? window.location.hostname
-    : "127.0.0.1";
-const apiBase =
-  import.meta.env.VITE_API_BASE_URL || `http://${defaultApiHost}:5000/api`;
+// Local development uses Vite's same-origin /api proxy, including when Vite
+// falls back to another port. Set an explicit API URL only for separate hosting.
+const configuredApiBase = String(import.meta.env.VITE_API_BASE_URL || "").trim();
+const apiBase = (configuredApiBase || "/api").replace(/\/+$/, "");
 
 async function readError(response) {
   const text = await response.text();
@@ -57,7 +53,12 @@ export async function uploadDocument({
   subjectCode,
 }) {
   const subjects = await request("/subjects");
-  const subject = subjects.find((item) => item.code === subjectCode);
+  const normalizedSubject = String(subjectCode ?? "").trim();
+  const subject = subjects.find(
+    (item) =>
+      String(item.code).toLowerCase() === normalizedSubject.toLowerCase() ||
+      String(item.id) === normalizedSubject,
+  );
   if (!subject)
     throw new Error("Môn học không tồn tại hoặc chưa được tải lại.");
   const body = new FormData();
@@ -74,6 +75,22 @@ export async function uploadDocument({
   const result = await response.json();
   return request(`/documents/${result.document_id}`);
 }
+
+export const createQuiz = (documentIds) =>
+  request("/quizzes/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ document_ids: documentIds }),
+  });
+
+export const submitQuiz = (quizId, answers) =>
+  request(`/quizzes/${quizId}/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answers }),
+  });
+
+export const getQuizHistory = () => request("/quizzes/history");
 
 export const askTutor = ({ documentId, question }) =>
   request("/ai/chat", {
@@ -93,14 +110,13 @@ export const askAiTutor = ({ conversationId, message, mode, fileIds = [] }) =>
     }),
   });
 export const getSubscription = () => request("/subscription");
-export const checkoutSubscription = ({ plan, billingCycle, paymentMethod }) =>
+export const checkoutSubscription = ({ plan, billingCycle }) =>
   request("/subscription/checkout", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       plan,
       billing_cycle: billingCycle,
-      payment_method: paymentMethod,
     }),
   });
 export const cancelSubscription = () =>
