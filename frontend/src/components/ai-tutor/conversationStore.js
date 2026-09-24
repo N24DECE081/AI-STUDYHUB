@@ -40,7 +40,7 @@ export const mergeConversations = (local, remote) => {
     byId.delete(conversation.conversation_id);
     const messages = (conversation.messages || [])
       .filter((message) => message.role && message.content)
-      .map((message) => ({ id: String(message.message_id), role: message.role, content: message.content }));
+      .map((message) => ({ id: String(message.message_id), role: message.role, content: message.content, quiz: message.quiz || null }));
     const seen = new Set(messages.map(fingerprint));
     const localOnly = (existing?.messages || []).filter((message) => !message.seed && !seen.has(fingerprint(message)));
     return {

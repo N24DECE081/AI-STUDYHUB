@@ -124,6 +124,37 @@ def tutor_context(file_ids, question, limit=3, fallback=False):
         sources.append({'id':row['id'],'title':row['title']})
     return '\n\n'.join(parts), sources
 
+def chat_quiz(engine, topic, context):
+    """Sinh quiz trắc nghiệm CÓ CẤU TRÚC để UI render thành câu hỏi bấm chọn được.
+
+    Có model thì model đặt câu hỏi từ tài liệu; không có model (hết quota, mất mạng)
+    thì bản offline chắt câu hỏi và đáp án từ chính tài liệu — không bịa. Trả (None, '')
+    khi không dựng được quiz, để route rơi về câu trả lời dạng văn bản.
+    """
+    try:
+        data=engine.complete_json(task='quiz',payload={'topic':topic,'context':context[:6000],'question_count':4})
+    except Exception:
+        return None,''
+    if not isinstance(data,dict): return None,''
+    questions=[]
+    for item in (data.get('questions') or [])[:5]:
+        if not isinstance(item,dict): continue
+        prompt=str(item.get('question') or '').strip()
+        options=[str(option).strip() for option in (item.get('options') or []) if str(option).strip()]
+        if not prompt or len(options)<2: continue
+        try: answer_index=int(item.get('answer_index') or 0)
+        except (TypeError,ValueError): continue
+        if not 0<=answer_index<len(options): continue
+        options=options[:4]
+        if answer_index>=len(options): continue
+        try: max_score=int(item.get('max_score') or 10)
+        except (TypeError,ValueError): max_score=10
+        questions.append({'question':prompt[:400],'options':options,'answer_index':answer_index,
+                          'max_score':max(1,min(max_score,100))})
+    if not questions: return None,''
+    title=str(data.get('topic') or topic or 'Tài liệu của bạn').strip()[:120]
+    return {'topic':title,'questions':questions},title
+
 def public_roadmap(row, exercises, progress):
     payload=row.get('payload') or {}
     if not isinstance(payload,dict): payload={}
@@ -541,18 +572,26 @@ class H(BaseHTTPRequestHandler):
     conversation=tutor_store.conversation_for(c,u['id'],conversation_key,mode=mode,title=message[:60])
     conversation_id=int(conversation['id']); conversation_title=str(conversation['title'] or '')
     history=tutor_store.history(c,conversation_id,8)
+   quiz=None; quiz_topic=''
+   if mode=='generate_quiz':
+    quiz,quiz_topic=chat_quiz(engine,message,context)
    try:
-    answer=engine.answer(mode=mode,question=message,context=context,history=history)
+    if quiz:
+     answer=(f'## Quiz nhanh: {quiz_topic}\n\n'
+             f'{len(quiz["questions"])} câu hỏi bám theo tài liệu. Chọn đáp án rồi bấm **Kiểm tra** để xem kết quả.')
+    else:
+     answer=engine.answer(mode=mode,question=message,context=context,history=history)
    except TutorEngineError as error:
     return self.json({'error':f'AI Tutor tạm thời không trả lời được: {error}','retryable':True},502)
    health=tutor_engine.PROVIDER_HEALTH
    degraded=bool(getattr(engine,'name','')=='provider-resilient' and not health.get('ok',True))
    with db() as c:
     tutor_store.add_message(c,conversation_id,'user',message,mode)
-    message_id=tutor_store.add_message(c,conversation_id,'assistant',answer,mode)
+    message_id=tutor_store.add_message(c,conversation_id,'assistant',answer,mode,payload=quiz)
     if conversation_title in ('','Cuộc hội thoại mới'):
      tutor_store.rename_conversation(c,conversation_id,message[:60])
    return self.json({'conversation_id':conversation_key,'message_id':str(message_id),'role':'assistant','content':answer,'sources':sources,'mode':mode,
+     'quiz':quiz,
      'engine_degraded':degraded,'engine_degraded_reason':health.get('reason','') if degraded else ''},200)
   if path=='/api/ai-tutor/assessment/start':
    u=require_user(self)

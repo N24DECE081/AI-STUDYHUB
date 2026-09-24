@@ -213,6 +213,22 @@
 .tutor-math{overflow-x:auto}
 .tutor-message-content .katex{color:var(--ink);font-size:1.04em}
 
+/* ---------- Quiz do Nova tạo ngay trong chat ---------- */
+.tutor-quiz-card{margin-top:10px;border:1px solid var(--line);border-radius:12px;background:#fbfcfe;padding:14px 15px;display:grid;gap:12px;max-width:min(100%,660px)}
+.tutor-quiz-card-head{display:flex;align-items:center;gap:9px}
+.tutor-quiz-card-head h4{margin:0;font-size:13.5px;font-weight:800;color:var(--ink)}
+.tutor-quiz-card-head .tutor-chip{margin-left:auto}
+.tutor-quiz-list{margin:0;padding-left:0;list-style:none;display:grid;gap:14px}
+.tutor-quiz-list>li{display:grid;gap:7px;border-left:3px solid transparent;padding-left:10px}
+.tutor-quiz-list>li.right{border-left-color:var(--ok)}
+.tutor-quiz-list>li.wrong{border-left-color:var(--red)}
+.tutor-quiz-card .tutor-quiz-prompt{font-size:13.5px;font-weight:600;color:var(--ink)}
+.tutor-quiz-card .tutor-options label{background:#fff}
+.tutor-quiz-card .tutor-options label.correct{border-color:var(--ok);background:var(--ok-bg)}
+.tutor-quiz-card .tutor-options label.incorrect{border-color:var(--red);background:var(--danger-bg)}
+.tutor-quiz-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.tutor-quiz-actions .tutor-hint{margin-right:auto}
+
 /* ---------- Markdown trong câu trả lời ---------- */
 .tutor-message-content table,.tutor-grade-feedback table,.tutor-suggested table{border-collapse:collapse;margin:10px 0;font-size:13px;display:block;overflow-x:auto;max-width:100%}
 .tutor-message-content th,.tutor-message-content td,.tutor-suggested th,.tutor-suggested td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top;color:#243950}

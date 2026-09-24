@@ -310,6 +310,7 @@ CREATE TABLE IF NOT EXISTS tutor_messages (
     role            TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
     content         TEXT NOT NULL CHECK(length(trim(content)) > 0),
     mode            TEXT,
+    payload         TEXT,
     created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(conversation_id) REFERENCES tutor_conversations(id) ON DELETE CASCADE ON UPDATE CASCADE
 );

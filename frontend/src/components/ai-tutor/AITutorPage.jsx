@@ -31,7 +31,7 @@ export default function AITutorPage({ selectedDocument }) {
     if (!retryMessage) { updateConversation(conversation.id, (current) => ({ ...current, title: current.messages.length <= 1 ? text.slice(0, 44) : current.title, updatedAt: Date.now(), messages: [...current.messages, userMessage] })); setDraft(''); }
     else updateConversation(conversation.id, (current) => ({ ...current, messages: current.messages.filter((message) => message.id !== retryMessage.id) }));
     setSending(true);
-    try { const result = await askAiTutor({ conversationId: conversation.id, message: text, mode, fileIds: files.filter((file) => !file.uploading && !file.error).map((file) => file.id) }); updateConversation(conversation.id, (current) => ({ ...current, updatedAt: Date.now(), messages: [...current.messages, { id: result.message_id || newId(), role: 'assistant', content: result.content }] })); if (result.engine_degraded) loadEngine(); }
+    try { const result = await askAiTutor({ conversationId: conversation.id, message: text, mode, fileIds: files.filter((file) => !file.uploading && !file.error).map((file) => file.id) }); updateConversation(conversation.id, (current) => ({ ...current, updatedAt: Date.now(), messages: [...current.messages, { id: result.message_id || newId(), role: 'assistant', content: result.content, quiz: result.quiz || null }] })); if (result.engine_degraded) loadEngine(); }
     catch (error) { updateConversation(conversation.id, (current) => ({ ...current, messages: [...current.messages, { id: newId(), role: 'assistant', content: '', error: `Không thể kết nối AI Tutor: ${error.message}`, original: text }] })); }
     finally { setSending(false); }
   };

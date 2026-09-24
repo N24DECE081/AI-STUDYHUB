@@ -154,6 +154,23 @@ class Database:
         finally:
             conn.execute("PRAGMA foreign_keys = ON")
 
+    def _ensure_columns(self, conn: sqlite3.Connection) -> None:
+        """Thêm cột mới cho database đã tồn tại trước đó.
+
+        schema.sql chỉ dùng CREATE TABLE IF NOT EXISTS nên bảng cũ không tự có cột mới;
+        không có bước này thì người đã chạy StudyHub từ trước sẽ lỗi "no such column".
+        """
+        additions = {
+            'tutor_messages': {'payload': 'TEXT'},
+        }
+        for table, columns in additions.items():
+            existing = {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}
+            if not existing:
+                continue
+            for name, ddl in columns.items():
+                if name not in existing:
+                    conn.execute(f'ALTER TABLE {table} ADD COLUMN {name} {ddl}')
+
     def initialize(self) -> None:
         with self.connect() as conn:
             if self._needs_legacy_migration(conn):
@@ -161,6 +178,7 @@ class Database:
             else:
                 self._repair_legacy_foreign_keys(conn)
                 self._create_schema(conn)
+            self._ensure_columns(conn)
             conn.commit()
 
     def execute(self, sql: str, params: Iterable = ()) -> int:

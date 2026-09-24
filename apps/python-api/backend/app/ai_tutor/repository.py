@@ -12,6 +12,12 @@ def _row_to_dict(row) -> dict:
     return dict(row) if row is not None else {}
 
 
+def _decode_payload(raw) -> dict | None:
+    """Quiz sinh trong chat được lưu kèm tin nhắn để mở lại hội thoại vẫn bấm được."""
+    value = _loads(raw, None)
+    return value if isinstance(value, dict) and value.get('questions') else None
+
+
 def _loads(value, fallback):
     if not value:
         return fallback
@@ -38,10 +44,12 @@ def conversation_for(conn, user_id: int, client_key: str, *, mode: str = 'explai
     return conn.execute('SELECT * FROM tutor_conversations WHERE id=?', (cursor.lastrowid,)).fetchone()
 
 
-def add_message(conn, conversation_id: int, role: str, content: str, mode: str | None = None) -> int:
+def add_message(conn, conversation_id: int, role: str, content: str, mode: str | None = None,
+                payload: dict | None = None) -> int:
     cursor = conn.execute(
-        'INSERT INTO tutor_messages(conversation_id,role,content,mode) VALUES(?,?,?,?)',
-        (conversation_id, role, content, mode),
+        'INSERT INTO tutor_messages(conversation_id,role,content,mode,payload) VALUES(?,?,?,?,?)',
+        (conversation_id, role, content, mode,
+         json.dumps(payload, ensure_ascii=False) if payload else None),
     )
     conn.execute(
         'UPDATE tutor_conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?',
@@ -78,7 +86,7 @@ def conversations_for(conn, user_id: int, limit: int = 20, messages_each: int = 
     conversations = []
     for row in rows:
         messages = conn.execute(
-            'SELECT id, role, content, mode, created_at FROM tutor_messages WHERE conversation_id=? ORDER BY id LIMIT ?',
+            'SELECT id, role, content, mode, payload, created_at FROM tutor_messages WHERE conversation_id=? ORDER BY id LIMIT ?',
             (row['id'], messages_each),
         ).fetchall()
         conversations.append({
@@ -91,6 +99,7 @@ def conversations_for(conn, user_id: int, limit: int = 20, messages_each: int = 
                 'role': message['role'],
                 'content': message['content'],
                 'mode': message['mode'],
+                'quiz': _decode_payload(message['payload']),
                 'created_at': message['created_at'],
             } for message in messages],
         })

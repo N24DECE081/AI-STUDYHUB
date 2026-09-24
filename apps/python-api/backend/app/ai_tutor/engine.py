@@ -18,6 +18,25 @@ from collections import Counter
 from . import config
 
 MODES = ('explain', 'solve', 'hint', 'summarize', 'generate_quiz')
+# Chỉ dẫn hành vi cho từng chế độ. Khi Nova dùng model thật, chỉ gửi mỗi tên chế độ
+# ("chế độ hiện tại: hint") là không đủ — model vẫn đưa đáp án, nên mỗi chế độ nói rõ
+# nó muốn gì. Bản offline đã tự định tuyến sang compose_* riêng nên không cần phần này.
+MODE_INSTRUCTIONS = {
+    'explain': ('Nhiệm vụ của lượt này: GIẢI THÍCH. Nêu định nghĩa, bản chất và ví dụ minh hoạ cho khái niệm '
+                'người học hỏi. Không trình bày lời giải hoàn chỉnh cho một bài tập cụ thể; nếu câu hỏi kèm '
+                'bài tập, hãy giải thích kiến thức cần dùng rồi mời người học chuyển sang chế độ "Giải bài".'),
+    'solve': ('Nhiệm vụ của lượt này: GIẢI BÀI. Trình bày lời giải theo từng bước có đánh số, ở mỗi bước nêu '
+              'rõ quy tắc/công thức đang dùng và tính toán cụ thể, kết thúc bằng kết luận đáp án rõ ràng.'),
+    'hint': ('Nhiệm vụ của lượt này: GỢI Ý. TUYỆT ĐỐI KHÔNG đưa đáp án, đáp số, kết quả cuối hay lời giải '
+             'hoàn chỉnh — kể cả khi người học hỏi lại lần nữa, xin đáp án, nói "cứ giải đi" hoặc nói sẽ tự '
+             'làm. Chỉ được phép: nhắc lại dữ kiện đã cho, chỉ ra kiến thức/công thức cần dùng, nêu bước '
+             'tiếp theo cần làm, và hỏi ngược để người học tự đi tiếp. Kết thúc bằng một câu hỏi gợi mở.'),
+    'summarize': ('Nhiệm vụ của lượt này: TÓM TẮT. Bám sát ngữ cảnh tài liệu được cung cấp, trình bày theo '
+                  'mục ngắn gọn, không thêm kiến thức ngoài tài liệu; mục nào tài liệu không có thì ghi rõ '
+                  'là tài liệu chưa đề cập.'),
+    'generate_quiz': ('Nhiệm vụ của lượt này: TẠO QUIZ. Đặt 3-5 câu hỏi trắc nghiệm bám sát nội dung tài '
+                      'liệu, mỗi câu có 4 lựa chọn và đúng một đáp án; không bịa nội dung ngoài tài liệu.'),
+}
 LEVELS = ('beginner', 'intermediate', 'advanced')
 LEVEL_LABELS = {'beginner': 'mới bắt đầu', 'intermediate': 'trung bình', 'advanced': 'nâng cao'}
 PACE_LABELS = {'slow': 'chậm mà chắc', 'steady': 'đều đặn', 'fast': 'cấp tốc'}
@@ -1043,8 +1062,9 @@ class ProviderEngine:
         return (choices[0].get('message') or {}).get('content') or ''
 
     def answer(self, *, mode: str, question: str, context: str, history: list | None = None) -> str:
-        system = ('Bạn là Nova, gia sư AI của StudyHub. Trả lời bằng tiếng Việt, dùng Markdown gọn gàng, '
-                  f'chế độ hiện tại: {mode}. Ưu tiên ngữ cảnh tài liệu được cung cấp; nếu ngữ cảnh không có '
+        system = ('Bạn là Nova, gia sư AI của StudyHub. Trả lời bằng tiếng Việt, dùng Markdown gọn gàng. '
+                  f'{MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["explain"])} '
+                  'Ưu tiên ngữ cảnh tài liệu được cung cấp; nếu ngữ cảnh không có '
                   'thông tin cho câu hỏi, nói rõ là tài liệu chưa có phần đó rồi trả lời bằng kiến thức chung '
                   'và ghi chú rõ đó là kiến thức chung. Không bịa số liệu hay trích dẫn không có trong ngữ cảnh.')
         messages = [{'role': 'system', 'content': system}]
@@ -1070,7 +1090,11 @@ class ProviderEngine:
                         '"assessment": {"type": "short_answer", "max_score": 10}}]}\n'
                         'Mỗi module PHẢI có 2-4 lesson là object có "title"; không được để lessons rỗng '
                         'và không được trả lesson dạng chuỗi.'),
-            'quiz': 'Tạo quiz. Trả JSON với khoá questions (question, options, answer_index, max_score).',
+            'quiz': ('Tạo quiz trắc nghiệm bám sát tài liệu. Chỉ trả về JSON, không thêm chữ nào ngoài JSON. '
+                     'Cấu trúc bắt buộc: {"questions": [{"question": str, "options": [str, str, str, str], '
+                     '"answer_index": int (0..3, vị trí đáp án đúng), "max_score": int}], "topic": str}. '
+                     'Tạo 3-5 câu, mỗi câu ĐÚNG 4 lựa chọn; nội dung câu hỏi và lựa chọn phải lấy từ tài liệu, '
+                     'các lựa chọn sai phải hợp lý chứ không vô nghĩa.'),
         }
         text = self._chat([
             {'role': 'system', 'content': instructions.get(task, 'Trả về JSON hợp lệ.')},

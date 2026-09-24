@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
+import AITutorQuiz from './AITutorQuiz';
 
 // remark-gfm: model thật trả bảng markdown (| a | b |) rất thường xuyên.
 const REMARK_PLUGINS = [[remarkGfm, { singleTilde: false }], [remarkMath, { singleDollarTextMath: true }]];
@@ -38,6 +39,7 @@ export default function AITutorMessage({ message, onRetry }) {
     <div className="tutor-message-content">
       {message.error ? <><p className="tutor-error">{message.error}</p><button className="tutor-link" onClick={onRetry}>Thử lại</button></> : <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={MARKDOWN_COMPONENTS}>{message.content}</ReactMarkdown>}
     </div>
+    {message.quiz ? <AITutorQuiz quiz={message.quiz} /> : null}
     {message.role === 'assistant' && !message.error && <button className="tutor-copy" title="Sao chép câu trả lời" onClick={copy}>Sao chép</button>}
   </article>;
 }

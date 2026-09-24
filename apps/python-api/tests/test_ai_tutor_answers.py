@@ -30,7 +30,8 @@ for _name in ('DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'GROQ_
               'STUDYHUB_AI_PROVIDER', 'STUDYHUB_AI_API_KEY', 'STUDYHUB_AI_BASE_URL', 'STUDYHUB_AI_MODEL'):
     os.environ.pop(_name, None)
 
-from backend.app.ai_tutor import config, engine, grading, roadmap  # noqa: E402
+from backend.app.ai_tutor import config, engine, grading, roadmap, repository as tutor_store  # noqa: E402
+import server  # noqa: E402  (chat_quiz: chế độ Tạo quiz dựng câu hỏi có cấu trúc)
 
 DOCUMENT = (
     'Nhập môn Java: Kế thừa là cơ chế cho phép lớp con dùng lại thuộc tính và phương thức của lớp cha. '
@@ -599,6 +600,166 @@ class GradingWithModelTests(unittest.TestCase):
                                         answer_type='text', engine=engine.LocalEngine())
         self.assertGreater(result['score'], 0)
         self.assertIn(result['grade'], ('Excellent', 'Very Good', 'Good', 'Pass'))
+
+
+class ModeInstructionTests(unittest.TestCase):
+    """Chế độ chat phải khác nhau thật, không chỉ là cái nhãn.
+
+    Trước đây chỉ gửi 'chế độ hiện tại: hint' trong system prompt nên model vẫn đưa
+    đáp án, và ba chế độ Giải thích / Giải bài / Gợi ý cho ra câu trả lời gần như
+    giống nhau. Các ca dưới đây khoá lại: mỗi chế độ gửi một chỉ dẫn hành vi riêng.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.mock = MockProvider('Nội dung trả lời thử.')
+        cls.mock.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.mock.stop()
+
+    def system_prompt(self, mode):
+        provider = engine.ProviderEngine(base_url=f'http://127.0.0.1:{self.mock.port}/v1',
+                                         api_key='test-key-not-real', model='mock-model')
+        provider.answer(mode=mode, question='Stack là gì?', context=DOCUMENT)
+        return self.mock.requests[-1]['body']['messages'][0]['content']
+
+    def test_every_mode_sends_its_own_behaviour_instruction(self):
+        prompts = {mode: self.system_prompt(mode) for mode in engine.MODES}
+        self.assertEqual(len(set(prompts.values())), len(engine.MODES),
+                         'mỗi chế độ phải có chỉ dẫn riêng, không dùng chung một prompt')
+        self.assertIn('GIẢI THÍCH', prompts['explain'])
+        self.assertIn('GIẢI BÀI', prompts['solve'])
+        self.assertIn('GỢI Ý', prompts['hint'])
+        self.assertIn('TÓM TẮT', prompts['summarize'])
+        self.assertIn('TẠO QUIZ', prompts['generate_quiz'])
+
+    def test_hint_mode_forbids_handing_over_the_answer(self):
+        prompt = self.system_prompt('hint')
+        self.assertIn('KHÔNG đưa đáp án', prompt)
+        self.assertIn('hỏi ngược', prompt)
+        # chỉ dẫn của chế độ Giải bài không được lẫn sang chế độ Gợi ý
+        self.assertNotIn('kết luận đáp án rõ ràng', prompt)
+        self.assertNotIn('GIẢI BÀI', prompt)
+
+    def test_quiz_mode_asks_the_model_for_multiple_choice_questions(self):
+        prompt = self.system_prompt('generate_quiz')
+        self.assertIn('4 lựa chọn', prompt)
+        self.assertIn('đúng một đáp án', prompt)
+
+    def test_structured_quiz_request_asks_for_answer_index(self):
+        """Quiz của UI cần answer_index: model phải được yêu cầu đúng cấu trúc đó."""
+        reply = json.dumps({'topic': 'Stack', 'questions': [
+            {'question': 'Stack theo nguyên tắc nào?', 'options': ['LIFO', 'FIFO'],
+             'answer_index': 0, 'max_score': 10}]}, ensure_ascii=False)
+        mock = MockProvider(reply)
+        mock.start()
+        try:
+            provider = engine.ProviderEngine(base_url=f'http://127.0.0.1:{mock.port}/v1',
+                                             api_key='test-key-not-real', model='mock-model')
+            provider.complete_json(task='quiz', payload={'topic': 'Stack', 'context': DOCUMENT})
+        finally:
+            mock.stop()
+        prompt = mock.requests[-1]['body']['messages'][0]['content']
+        self.assertIn('answer_index', prompt)
+        self.assertIn('options', prompt)
+
+
+class ChatQuizTests(unittest.TestCase):
+    """Chế độ Tạo quiz trả câu hỏi CÓ CẤU TRÚC để UI bấm chọn, không phải văn bản."""
+
+    def test_offline_engine_still_builds_a_checkable_quiz(self):
+        quiz, topic = server.chat_quiz(engine.LocalEngine(), 'Stack', STACK_DOCUMENT)
+        self.assertIsNotNone(quiz, 'engine offline vẫn phải dựng được quiz từ tài liệu')
+        self.assertEqual(topic, 'Stack')
+        for question in quiz['questions']:
+            self.assertTrue(question['question'].strip())
+            self.assertGreaterEqual(len(question['options']), 2)
+            self.assertTrue(0 <= question['answer_index'] < len(question['options']))
+
+    def test_provider_quiz_json_is_normalised_and_broken_items_dropped(self):
+        reply = json.dumps({'topic': 'Stack và Queue', 'questions': [
+            {'question': 'Stack hoạt động theo nguyên tắc nào?',
+             'options': ['LIFO', 'FIFO', 'Ngẫu nhiên', 'Theo mức'], 'answer_index': 0, 'max_score': 10},
+            {'question': 'Câu chỉ có một lựa chọn', 'options': ['LIFO'], 'answer_index': 0, 'max_score': 10},
+            {'question': 'Đáp án trỏ ra ngoài danh sách', 'options': ['a', 'b'], 'answer_index': 7, 'max_score': 10},
+        ]})
+        mock = MockProvider(reply)
+        mock.start()
+        try:
+            provider = engine.ProviderEngine(base_url=f'http://127.0.0.1:{mock.port}/v1',
+                                             api_key='test-key-not-real', model='mock-model')
+            quiz, topic = server.chat_quiz(provider, 'Stack', STACK_DOCUMENT)
+        finally:
+            mock.stop()
+        self.assertEqual(topic, 'Stack và Queue')
+        self.assertIsNotNone(quiz)
+        self.assertEqual(len(quiz['questions']), 1, 'câu hỏi hỏng phải bị loại, không đẩy ra UI')
+        first = quiz['questions'][0]
+        self.assertEqual(first['options'][first['answer_index']], 'LIFO')
+
+    def test_unreachable_provider_returns_no_quiz_so_chat_falls_back(self):
+        provider = engine.ProviderEngine(base_url='http://127.0.0.1:9/v1', api_key='test-key-not-real',
+                                         model='mock-model', timeout=2)
+        quiz, _topic = server.chat_quiz(provider, 'Stack', STACK_DOCUMENT)
+        self.assertIsNone(quiz, 'provider lỗi thì route phải rơi về câu trả lời dạng văn bản')
+
+
+class QuizPersistenceTests(unittest.TestCase):
+    """Quiz phải mở lại được sau khi tải lại trang: lưu kèm tin nhắn trong DB."""
+
+    def setUp(self):
+        from backend.app.db.database import Database
+        self.tmp = tempfile.TemporaryDirectory()
+        self.database = Database(Path(self.tmp.name) / 'quiz.db')
+        self.database.initialize()
+        self.quiz = {'topic': 'Stack', 'questions': [
+            {'question': 'Queue lấy phần tử ra ở đâu?', 'options': ['Đầu hàng', 'Cuối hàng', 'Giữa', 'Ngẫu nhiên'],
+             'answer_index': 0, 'max_score': 10}]}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _user_and_conversation(self):
+        with self.database.connect() as conn:
+            user_id = conn.execute('INSERT INTO users(full_name,email,password_hash) VALUES(?,?,?)',
+                                   ('Người học', 'quiz@example.com', 'hash')).lastrowid
+            conversation = tutor_store.conversation_for(conn, int(user_id), 'client-quiz',
+                                                        mode='generate_quiz', title='Quiz')
+            conn.commit()
+        return int(user_id), int(conversation['id'])
+
+    def test_quiz_survives_a_reload(self):
+        user_id, conversation_id = self._user_and_conversation()
+        with self.database.connect() as conn:
+            tutor_store.add_message(conn, conversation_id, 'assistant', '## Quiz nhanh: Stack',
+                                    'generate_quiz', payload=self.quiz)
+            conn.commit()
+        with self.database.connect() as conn:
+            conversations = tutor_store.conversations_for(conn, user_id)
+        message = conversations[0]['messages'][0]
+        self.assertIsNotNone(message['quiz'], 'tải lại hội thoại vẫn phải có quiz để bấm')
+        self.assertEqual(message['quiz']['questions'][0]['options'][0], 'Đầu hàng')
+
+    def test_plain_answers_have_no_quiz_attached(self):
+        user_id, conversation_id = self._user_and_conversation()
+        with self.database.connect() as conn:
+            tutor_store.add_message(conn, conversation_id, 'assistant', 'Stack là LIFO.', 'explain')
+            conn.commit()
+        with self.database.connect() as conn:
+            conversations = tutor_store.conversations_for(conn, user_id)
+        self.assertIsNone(conversations[0]['messages'][0]['quiz'])
+
+    def test_payload_column_is_added_to_an_existing_database(self):
+        with self.database.connect() as conn:
+            conn.execute('ALTER TABLE tutor_messages DROP COLUMN payload')
+            conn.commit()
+            self.assertNotIn('payload', {row[1] for row in conn.execute('PRAGMA table_info(tutor_messages)')})
+        self.database.initialize()
+        with self.database.connect() as conn:
+            columns = {row[1] for row in conn.execute('PRAGMA table_info(tutor_messages)')}
+        self.assertIn('payload', columns, 'DB cũ phải được thêm cột khi khởi động lại')
 
 
 if __name__ == '__main__':
