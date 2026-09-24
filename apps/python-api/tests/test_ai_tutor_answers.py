@@ -638,10 +638,25 @@ class ModeInstructionTests(unittest.TestCase):
     def test_hint_mode_forbids_handing_over_the_answer(self):
         prompt = self.system_prompt('hint')
         self.assertIn('KHÔNG đưa đáp án', prompt)
-        self.assertIn('hỏi ngược', prompt)
+        self.assertIn('câu hỏi gợi mở', prompt)
+        # gợi ý phải ngắn và không được đưa ví dụ giải sẵn (ví dụ sẵn là để chép)
+        self.assertIn('NGẮN', prompt)
+        self.assertIn('KHÔNG đưa ví dụ đã giải sẵn', prompt)
         # chỉ dẫn của chế độ Giải bài không được lẫn sang chế độ Gợi ý
         self.assertNotIn('kết luận đáp án rõ ràng', prompt)
         self.assertNotIn('GIẢI BÀI', prompt)
+
+    def test_explain_and_hint_stop_overlapping(self):
+        """Hai chế độ từng cho ra câu trả lời na ná nhau: chốt lại ranh giới."""
+        explain = self.system_prompt('explain')
+        hint = self.system_prompt('hint')
+        # giải thích: được ví dụ mẫu nhưng bằng dữ liệu khác, và không hỏi ngược
+        self.assertIn('ví dụ minh hoạ đã giải', explain)
+        self.assertIn('KHÁC với bài', explain)
+        self.assertIn('Không kết thúc bằng câu hỏi', explain)
+        # gợi ý: không giảng lại khái niệm, chỉ dữ kiện + bước tiếp theo + câu hỏi
+        self.assertIn('Không giảng lại toàn bộ khái niệm', hint)
+        self.assertNotIn('ví dụ minh hoạ đã giải', hint)
 
     def test_quiz_mode_asks_the_model_for_multiple_choice_questions(self):
         prompt = self.system_prompt('generate_quiz')

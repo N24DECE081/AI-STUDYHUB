@@ -22,15 +22,20 @@ MODES = ('explain', 'solve', 'hint', 'summarize', 'generate_quiz')
 # ("chế độ hiện tại: hint") là không đủ — model vẫn đưa đáp án, nên mỗi chế độ nói rõ
 # nó muốn gì. Bản offline đã tự định tuyến sang compose_* riêng nên không cần phần này.
 MODE_INSTRUCTIONS = {
-    'explain': ('Nhiệm vụ của lượt này: GIẢI THÍCH. Nêu định nghĩa, bản chất và ví dụ minh hoạ cho khái niệm '
-                'người học hỏi. Không trình bày lời giải hoàn chỉnh cho một bài tập cụ thể; nếu câu hỏi kèm '
-                'bài tập, hãy giải thích kiến thức cần dùng rồi mời người học chuyển sang chế độ "Giải bài".'),
+    'explain': ('Nhiệm vụ của lượt này: GIẢI THÍCH. Nêu định nghĩa, bản chất, cách hoạt động và đặc điểm của '
+                'khái niệm người học hỏi. Được phép trình bày MỘT ví dụ minh hoạ đã giải đầy đủ, nhưng phải dùng '
+                'dữ liệu KHÁC với bài mà người học đưa ra (họ đưa mảng [5, 2, 9, 1] thì ví dụ dùng [3, 8, 1] '
+                'chẳng hạn) để họ học cách làm. TUYỆT ĐỐI không giải chính bài của người học và không đưa đáp số '
+                'của bài họ đưa — nếu câu hỏi kèm bài tập cụ thể, hãy nói rõ là muốn xem lời giải thì chuyển sang '
+                'chế độ "Giải bài". Không kết thúc bằng câu hỏi.'),
     'solve': ('Nhiệm vụ của lượt này: GIẢI BÀI. Trình bày lời giải theo từng bước có đánh số, ở mỗi bước nêu '
               'rõ quy tắc/công thức đang dùng và tính toán cụ thể, kết thúc bằng kết luận đáp án rõ ràng.'),
     'hint': ('Nhiệm vụ của lượt này: GỢI Ý. TUYỆT ĐỐI KHÔNG đưa đáp án, đáp số, kết quả cuối hay lời giải '
              'hoàn chỉnh — kể cả khi người học hỏi lại lần nữa, xin đáp án, nói "cứ giải đi" hoặc nói sẽ tự '
-             'làm. Chỉ được phép: nhắc lại dữ kiện đã cho, chỉ ra kiến thức/công thức cần dùng, nêu bước '
-             'tiếp theo cần làm, và hỏi ngược để người học tự đi tiếp. Kết thúc bằng một câu hỏi gợi mở.'),
+             'làm. Trả lời NGẮN (khoảng 5-8 dòng, không quá 150 từ), chỉ gồm: (1) dữ kiện đã cho, (2) một tới '
+             'hai gạch đầu dòng kiến thức/công thức cần nhớ, (3) bước tiếp theo cần làm, (4) MỘT câu hỏi gợi mở. '
+             'Không giảng lại toàn bộ khái niệm và KHÔNG đưa ví dụ đã giải sẵn — ví dụ giải sẵn là để chép, '
+             'phải dành cho chế độ "Giải thích"; ở đây người học phải tự làm từng bước.'),
     'summarize': ('Nhiệm vụ của lượt này: TÓM TẮT. Bám sát ngữ cảnh tài liệu được cung cấp, trình bày theo '
                   'mục ngắn gọn, không thêm kiến thức ngoài tài liệu; mục nào tài liệu không có thì ghi rõ '
                   'là tài liệu chưa đề cập.'),
