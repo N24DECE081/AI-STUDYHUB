@@ -39,6 +39,9 @@ def update_streak(conn, user_id: int) -> dict:
 
 
 def public_user(row) -> dict:
+    keys = set(row.keys())
+    first_name = (row["first_name"] or "").strip() if "first_name" in keys else ""
+    last_name = (row["last_name"] or "").strip() if "last_name" in keys else ""
     return {
         "id": row["id"],
         "name": row["full_name"],
@@ -47,6 +50,9 @@ def public_user(row) -> dict:
         "role": row["role"],
         "status": row["status"],
         "avatar_url": row["avatar_url"],
+        "first_name": first_name,
+        "last_name": last_name,
+        "profile_complete": bool(first_name and last_name),
     }
 
 

@@ -12,8 +12,10 @@ from email.policy import default
 
 from backend.app.db.runtime import get_runtime_database
 from backend.app.db.seed import seed as seed_database
-from backend.app.security import authenticate, register as register_user, current_user, revoke_session, SESSION_COOKIE
+from backend.app.security import authenticate, create_session, hash_password, register as register_user, current_user, public_user, revoke_session, SESSION_COOKIE
+from backend.app.security.service import update_streak
 from backend.app.security.session import token_hash
+from backend.app.security.oauth import OAuthError, authorization_url as oauth_authorization_url, exchange_profile as oauth_exchange_profile, provider_status as oauth_provider_status
 from backend.app.ai_tutor import (
     EngineError as TutorEngineError,
     GradingError as TutorGradingError,
@@ -82,7 +84,8 @@ AUTH_RATE_LIMIT=positive_int_env('STUDYHUB_AUTH_RATE_LIMIT_PER_MINUTE',10)
 AUTH_BURST=positive_int_env('STUDYHUB_AUTH_BURST',5)
 api_rate_limiter=TokenBucketRateLimiter(API_RATE_LIMIT,API_BURST)
 auth_rate_limiter=TokenBucketRateLimiter(AUTH_RATE_LIMIT,AUTH_BURST)
-ALLOWED_UPLOAD_EXTENSIONS={'.pdf','.txt','.md','.csv','.doc','.docx','.ppt','.pptx'}
+ALLOWED_UPLOAD_EXTENSIONS={'.pdf','.txt','.md','.mdf','.csv','.doc','.docx','.ppt','.pptx'}
+STUDY_HEARTBEAT_GRACE_SECONDS=30
 DEFAULT_CORS_ORIGINS={
  'http://localhost:5173','http://127.0.0.1:5173',
  'http://localhost:5174','http://127.0.0.1:5174',
@@ -132,6 +135,57 @@ def require_user(handler):
 def session_cookie(token, max_age=7 * 24 * 60 * 60):
     return f'{SESSION_COOKIE}={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'
 
+OAUTH_STATE_COOKIE='studyhub_oauth_state'
+
+def oauth_state_cookie(value, max_age=600):
+    return f'{OAUTH_STATE_COOKIE}={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'
+
+def oauth_frontend_url():
+    return os.environ.get('STUDYHUB_FRONTEND_URL','http://127.0.0.1:5173').strip().rstrip('/')
+
+def oauth_user_session(provider, profile):
+    with db() as c:
+        account=c.execute(
+            'SELECT user_id FROM oauth_accounts WHERE provider=? AND provider_user_id=?',
+            (provider,profile['provider_user_id']),
+        ).fetchone()
+        row=c.execute('SELECT * FROM users WHERE id=?',(account['user_id'],)).fetchone() if account else None
+        if not row:
+            row=c.execute('SELECT * FROM users WHERE email=?',(profile['email'],)).fetchone()
+        if not row:
+            full_name=profile['name'] if len(profile['name'])>=2 else 'StudyHub User'
+            user_id=c.execute(
+                'INSERT INTO users(full_name,email,password_hash,role,status,avatar_url) VALUES(?,?,?,?,?,?)',
+                (full_name,profile['email'],hash_password(secrets.token_urlsafe(32)),'student','active',profile['avatar_url'] or None),
+            ).lastrowid
+            row=c.execute('SELECT * FROM users WHERE id=?',(user_id,)).fetchone()
+        if row['status']!='active':
+            raise OAuthError('Tài khoản StudyHubAI đang bị khóa')
+        linked=c.execute(
+            'SELECT id FROM oauth_accounts WHERE provider=? AND provider_user_id=?',
+            (provider,profile['provider_user_id']),
+        ).fetchone()
+        if linked:
+            c.execute(
+                'UPDATE oauth_accounts SET user_id=?,provider_email=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                (row['id'],profile['email'],linked['id']),
+            )
+        else:
+            c.execute(
+                'INSERT INTO oauth_accounts(user_id,provider,provider_user_id,provider_email) VALUES(?,?,?,?)',
+                (row['id'],provider,profile['provider_user_id'],profile['email']),
+            )
+        if profile['avatar_url']:
+            c.execute('UPDATE users SET avatar_url=?,last_login_at=CURRENT_TIMESTAMP WHERE id=?',(profile['avatar_url'],row['id']))
+        else:
+            c.execute('UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?',(row['id'],))
+        update_streak(c,row['id'])
+        token,expires_at=create_session(c,row['id'])
+        c.commit()
+        fresh=c.execute('SELECT * FROM users WHERE id=?',(row['id'],)).fetchone()
+        user=public_user(fresh)
+    return user,token,expires_at
+
 def utc_stamp():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -156,7 +210,25 @@ def ensure_study_session(connection, user_id, token):
     row=connection.execute('SELECT * FROM study_sessions WHERE session_key=?',(key,)).fetchone()
     if row:
         if row['status']=='active':
-            connection.execute('UPDATE study_sessions SET last_seen_at=? WHERE id=?',(now,row['id']))
+            others=connection.execute(
+                'SELECT id,last_seen_at FROM study_sessions WHERE user_id=? AND status=? AND id<>?',
+                (user_id,'active',row['id']),
+            ).fetchall()
+            for other in others:
+                if elapsed_seconds(other['last_seen_at'],now)>STUDY_HEARTBEAT_GRACE_SECONDS:
+                    connection.execute(
+                        'UPDATE study_sessions SET ended_at=last_seen_at,status=? WHERE id=?',
+                        ('completed',other['id']),
+                    )
+            latest=connection.execute(
+                'SELECT MAX(last_seen_at) latest FROM study_sessions WHERE user_id=? AND status=?',
+                (user_id,'active'),
+            ).fetchone()['latest']
+            increment=min(elapsed_seconds(latest,now),STUDY_HEARTBEAT_GRACE_SECONDS)
+            connection.execute(
+                'UPDATE study_sessions SET last_seen_at=?,duration_seconds=duration_seconds+? WHERE id=?',
+                (now,increment,row['id']),
+            )
         connection.commit()
         return row['id']
     session_id=connection.execute(
@@ -173,7 +245,11 @@ def close_study_session(connection, token):
         'SELECT * FROM study_sessions WHERE session_key=? AND status=?',(key,'active')
     ).fetchone()
     if not row:return None
-    duration=elapsed_seconds(row['started_at'],now)
+    latest=connection.execute(
+        'SELECT MAX(last_seen_at) latest FROM study_sessions WHERE user_id=? AND status=?',
+        (row['user_id'],'active'),
+    ).fetchone()['latest']
+    duration=max(0,int(row['duration_seconds'] or 0))+min(elapsed_seconds(latest,now),STUDY_HEARTBEAT_GRACE_SECONDS)
     connection.execute(
         'UPDATE study_sessions SET last_seen_at=?,ended_at=?,duration_seconds=?,status=? WHERE id=?',
         (now,now,duration,'completed',row['id']),
@@ -187,21 +263,26 @@ def study_time_summary(connection, user_id, token):
         'SELECT id,session_key,started_at,last_seen_at,ended_at,duration_seconds,status '
         'FROM study_sessions WHERE user_id=? ORDER BY started_at DESC',(user_id,)
     ).fetchall()
-    total=0; current=0; history=[]
+    total=0; current=0; history=[]; active_rows=[]
     for row in rows:
         if row['status']=='active':
-            end=now if row['session_key']==current_key else row['last_seen_at']
-            seconds=elapsed_seconds(row['started_at'],end)
+            seconds=max(0,int(row['duration_seconds'] or 0))
+            active_rows.append(row)
         else:
             seconds=max(0,int(row['duration_seconds'] or 0))
         total+=seconds
-        if row['status']=='active' and row['session_key']==current_key:current=seconds
+        if row['status']=='active':current+=seconds
         if len(history)<10:
             history.append({
                 'id':row['id'],'started_at':row['started_at'],'ended_at':row['ended_at'],
                 'duration_seconds':seconds,'status':row['status'],
             })
-    return {'total_seconds':total,'current_session_seconds':current,'session_count':len(rows),'active':current_key is not None and any(row['status']=='active' and row['session_key']==current_key for row in rows),'sessions':history}
+    if active_rows:
+        latest=max(row['last_seen_at'] for row in active_rows)
+        live=min(elapsed_seconds(latest,now),STUDY_HEARTBEAT_GRACE_SECONDS)
+        total+=live; current+=live
+    active=current_key is not None and any(row['status']=='active' and row['session_key']==current_key for row in rows)
+    return {'total_seconds':total,'current_session_seconds':current,'session_count':len(rows),'active':active,'sessions':history}
 
 def document_text(row, connection=None):
     if connection is not None:
@@ -462,8 +543,20 @@ def extract_document_text(path):
     ext=os.path.splitext(path)[1].lower()
     if not os.path.exists(path):
         return ''
-    if ext in ('.txt','.md','.csv','.log'):
+    if ext in ('.txt','.md','.mdf','.csv','.log'):
         return open(path,'r',encoding='utf-8',errors='replace').read()
+    if ext=='.doc':
+        try:
+            raw=open(path,'rb').read()
+            candidates=[]
+            for encoding in ('utf-16le','windows-1252','latin-1'):
+                decoded=raw.decode(encoding,errors='ignore').replace('\x00',' ')
+                runs=re.findall(r'[A-Za-zÀ-ỹ0-9][A-Za-zÀ-ỹ0-9\s.,:;!?()/%+\-]{12,}',decoded)
+                text='\n'.join(re.sub(r'\s+',' ',run).strip() for run in runs)
+                if text:candidates.append(text)
+            return max(candidates,key=len,default='')
+        except OSError:
+            return ''
     if ext in ('.docx','.pptx'):
         try:
             with zipfile.ZipFile(path) as archive:
@@ -593,6 +686,10 @@ class H(BaseHTTPRequestHandler):
    for k,v in headers.items(): self.send_header(k,v)
   self.end_headers(); self.wfile.write(body)
  def json(self,obj,status=200,headers=None): self.send(status,json.dumps(obj,ensure_ascii=False).encode(),headers=headers)
+ def redirect(self,location,cookies=()):
+  self.send_response(302); self.send_header('Location',location); self.send_header('Cache-Control','no-store')
+  for cookie in cookies:self.send_header('Set-Cookie',cookie)
+  self.end_headers()
  def gateway_access(self):
   path=urlparse(self.path).path
   if path!='/api' and not path.startswith('/api/'): return True
@@ -646,12 +743,45 @@ class H(BaseHTTPRequestHandler):
  def do_GET(self):
   if not self.gateway_access(): return
   p=urlparse(self.path); path=p.path
+  if path=='/api/auth/oauth/status':return self.json({'providers':oauth_provider_status()})
+  oauth_start=re.fullmatch(r'/api/auth/oauth/(google|facebook)',path)
+  if oauth_start:
+   provider=oauth_start.group(1); state=secrets.token_urlsafe(32)
+   try:location=oauth_authorization_url(provider,state)
+   except OAuthError as error:return self.json({'error':str(error)},503)
+   return self.redirect(location,[oauth_state_cookie(f'{provider}:{state}')])
+  oauth_callback=re.fullmatch(r'/api/auth/oauth/(google|facebook)/callback',path)
+  if oauth_callback:
+   provider=oauth_callback.group(1); query=parse_qs(p.query); state=query.get('state',[''])[0]; code=query.get('code',[''])[0]
+   stored=cookie_value(self,OAUTH_STATE_COOKIE) or ''; expected=f'{provider}:{state}'
+   clear_state=oauth_state_cookie('',0)
+   if query.get('error'):
+    return self.redirect(f'{oauth_frontend_url()}/?oauth_error=access_denied',[clear_state])
+   if not state or not secrets.compare_digest(stored,expected):
+    return self.redirect(f'{oauth_frontend_url()}/?oauth_error=invalid_state',[clear_state])
+   if not code:
+    return self.redirect(f'{oauth_frontend_url()}/?oauth_error=missing_code',[clear_state])
+   try:
+    profile=oauth_exchange_profile(provider,code)
+    user,token,_=oauth_user_session(provider,profile)
+    with db() as c:ensure_study_session(c,user['id'],token)
+   except OAuthError:
+    return self.redirect(f'{oauth_frontend_url()}/?oauth_error=provider_failed',[clear_state])
+   except Exception as error:
+    self.log_error('OAuth callback failed: %r',error)
+    return self.redirect(f'{oauth_frontend_url()}/?oauth_error=server_failed',[clear_state])
+   return self.redirect(f'{oauth_frontend_url()}/?oauth=success',[clear_state,session_cookie(token)])
   if path in ('/api/me','/api/auth/me'):
    token=cookie_value(self,SESSION_COOKIE); user=user_from(self)
    if user and token:
     with db() as c:ensure_study_session(c,user['id'],token)
    return self.json({'user':user})
   if path=='/api/subjects':
+    scope=parse_qs(p.query).get('scope',['all'])[0]
+    if scope=='mine':
+     u=require_user(self)
+     if not u:return
+     c=db(); rows=[dict(r) for r in c.execute('SELECT * FROM subjects WHERE created_by=? ORDER BY name',(u['id'],))]; c.close(); return self.json(rows)
     c=db(); rows=[dict(r) for r in c.execute('SELECT * FROM subjects ORDER BY name')]; c.close(); return self.json(rows)
   if path=='/api/subscription':
    u=require_user(self)
@@ -666,7 +796,7 @@ class H(BaseHTTPRequestHandler):
   if path=='/api/documents':
    u=require_user(self)
    if not u:return
-   qs=parse_qs(p.query); q=qs.get('q',[''])[0]; sub=qs.get('subject',[''])[0]; c=db(); sql='SELECT d.*, d.original_filename AS file_name, d.storage_path AS file_path, d.uploaded_by AS uploader_id, s.code subject_code,s.name subject_name,u.full_name AS uploader FROM documents d JOIN subjects s ON s.id=d.subject_id JOIN users u ON u.id=d.uploaded_by WHERE d.uploaded_by=?'; args=[u['id']]
+   qs=parse_qs(p.query); q=qs.get('q',[''])[0]; sub=qs.get('subject',[''])[0]; c=db(); sql='SELECT d.*, d.original_filename AS file_name, d.storage_path AS file_path, d.uploaded_by AS uploader_id, s.code subject_code,s.name subject_name,u.full_name AS uploader, (SELECT substr(dc.content,1,320) FROM document_chunks dc WHERE dc.document_id=d.id ORDER BY dc.chunk_index LIMIT 1) AS content_preview FROM documents d JOIN subjects s ON s.id=d.subject_id JOIN users u ON u.id=d.uploaded_by WHERE d.uploaded_by=?'; args=[u['id']]
    if q: sql+=' AND (d.title LIKE ? OR d.description LIKE ?)'; args += [f'%{q}%',f'%{q}%']
    if sub: sql+=' AND s.code=?'; args.append(sub)
    sql+=' ORDER BY d.created_at DESC'; rows=[dict(r) for r in c.execute(sql,args)]; c.close(); return self.json(rows)
@@ -772,7 +902,7 @@ class H(BaseHTTPRequestHandler):
    if not os.path.exists(fp): c.close(); return self.json({'error':'file missing'},404)
    c.close()
    ext=os.path.splitext(r['original_filename'])[1].lower()
-   if ext not in ('.txt','.md','.csv','.log'):
+   if ext not in ('.txt','.md','.mdf','.csv','.log'):
     return self.send(302,b'',headers={'Location':f'/download/{r["id"]}?view=1'})
    content=html.escape(open(fp,'r',encoding='utf-8',errors='replace').read())
    page=f'''<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(r["original_filename"])}</title><style>body{{margin:0;background:#f4f6f8;color:#18212b;font:16px/1.75 "Segoe UI",Arial,sans-serif}}main{{max-width:920px;margin:40px auto;padding:32px 40px;background:#fff;border:1px solid #dfe4ea;border-radius:12px;box-shadow:0 12px 35px #17203318}}h1{{margin:0 0 22px;font-size:24px}}pre{{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:15px/1.8 "Cascadia Code","Segoe UI",monospace}}@media(max-width:600px){{main{{margin:0;border:0;border-radius:0;padding:22px}}}}</style></head><body><main><h1>{html.escape(r["original_filename"])}</h1><pre>{content}</pre></main></body></html>'''
@@ -1000,6 +1130,24 @@ class H(BaseHTTPRequestHandler):
    user, token, expires_at = result
    with db() as c:ensure_study_session(c,user['id'],token)
    return self.json({'ok':True,'user':user,'expires_at':expires_at},201,{'Set-Cookie':session_cookie(token)})
+  if path=='/api/profile':
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   if not isinstance(x,dict):return self.json({'error':'Dữ liệu hồ sơ không hợp lệ'},400)
+   first_name=str(x.get('first_name') or '').strip()
+   last_name=str(x.get('last_name') or '').strip()
+   if not 1<=len(first_name)<=60:return self.json({'error':'First name phải từ 1 đến 60 ký tự'},400)
+   if not 1<=len(last_name)<=60:return self.json({'error':'Last name phải từ 1 đến 60 ký tự'},400)
+   if any(char in first_name+last_name for char in '<>\r\n'):
+    return self.json({'error':'Tên chứa ký tự không hợp lệ'},400)
+   with db() as c:
+    c.execute('UPDATE users SET first_name=?,last_name=?,full_name=? WHERE id=?',
+              (first_name,last_name,f'{first_name} {last_name}',u['id']))
+    c.commit()
+    row=c.execute('SELECT * FROM users WHERE id=?',(u['id'],)).fetchone()
+    updated=public_user(row)
+   return self.json({'user':updated},200)
   if path=='/api/subjects':
    u=require_user(self)
    if not u:return
@@ -1015,7 +1163,7 @@ class H(BaseHTTPRequestHandler):
    if not 2 <= len(code) <= 12:return self.json({'error':'Mã môn học phải từ 2 đến 12 ký tự'},400)
    with db() as c:
     if c.execute('SELECT id FROM subjects WHERE code=?',(code,)).fetchone():return self.json({'error':'Mã môn học đã tồn tại'},409)
-    row=c.execute('INSERT INTO subjects(code,name,description) VALUES(?,?,?)',(code,name,description)).lastrowid
+    row=c.execute('INSERT INTO subjects(code,name,description,created_by) VALUES(?,?,?,?)',(code,name,description,u['id'])).lastrowid
     c.commit(); subject=c.execute('SELECT id,code,name,description FROM subjects WHERE id=?',(row,)).fetchone()
    return self.json(dict(subject),201)
   if path=='/api/subscription/checkout':
@@ -1375,7 +1523,7 @@ class H(BaseHTTPRequestHandler):
    safe=re.sub(r'[^A-Za-z0-9._-]','_',filename); stored=f'{secrets.token_hex(8)}_{safe}'
    target=os.path.join(UP,stored)
    ext=extension.lstrip('.')
-   mime={'.pdf':'application/pdf','.txt':'text/plain','.md':'text/markdown','.csv':'text/csv','.doc':'application/msword','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.ppt':'application/vnd.ms-powerpoint','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation'}.get(extension,'application/octet-stream')
+   mime={'.pdf':'application/pdf','.txt':'text/plain','.md':'text/markdown','.mdf':'text/markdown','.csv':'text/csv','.doc':'application/msword','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.ppt':'application/vnd.ms-powerpoint','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation'}.get(extension,'application/octet-stream')
    try:
     with open(target,'wb') as fh: fh.write(content)
     extracted_text=extract_document_text(target)
@@ -1395,7 +1543,7 @@ class H(BaseHTTPRequestHandler):
     c.close()
     if cleanup_errors: self.log_error('upload cleanup failed after %r: %r',error,cleanup_errors)
     if isinstance(error,DocumentTextError):
-     return self.json({'error':'Không đọc được nội dung chữ trong tài liệu. Hãy dùng PDF có text, DOCX, PPTX, TXT, MD hoặc CSV.'},422)
+     return self.json({'error':'Không đọc được nội dung chữ trong tài liệu. Hãy dùng PDF có text, Word, MD/MDF, TXT hoặc CSV.'},422)
     return self.json({'error':'Không thể lưu tài liệu'},500)
    c.close(); return self.json({'ok':True,'document_id':document_id,'status':'ready','chunk_count':chunk_count},201)
   return self.json({'error':'not found'},404)

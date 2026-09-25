@@ -113,6 +113,15 @@ class ServerIntegrationTest(unittest.TestCase):
         self.assertIsNotNone(cookie)
         self.assertEqual(body['user']['email'], email)
         self.assertNotIn('password_hash', body['user'])
+        self.assertFalse(body['user']['profile_complete'])
+        status,_,profile=self.request('/api/profile','POST',{
+            'first_name':'Minh','last_name':'Nguyen'
+        },{'Cookie':cookie.split(';',1)[0]})
+        self.assertEqual(status,200,profile)
+        self.assertEqual(profile['user']['first_name'],'Minh')
+        self.assertEqual(profile['user']['last_name'],'Nguyen')
+        self.assertEqual(profile['user']['email'],email)
+        self.assertTrue(profile['user']['profile_complete'])
         req=urllib.request.Request(f'http://127.0.0.1:{self.port}/api/me', headers={'Cookie':cookie.split(';',1)[0]})
         with urllib.request.urlopen(req, timeout=2) as r:
             me=json.loads(r.read())
@@ -125,6 +134,29 @@ class ServerIntegrationTest(unittest.TestCase):
         with urllib.request.urlopen(req, timeout=2) as r:
             me=json.loads(r.read())
         self.assertIsNone(me['user'])
+
+    def test_oauth_status_never_exposes_secrets(self):
+        status,_,body=self.request('/api/auth/oauth/status')
+        self.assertEqual(status,200,body)
+        self.assertEqual(set(body['providers']),{'google','facebook'})
+        self.assertNotIn('secret',json.dumps(body).lower())
+
+    def test_subject_categories_are_scoped_to_the_current_user(self):
+        student=self.login_cookie('student@studyhub.local','Student123!')
+        teacher=self.login_cookie('teacher@studyhub.local','Teacher123!')
+        code=f'U{time.time_ns()}'[-12:]
+        status,_,created=self.request('/api/subjects','POST',{
+            'name':'My private category','code':code,'description':'Only this user can list it'
+        },{'Cookie':student})
+        self.assertEqual(status,201,created)
+        status,_,student_subjects=self.request('/api/subjects?scope=mine',headers={'Cookie':student})
+        self.assertEqual(status,200,student_subjects)
+        self.assertIn(created['id'],[subject['id'] for subject in student_subjects])
+        status,_,teacher_subjects=self.request('/api/subjects?scope=mine',headers={'Cookie':teacher})
+        self.assertEqual(status,200,teacher_subjects)
+        self.assertNotIn(created['id'],[subject['id'] for subject in teacher_subjects])
+        status,_,unauthorized=self.request('/api/subjects?scope=mine')
+        self.assertEqual(status,401,unauthorized)
 
     def test_real_time_study_session_and_document_progress(self):
         email=f'progress_clock_{time.time_ns()}@example.com'
@@ -144,7 +176,8 @@ class ServerIntegrationTest(unittest.TestCase):
             'txt','text/plain',4,'uploads/progress.txt','ready','private'
         )).lastrowid
         connection.execute(
-            "UPDATE study_sessions SET started_at=datetime('now','-3665 seconds') "
+            "UPDATE study_sessions SET started_at=datetime('now','-3665 seconds'), "
+            "last_seen_at=CURRENT_TIMESTAMP,duration_seconds=3665 "
             "WHERE user_id=? AND status='active'",(user_id,)
         )
         connection.commit(); connection.close()
@@ -180,6 +213,28 @@ class ServerIntegrationTest(unittest.TestCase):
         connection.close()
         self.assertEqual(closed[0],'completed')
         self.assertGreaterEqual(closed[1],3665)
+
+    def test_parallel_tabs_do_not_double_count_study_time(self):
+        email=f'parallel_clock_{time.time_ns()}@example.com'
+        status,headers,body=self.request('/api/auth/register','POST',{
+            'name':'Parallel Clock','email':email,'password':'StrongPass123!'
+        })
+        self.assertEqual(status,201,body)
+        first_cookie=headers['Set-Cookie'].split(';',1)[0]
+        second_cookie=self.login_cookie(email,'StrongPass123!')
+        connection=sqlite3.connect(Path(self.tmp.name) / 'integration.db')
+        user_id=connection.execute('SELECT id FROM users WHERE email=?',(email,)).fetchone()[0]
+        connection.execute(
+            "UPDATE study_sessions SET last_seen_at=datetime('now','-10 seconds'),duration_seconds=0 "
+            "WHERE user_id=? AND status='active'",(user_id,)
+        )
+        connection.commit(); connection.close()
+        status,_,first=self.request('/api/study-time',headers={'Cookie':first_cookie})
+        self.assertEqual(status,200,first)
+        status,_,second=self.request('/api/study-time',headers={'Cookie':second_cookie})
+        self.assertEqual(status,200,second)
+        self.assertGreaterEqual(second['current_session_seconds'],10)
+        self.assertLessEqual(second['current_session_seconds'],12)
 
     def test_course_creation_and_progress_round_trip(self):
         student_cookie=self.login_cookie('student@studyhub.local','Student123!')
@@ -219,7 +274,7 @@ class ServerIntegrationTest(unittest.TestCase):
             (f'--{boundary}\r\nContent-Disposition: form-data; name="title"\r\n\r\nStudent upload\r\n').encode(),
             (f'--{boundary}\r\nContent-Disposition: form-data; name="subject_id"\r\n\r\n{subject_id}\r\n').encode(),
             (f'--{boundary}\r\nContent-Disposition: form-data; name="description"\r\n\r\nUploaded by student\r\n').encode(),
-            (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="student.txt"\r\nContent-Type: text/plain\r\n\r\nstudent file\r\n').encode(),
+            (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="student.mdf"\r\nContent-Type: text/markdown\r\n\r\nstudent file\r\n').encode(),
             f'--{boundary}--\r\n'.encode(),
         ]
         req=urllib.request.Request(f'http://127.0.0.1:{self.port}/api/upload', data=b''.join(fields), headers={'Content-Type':f'multipart/form-data; boundary={boundary}','Cookie':cookie}, method='POST')
@@ -246,6 +301,10 @@ class ServerIntegrationTest(unittest.TestCase):
         self.assertEqual(status,200,content)
         self.assertEqual(content['content'],'student file')
         self.assertEqual(content['display_mode'],'plain_text')
+        status,_,documents=self.request('/api/documents',headers={'Cookie':cookie})
+        self.assertEqual(status,200,documents)
+        listed=next(item for item in documents if item['id']==uploaded['document_id'])
+        self.assertEqual(listed['content_preview'],'student file')
         status,_,tutor_result=self.request('/api/ai-tutor/chat','POST',{
             'conversation_id':f'auto-progress-{time.time_ns()}',
             'message':'Giải thích nội dung student file','mode':'explain',

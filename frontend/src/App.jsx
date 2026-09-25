@@ -4,9 +4,12 @@ import {
   checkoutSubscription,
   cancelSubscription,
   createSubject,
+  deleteDocument,
   getCurrentUser,
   getDocumentContent,
   getDocuments,
+  getOAuthLoginUrl,
+  getOAuthStatus,
   getProgress,
   getStudyTime,
   getStreak,
@@ -16,6 +19,7 @@ import {
   logout as apiLogout,
   register,
   uploadDocument,
+  updateProfile,
 } from "./api";
 import AITutorPage from "./components/ai-tutor/AITutorPage";
 import AIAssistant from "./components/AIAssistant/AIAssistant";
@@ -30,12 +34,14 @@ import {
   CheckIcon,
   CloudArrowUpIcon,
   FireIcon,
+  LockClosedIcon,
   MagnifyingGlassIcon,
   PlusIcon,
   BoltIcon,
   RectangleStackIcon,
   XMarkIcon,
   SparklesIcon,
+  TrashIcon,
 } from "@heroicons/react/24/outline";
 
 const PLANS = {
@@ -95,6 +101,8 @@ const PLANS = {
   },
 };
 
+const PROTECTED_VIEWS = new Set(["library", "quiz", "roadmap", "dashboard", "tutor"]);
+
 const EMPTY_STUDY_TIME = {
   total_seconds: 0,
   current_session_seconds: 0,
@@ -107,14 +115,6 @@ function formatStudyDuration(totalSeconds) {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return hours ? `${hours} giờ ${remainingMinutes} phút` : `${minutes} phút`;
-}
-
-function formatStudyClock(totalSeconds) {
-  const seconds = Math.max(0, Math.floor(totalSeconds));
-  const hours = String(Math.floor(seconds / 3600)).padStart(2, "0");
-  const minutes = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
-  const remainingSeconds = String(seconds % 60).padStart(2, "0");
-  return `${hours}:${minutes}:${remainingSeconds}`;
 }
 
 function mapDocumentProgress(result) {
@@ -182,10 +182,10 @@ function StreakCard({ user, streak, onLogin }) {
   );
 }
 
-function Modal({ title, children, onClose, icon, subtitle, className = "" }) {
+function Modal({ title, children, onClose, icon, subtitle, className = "", backdropClassName = "", hideHeader = false }) {
   const isCheckout = title === "Xác nhận thay đổi gói";
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
+    <div className={`modal-backdrop ${backdropClassName}`.trim()} onMouseDown={onClose}>
       <section
         className={`modal ${isCheckout ? "checkout-modal" : ""} ${icon ? "modal-with-icon" : ""} ${className}`.trim()}
         role="dialog"
@@ -193,7 +193,8 @@ function Modal({ title, children, onClose, icon, subtitle, className = "" }) {
         aria-labelledby="modal-heading-title"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <header>
+        {hideHeader && <h2 id="modal-heading-title" className="sr-only">{title}</h2>}
+        {!hideHeader && <header>
           <div className="modal-heading">
             {icon && (
               <span className="modal-icon-badge" aria-hidden="true">
@@ -210,7 +211,7 @@ function Modal({ title, children, onClose, icon, subtitle, className = "" }) {
           <button aria-label="Đóng" onClick={onClose}>
             ×
           </button>
-        </header>
+        </header>}
         {isCheckout && (
           <div className="checkout-banner">
             <strong>Thanh toán minh bạch</strong>
@@ -289,6 +290,10 @@ export default function App() {
   });
   const [modal, setModal] = useState(null);
   const [authMode, setAuthMode] = useState("login");
+  const [authStep, setAuthStep] = useState("signin");
+  const [authNotice, setAuthNotice] = useState("");
+  const [pendingAuthUser, setPendingAuthUser] = useState(null);
+  const [oauthStatus, setOAuthStatus] = useState({ google: false, facebook: false });
   const [toast, setToast] = useState("");
   const [selectedDocument, setSelectedDocument] = useState(null);
   const [documentPreview, setDocumentPreview] = useState(null);
@@ -429,12 +434,32 @@ export default function App() {
       window.clearInterval(sync);
     };
   }, [userKey]);
+  useEffect(() => {
+    if (!userKey || view !== "library") return;
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      const [documentResult, progressResult] = await Promise.allSettled([getDocuments(), getProgress()]);
+      if (!active) return;
+      if (documentResult.status === "fulfilled") setDocuments(documentResult.value);
+      if (progressResult.status === "fulfilled") setProgress(mapDocumentProgress(progressResult.value));
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [userKey, view]);
   useRevealOnScroll(`${view}-${documents.length}-${quizDecks.length}`);
   useEffect(() => {
     let active = true;
     getCurrentUser()
       .then((result) => {
-        if (active && result.user) saveUser(result.user);
+        if (active && result.user?.profile_complete) saveUser(result.user);
+        if (active && result.user && !result.user.profile_complete) {
+          saveUser(null);
+          setPendingAuthUser(result.user);
+          setAuthStep("profile");
+          setModal("auth");
+        }
         if (active && !result.user) saveUser(null);
       })
       .catch(() => {
@@ -444,15 +469,53 @@ export default function App() {
       active = false;
     };
   }, []);
+  useEffect(() => {
+    if (modal !== "auth" || authStep !== "signin") return undefined;
+    let active = true;
+    getOAuthStatus()
+      .then((result) => {
+        if (!active) return;
+        setOAuthStatus({
+          google: Boolean(result.providers?.google?.configured),
+          facebook: Boolean(result.providers?.facebook?.configured),
+        });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [modal, authStep]);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const oauthError = params.get("oauth_error");
+    if (!oauthError) return;
+    window.history.replaceState({}, "", window.location.pathname);
+    const timer = window.setTimeout(() => {
+      setAuthMode("login");
+      setAuthStep("signin");
+      setAuthNotice(
+        oauthError === "access_denied"
+          ? "Bạn đã hủy quyền đăng nhập Google/Facebook."
+          : "Đăng nhập Google/Facebook chưa thành công. Hãy kiểm tra cấu hình callback và thử lại.",
+      );
+      setModal("auth");
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const openAuth = (mode = "login", notice = "") => {
+    setAuthMode(mode);
+    setAuthStep("signin");
+    setAuthNotice(notice);
+    setPendingAuthUser(null);
+    setModal("auth");
+  };
   const requireLogin = () => {
     if (user) return false;
-    setAuthMode("login");
-    setModal("auth");
-    notify("Đăng nhập để dùng tính năng cá nhân.");
+    openAuth("login", "Bạn cần đăng nhập để sử dụng dịch vụ này.");
     return true;
   };
   const go = (next) => {
-    if (next === "tutor" && requireLogin()) return;
+    if (PROTECTED_VIEWS.has(next) && requireLogin()) return;
     if (next === "dashboard" && user) void loadProgress();
     setView(next);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -495,13 +558,14 @@ export default function App() {
   const submitAuth = async (event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    const email = String(data.get("email") || "").trim();
     try {
       const result =
         authMode === "login"
-          ? await login(data.get("email"), data.get("password"))
+          ? await login(email, data.get("password"))
           : await register(
-              data.get("name"),
-              data.get("email"),
+              email.split("@")[0].replace(/[._-]+/g, " ").trim() || "StudyHub User",
+              email,
               data.get("password"),
             );
       // Clear old user's data first before saving new user
@@ -510,18 +574,58 @@ export default function App() {
       setStudyTime(EMPTY_STUDY_TIME);
       setSubjects([]);
       setSubscription({ plan: "free", status: "active" });
-      // Now save the new user (this triggers effect to load their data)
-      saveUser(result.user || result);
-      if (result.user?.streak) setStreak(result.user.streak);
-      setModal(null);
-      notify(
-        authMode === "login"
-          ? "Đăng nhập thành công."
-          : "Tạo tài khoản thành công.",
-      );
+      const authenticatedUser = result.user || result;
+      if (authenticatedUser.streak) setStreak(authenticatedUser.streak);
+      if (authenticatedUser.profile_complete) {
+        saveUser(authenticatedUser);
+        setAuthNotice("");
+        setModal(null);
+        notify("Đăng nhập thành công.");
+      } else {
+        setPendingAuthUser(authenticatedUser);
+        setAuthStep("profile");
+      }
     } catch (error) {
       notify(`Không thể thực hiện: ${error.message}`);
     }
+  };
+  const submitProfile = async (event) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    try {
+      const result = await updateProfile({
+        firstName: String(data.get("firstName") || "").trim(),
+        lastName: String(data.get("lastName") || "").trim(),
+      });
+      saveUser(result.user);
+      setPendingAuthUser(null);
+      setAuthStep("signin");
+      setAuthNotice("");
+      setModal(null);
+      notify("Đã hoàn tất hồ sơ StudyHubAI.");
+    } catch (error) {
+      notify(`Không thể cập nhật hồ sơ: ${error.message}`);
+    }
+  };
+  const closeAuth = async () => {
+    if (pendingAuthUser) {
+      try {
+        await apiLogout();
+      } catch {
+        /* The incomplete local session is still cleared from the UI. */
+      }
+    }
+    setPendingAuthUser(null);
+    setAuthStep("signin");
+    setAuthNotice("");
+    setModal(null);
+  };
+  const chooseOAuth = (provider) => {
+    if (!oauthStatus[provider]) {
+      notify(`Đăng nhập ${provider === "google" ? "Google" : "Facebook"} chưa được cấu hình Client ID/Secret.`);
+      return;
+    }
+    window.location.assign(getOAuthLoginUrl(provider));
   };
   const submitUpload = async (event) => {
     event.preventDefault();
@@ -532,8 +636,8 @@ export default function App() {
     const extension = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
     if (!title) return notify("Tiêu đề tài liệu không được để trống.");
     if (file.size === 0) return notify("File không được rỗng.");
-    if (file.size > 10 * 1024 * 1024) return notify("File tối đa 10MB.");
-    if (![".pdf", ".txt", ".md", ".csv", ".doc", ".docx", ".ppt", ".pptx"].includes(extension)) {
+    if (file.size > 20 * 1024 * 1024) return notify("File tối đa 20MB.");
+    if (![".pdf", ".txt", ".md", ".mdf", ".csv", ".doc", ".docx"].includes(extension)) {
       return notify("Định dạng file chưa được hỗ trợ.");
     }
     try {
@@ -548,6 +652,19 @@ export default function App() {
       notify("Đã tải tài liệu vào kho học liệu.");
     } catch (error) {
       notify(`Upload thất bại: ${error.message}`);
+    }
+  };
+  const removeLibraryDocument = async (event, document) => {
+    event.stopPropagation();
+    if (!window.confirm(`Xóa “${document.title}” khỏi kho học liệu?`)) return;
+    try {
+      await deleteDocument(document.id);
+      if (String(documentPreview?.document?.id) === String(document.id)) closeDocumentPreview();
+      setSelectedDocument((current) => String(current?.id) === String(document.id) ? null : current);
+      await loadDocumentsAndProgress();
+      notify("Đã xóa tài liệu và dữ liệu liên quan.");
+    } catch (error) {
+      notify(`Không thể xóa tài liệu: ${error.message}`);
     }
   };
   const submitSubject = async (event) => {
@@ -672,19 +789,13 @@ export default function App() {
             <>
               <button
                 className="btn btn-ghost"
-                onClick={() => {
-                  setAuthMode("login");
-                  setModal("auth");
-                }}
+                onClick={() => openAuth("login")}
               >
                 Đăng nhập
               </button>
               <button
                 className="btn btn-primary"
-                onClick={() => {
-                  setAuthMode("register");
-                  setModal("auth");
-                }}
+                onClick={() => openAuth("register")}
               >
                 Bắt đầu
               </button>
@@ -765,10 +876,7 @@ export default function App() {
             <StreakCard
               user={user}
               streak={streak}
-              onLogin={() => {
-                setAuthMode("login");
-                setModal("auth");
-              }}
+              onLogin={() => openAuth("login")}
             />
             <section className="content-section">
               <span className="eyebrow">WORKFLOW CÁ NHÂN</span>
@@ -879,7 +987,7 @@ export default function App() {
                 >
                   <span>{doc.subject_code || "DOC"}</span>
                   <h3>{doc.title}</h3>
-                  <p>{doc.description || "Tài liệu chưa có mô tả."}</p>
+                  <p>{doc.content_preview || doc.description || "Tài liệu chưa có nội dung xem trước."}</p>
                   <div className="document-card-actions">
                     <button
                       className="text-link document-view-link"
@@ -899,6 +1007,15 @@ export default function App() {
                       }}
                     >
                       Hỏi Nova →
+                    </button>
+                    <button
+                      type="button"
+                      className="document-delete-button"
+                      title={`Xóa ${doc.title}`}
+                      aria-label={`Xóa ${doc.title}`}
+                      onClick={(event) => removeLibraryDocument(event, doc)}
+                    >
+                      <TrashIcon aria-hidden="true" />
                     </button>
                   </div>
                 </article>
@@ -974,8 +1091,8 @@ export default function App() {
               </div>
               <div className="stat-box blue">
                 <span>Thời gian học</span>
-                <strong className="study-time-value">{formatStudyDuration(studyTime.total_seconds)}</strong>
-                <small>Phiên hiện tại: {formatStudyClock(studyTime.current_session_seconds)}</small>
+                <strong className="study-time-value">{formatStudyDuration(studyTime.current_session_seconds)}</strong>
+                <small>Tổng thời gian: {formatStudyDuration(studyTime.total_seconds)}</small>
               </div>
               <div className="stat-box dark">
                 <span>Tài liệu</span>
@@ -1151,39 +1268,88 @@ export default function App() {
       )}
       {modal === "auth" && (
         <Modal
-          title={authMode === "login" ? "Đăng nhập StudyHub" : "Tạo tài khoản"}
-          onClose={() => setModal(null)}
+          title={authStep === "profile" ? "Complete your profile" : "Welcome to StudyHubAI"}
+          onClose={closeAuth}
+          className="auth-welcome-modal"
+          backdropClassName="auth-welcome-backdrop"
+          hideHeader
         >
-          <form className="auth-form" onSubmit={submitAuth}>
-            {authMode === "register" && (
-              <label>
-                Họ tên
-                <input name="name" required />
-              </label>
-            )}
-            <label>
-              Email
-              <input name="email" type="email" required />
-            </label>
-            <label>
-              Mật khẩu
-              <input name="password" type="password" minLength="6" required />
-            </label>
-            <button className="btn btn-primary full">
-              {authMode === "login" ? "Đăng nhập" : "Tạo tài khoản"}
-            </button>
-            <button
-              type="button"
-              className="text-link"
-              onClick={() =>
-                setAuthMode(authMode === "login" ? "register" : "login")
-              }
-            >
-              {authMode === "login"
-                ? "Chưa có tài khoản? Đăng ký"
-                : "Đã có tài khoản? Đăng nhập"}
-            </button>
-          </form>
+          <button
+            type="button"
+            className="auth-close-button"
+            aria-label="Đóng"
+            onClick={closeAuth}
+          >
+            <XMarkIcon aria-hidden="true" />
+          </button>
+          {authStep === "signin" ? (
+            <div className="auth-welcome">
+              {authNotice && (
+                <div className="auth-required-notice" role="status">
+                  <LockClosedIcon aria-hidden="true" />
+                  <div>
+                    <strong>Yêu cầu đăng nhập</strong>
+                    <p>{authNotice}</p>
+                  </div>
+                </div>
+              )}
+              <div className="auth-welcome-heading">
+                <h1>Welcome to StudyHubAI</h1>
+                <p>Your personal AI learning workspace</p>
+              </div>
+              <div className="oauth-actions">
+                <button type="button" className="oauth-button oauth-google" onClick={() => chooseOAuth("google")}>
+                  <span className="oauth-symbol" aria-hidden="true">G</span>
+                  Continue with Google
+                </button>
+                <button type="button" className="oauth-button oauth-facebook" onClick={() => chooseOAuth("facebook")}>
+                  <span className="oauth-symbol" aria-hidden="true">f</span>
+                  Continue with Facebook
+                </button>
+              </div>
+              <div className="auth-divider" aria-hidden="true"><span>OR</span></div>
+              <form className="auth-login-form" onSubmit={submitAuth}>
+                <label className="sr-only" htmlFor="auth-email">Gmail hoặc email</label>
+                <input id="auth-email" name="email" type="email" placeholder="Enter your Gmail or email..." autoComplete="email" required />
+                <label className="sr-only" htmlFor="auth-password">Mật khẩu</label>
+                <input id="auth-password" name="password" type="password" placeholder="Password" autoComplete={authMode === "login" ? "current-password" : "new-password"} minLength="6" required />
+                <button className="auth-continue-button">
+                  {authMode === "login" ? "Continue" : "Create account"}
+                </button>
+              </form>
+              <button
+                type="button"
+                className="auth-mode-switch"
+                onClick={() => setAuthMode(authMode === "login" ? "register" : "login")}
+              >
+                {authMode === "login" ? "New to StudyHubAI? Create an account" : "Already have an account? Sign in"}
+              </button>
+            </div>
+          ) : (
+            <div className="auth-profile-step">
+              <div className="auth-welcome-heading">
+                <h1>Complete your profile</h1>
+                <p>Tell us your name to finish setting up StudyHubAI.</p>
+              </div>
+              <form className="auth-profile-form" onSubmit={submitProfile}>
+                <div className="auth-name-grid">
+                  <label>
+                    First name
+                    <input name="firstName" autoComplete="given-name" maxLength="60" required autoFocus />
+                  </label>
+                  <label>
+                    Last name
+                    <input name="lastName" autoComplete="family-name" maxLength="60" required />
+                  </label>
+                </div>
+                <label>
+                  Gmail / Email
+                  <input value={pendingAuthUser?.email || ""} type="email" readOnly aria-readonly="true" />
+                </label>
+                <button className="auth-continue-button">Continue to StudyHubAI</button>
+              </form>
+            </div>
+          )}
         </Modal>
       )}
       {modal === "upload" && (
@@ -1225,9 +1391,10 @@ export default function App() {
                 id="upload-file"
                 name="file"
                 type="file"
-                accept=".pdf,.txt,.md,.csv,.doc,.docx,.ppt,.pptx"
+                accept=".pdf,.doc,.docx,.md,.mdf,.txt,.csv"
                 required
               />
+              <small className="upload-file-help">PDF, Word, MD/MDF · tối đa 20MB</small>
               <label htmlFor="upload-subject">
                 Môn học <span className="required-mark">*</span>
               </label>

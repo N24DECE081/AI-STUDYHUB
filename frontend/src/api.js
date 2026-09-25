@@ -51,7 +51,11 @@ export const register = (name, email, password) =>
   });
 export const logout = () => request("/auth/logout", { method: "POST" });
 export const getCurrentUser = () => request("/me");
-export const getSubjects = () => request("/subjects");
+export const getOAuthStatus = () => request("/auth/oauth/status");
+export const getOAuthLoginUrl = (provider) => `${apiBase}/auth/oauth/${encodeURIComponent(provider)}`;
+export const updateProfile = ({ firstName, lastName }) =>
+  postJson("/profile", { first_name: firstName, last_name: lastName });
+export const getSubjects = () => request("/subjects?scope=mine");
 export const createSubject = ({ name, code, description }) =>
   request("/subjects", {
     method: "POST",

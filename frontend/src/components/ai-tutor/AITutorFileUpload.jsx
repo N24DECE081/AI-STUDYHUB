@@ -6,7 +6,7 @@ export default function AITutorFileUpload({ onUpload, disabled, files, onRemove,
   const activeFileCount = files.filter((file) => !file.error).length;
   const atLimit = activeFileCount >= maxFiles;
   return <div className="tutor-file-upload">
-    <input ref={inputRef} type="file" hidden accept=".pdf,.txt,.md,.csv,.docx,.pptx" onChange={(event) => {
+    <input ref={inputRef} type="file" hidden accept=".pdf,.doc,.docx,.md,.mdf,.txt,.csv" onChange={(event) => {
       const file = event.target.files?.[0];
       if (file && !atLimit) onUpload(file);
       event.target.value = '';

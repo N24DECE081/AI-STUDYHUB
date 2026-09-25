@@ -122,6 +122,8 @@ class Database:
                 mime = {
                     ".pdf": "application/pdf",
                     ".txt": "text/plain",
+                    ".md": "text/markdown",
+                    ".mdf": "text/markdown",
                     ".doc": "application/msword",
                     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     ".ppt": "application/vnd.ms-powerpoint",
@@ -162,6 +164,8 @@ class Database:
         """
         additions = {
             'tutor_messages': {'payload': 'TEXT'},
+            'users': {'first_name': 'TEXT', 'last_name': 'TEXT'},
+            'subjects': {'created_by': 'INTEGER REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE'},
         }
         for table, columns in additions.items():
             existing = {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}

@@ -183,6 +183,11 @@
 .document-card-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:auto}
 .document-card-actions .text-link{display:inline-flex;align-items:center;gap:5px}
 .document-card-actions svg{width:16px;height:16px}
+.document-card-clickable>p{display:-webkit-box;min-height:3.1em;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.document-delete-button{display:grid;place-items:center;flex:none;width:32px;height:32px;padding:0;border:1px solid #f1c8cd;border-radius:8px;background:#fff;color:#c72f3b;cursor:pointer}
+.document-delete-button:hover{background:#fff0f1;border-color:#e78e97}
+.document-delete-button svg{width:16px;height:16px}
+.upload-file-help{color:#718198;font-size:11px;line-height:1.4}
 .document-preview-modal{width:min(960px,calc(100vw - 30px));max-width:960px;height:min(82dvh,820px);display:flex;flex-direction:column;overflow:hidden}
 .document-preview-modal>header{flex:none;padding-bottom:14px;border-bottom:1px solid #e2e8f1}
 .document-preview-meta{display:flex;flex-wrap:wrap;gap:7px;padding:12px 0}
@@ -200,4 +205,70 @@
   .document-preview-modal{width:calc(100vw - 20px);height:calc(100dvh - 20px);padding:16px}
   .document-preview-body pre{padding:16px;font-size:13px}
   .document-preview-actions .btn{flex:1}
+}
+
+/* Focused sign-in flow. OAuth credentials are configured by the backend. */
+.auth-welcome-backdrop{padding:28px;background:#fff;overflow:auto}
+.auth-welcome-modal{position:relative;width:min(100%,380px);max-width:380px;max-height:none;padding:0;border:0;border-radius:0;background:#fff;color:#111827;box-shadow:none;overflow:visible}
+.auth-close-button{position:fixed;top:22px;right:25px;display:grid;place-items:center;width:38px;height:38px;padding:0;border:0;border-radius:8px;background:#f3f4f6;color:#4b5563;cursor:pointer}
+.auth-close-button:hover{background:#e5e7eb;color:#111827}
+.auth-close-button svg{width:20px;height:20px}
+.auth-welcome,.auth-profile-step{display:grid;gap:22px;width:100%}
+.auth-required-notice{display:flex;align-items:flex-start;gap:11px;padding:13px 14px;border:1px solid #cbdcf6;border-radius:8px;background:#f2f7ff;color:#183b6b}
+.auth-required-notice>svg{flex:none;width:20px;height:20px;margin-top:1px;color:#2563a8}
+.auth-required-notice strong{display:block;font-size:13px}
+.auth-required-notice p{margin:3px 0 0;color:#506987;font-size:12px;line-height:1.45}
+.auth-welcome-heading{text-align:center}
+.auth-welcome-heading h1{margin:0;color:#111827;font:700 28px/1.2 'Poppins',sans-serif;letter-spacing:0}
+.auth-welcome-heading p{margin:7px 0 0;color:#8a8f98;font-size:14px;line-height:1.5}
+.oauth-actions{display:grid;gap:10px}
+.oauth-button,.auth-continue-button{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:44px;padding:0 42px;border:0;border-radius:8px;font-size:14px;font-weight:700;letter-spacing:0;cursor:pointer}
+.oauth-google{background:#202124;color:#fff}
+.oauth-google:hover{background:#090a0b}
+.oauth-facebook{background:#1877f2;color:#fff}
+.oauth-facebook:hover{background:#0f66d5}
+.oauth-symbol{position:absolute;left:15px;display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#fff;color:#202124;font:800 13px/1 Arial,sans-serif}
+.oauth-facebook .oauth-symbol{color:#1877f2;font-size:17px}
+.auth-divider{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;color:#9298a1;font-size:11px;font-weight:700}
+.auth-divider:before,.auth-divider:after{content:"";height:1px;background:#e5e7eb}
+.auth-login-form,.auth-profile-form{display:grid;gap:11px;margin:0}
+.auth-login-form input,.auth-profile-form input{width:100%;height:44px;box-sizing:border-box;padding:0 13px;border:1px solid #e5e7eb;border-radius:8px;outline:0;background:#f5f5f5;color:#111827;font-size:14px;letter-spacing:0}
+.auth-login-form input:focus,.auth-profile-form input:focus{border-color:#111827;background:#fff;box-shadow:0 0 0 3px rgba(17,24,39,.08)}
+.auth-profile-form label{display:grid;gap:7px;color:#374151;font-size:12px;font-weight:700}
+.auth-profile-form input[readonly]{background:#eef0f3;color:#6b7280;cursor:default}
+.auth-continue-button{background:#111827;color:#fff}
+.auth-continue-button:hover{background:#000}
+.auth-mode-switch{justify-self:center;padding:2px 4px;border:0;background:transparent;color:#526070;font-size:12px;font-weight:700;cursor:pointer}
+.auth-mode-switch:hover{color:#111827;text-decoration:underline}
+.auth-profile-step{gap:25px}
+.auth-name-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+
+@media(max-width:520px){
+  .auth-welcome-backdrop{padding:70px 20px 30px;place-items:start center}
+  .auth-close-button{top:16px;right:16px}
+  .auth-welcome-heading h1{font-size:25px}
+  .auth-name-grid{grid-template-columns:1fr}
+}
+
+/* Only user-editable fields expose a text caret or text selection. */
+.studyhub-app{cursor:default;caret-color:transparent;user-select:none}
+.studyhub-app input,.studyhub-app textarea,.studyhub-app [contenteditable="true"]{cursor:text;caret-color:auto;user-select:text}
+.studyhub-app button,.studyhub-app a,.studyhub-app select,.studyhub-app label[for]{cursor:pointer}
+.studyhub-app button:disabled,.studyhub-app select:disabled,.studyhub-app input:disabled,.studyhub-app textarea:disabled{cursor:not-allowed}
+
+/* Animated navigation state for hover, keyboard focus, and the selected view. */
+.nav-menu .nav-item{position:relative;overflow:hidden;border:0;background-color:transparent;background-image:linear-gradient(135deg,#f0444d 0%,#d9263c 52%,#b81632 100%);background-repeat:no-repeat;background-position:left center;background-size:0 100%;color:#718096;box-shadow:none;transition:background-size .25s ease,color .2s ease,transform .2s ease,box-shadow .25s ease}
+.nav-menu .nav-item:hover,.nav-menu .nav-item:focus-visible{background-color:transparent;background-size:100% 100%;color:#fff;transform:translateY(-1px);box-shadow:0 7px 15px rgba(202,31,54,.2);outline:none}
+.nav-menu .nav-item.active{border-bottom:0;background-color:#d9263c;background-size:100% 100%;color:#fff;box-shadow:0 7px 16px rgba(202,31,54,.24);animation:nav-selected-pop .28s ease-out}
+.nav-menu .nav-item.active:hover{transform:translateY(-1px)}
+
+@keyframes nav-selected-pop{
+  0%{transform:scale(.96)}
+  65%{transform:scale(1.03)}
+  100%{transform:scale(1)}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .nav-menu .nav-item{transition:none}
+  .nav-menu .nav-item.active{animation:none}
 }
