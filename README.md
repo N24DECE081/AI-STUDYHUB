@@ -12,19 +12,16 @@ Monorepo cho StudyHub. Mỗi thành viên chỉ cần làm việc trong đúng t
 
 Terminal 1:
 
-```powershell
-cd apps/python-api
+cd apps\python-api
 python -m pip install -r requirements.txt
 python run.py
-```
 
 Terminal 2:
 
-```powershell
+```cmd
 cd frontend
 npm install
 npm run dev
-```
 
 Mở URL Vite hiển thị, thường là `http://localhost:5173`. Vite tự proxy `/api` sang Python API ở `http://127.0.0.1:5000`.
 
