@@ -20,6 +20,8 @@ import {
 import AITutorPage from "./components/ai-tutor/AITutorPage";
 import QuizWorkspace from "./components/QuizWorkspace";
 import LearningRoadmapPage from "./components/LearningRoadmapPage";
+import PaymentCheckout from "./components/PaymentCheckout";
+import StudyDeckSession from "./components/StudyDeckSession";
 import { buildSubjectHashMap, findSubject, quickSortSubjects } from "./utils/subjectAlgorithms";
 import {
   ArrowRightIcon,
@@ -297,6 +299,7 @@ export default function App() {
     status: "active",
   });
   const [pendingPlan, setPendingPlan] = useState(null);
+  const [activeStudyDeck, setActiveStudyDeck] = useState(null);
   const [billingCycle] = useState("month");
   const subjectOptions = useMemo(() => quickSortSubjects(subjects), [subjects]);
   const subjectIndex = useMemo(() => buildSubjectHashMap(subjectOptions), [subjectOptions]);
@@ -574,6 +577,11 @@ export default function App() {
       name: String(data.get("deckName") || "").trim(),
       subject: String(data.get("deckSubject") || "").trim(),
       description: String(data.get("deckDescription") || "").trim(),
+      cards: String(data.get("deckCards") || "")
+        .split("\n")
+        .map((line) => line.split("|").map((part) => part.trim()))
+        .filter(([front, back]) => front && back)
+        .map(([front, back]) => ({ front, back })),
     };
     if (!deck.name) return notify("Tên bộ thẻ không được để trống.");
     const next = [...quizDecks, deck];
@@ -585,7 +593,7 @@ export default function App() {
   const requestPlan = (plan) => {
     if (requireLogin() || plan === subscription.plan) return;
     setPendingPlan(plan);
-    setModal("plan");
+    setModal(plan === "free" ? "plan" : "payment");
   };
   const confirmPlan = async () => {
     try {
@@ -933,7 +941,7 @@ export default function App() {
                     <h2>{deck.name}</h2>
                     <p>{deck.subject || "Chưa phân loại"}</p>
                     {deck.description && <small>{deck.description}</small>}
-                    <button className="btn btn-primary full" type="button">Bắt đầu ôn tập</button>
+                    <button className="btn btn-primary full" type="button" onClick={() => setActiveStudyDeck(deck)}>Bắt đầu ôn tập</button>
                   </article>
                 ))}
               </div>
@@ -1300,6 +1308,11 @@ export default function App() {
               Mô tả ngắn
               <textarea name="deckDescription" rows="3" placeholder="Mô tả mục tiêu của bộ thẻ..." />
             </label>
+            <label>
+              Nội dung thẻ
+              <textarea name="deckCards" rows="5" placeholder={"Mỗi dòng một thẻ theo mẫu:\nKhái niệm | Nội dung giải thích\nReact | Thư viện xây dựng giao diện"} />
+              <small className="muted">Dùng dấu | để ngăn cách mặt trước và mặt sau. Có thể bổ sung nhiều dòng.</small>
+            </label>
             <div className="quiz-modal-actions">
               <button type="button" className="text-link" onClick={() => setModal(null)}>Hủy</button>
               <button className="btn quiz-create-button" type="submit"><PlusIcon aria-hidden="true" /> Tạo bộ thẻ</button>
@@ -1323,6 +1336,11 @@ export default function App() {
           </button>
         </Modal>
       )}
+      {modal === "payment" && pendingPlan && (
+        <Modal title="Thanh toán gói học" subtitle="Thanh toán QR hiện đại · trạng thái xác nhận an toàn" onClose={() => setModal(null)}>
+          <PaymentCheckout planId={pendingPlan} plan={PLANS[pendingPlan]} qrImage="/payment/momo-vietqr.jpg" onClose={() => setModal(null)} />
+        </Modal>
+      )}
       {modal === "account" && (
         <Modal title="Tài khoản" onClose={() => setModal(null)}>
           <p>
@@ -1342,6 +1360,7 @@ export default function App() {
         </Modal>
       )}
       {toast && <div className="toast">{toast}</div>}
+      {activeStudyDeck && <StudyDeckSession deck={activeStudyDeck} onClose={() => setActiveStudyDeck(null)} />}
     </div>
   );
 }

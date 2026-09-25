@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createQuiz, getQuizHistory, submitQuiz } from "../api";
+import QuizFlashCard from "./QuizFlashCard";
+import QuizResultSummary from "./QuizResultSummary";
 
 const fieldStyle = {
   width: "100%",
@@ -19,6 +21,7 @@ export default function QuizWorkspace({ documents, user }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [history, setHistory] = useState([]);
+  const [currentQuestion, setCurrentQuestion] = useState(0);
 
   const subjects = useMemo(() => {
     const seen = new Map();
@@ -54,6 +57,7 @@ export default function QuizWorkspace({ documents, user }) {
     setError("");
     setResult(null);
     setAnswers({});
+    setCurrentQuestion(0);
     try {
       setQuiz(await createQuiz(selectedIds));
     } catch (requestError) {
@@ -64,10 +68,7 @@ export default function QuizWorkspace({ documents, user }) {
     }
   };
   const submit = async () => {
-    if (!quiz || Object.keys(answers).length !== quiz.questions.length) {
-      setError("Hãy trả lời đủ tất cả câu hỏi trước khi nộp bài.");
-      return;
-    }
+    if (!quiz) return;
     setLoading(true);
     setError("");
     try {
@@ -112,15 +113,8 @@ export default function QuizWorkspace({ documents, user }) {
 
       {quiz && <div className="quiz-question-list">
         <div className="quiz-result-head"><div><span className="eyebrow">BỘ QUIZ ĐANG LÀM · {quiz.questions.length} CÂU</span><h2>{quiz.title}</h2></div><button type="button" className="btn btn-ghost" onClick={() => { setQuiz(null); setResult(null); }}>Chọn lại tài liệu</button></div>
-        {quiz.questions.map((question, index) => {
-          const itemResult = result?.items?.find((item) => item.id === question.id);
-          return <article className={`quiz-question${itemResult ? (itemResult.correct ? " is-correct" : " is-wrong") : ""}`} key={question.id}>
-            <h3>Câu {index + 1}/{quiz.questions.length}: {question.question}</h3>
-            <div className="quiz-options">{question.options.map((option, optionIndex) => <label key={optionIndex} className="quiz-option"><input type="radio" name={`question-${question.id}`} checked={answers[question.id] === optionIndex} disabled={Boolean(result)} onChange={() => setAnswers((current) => ({ ...current, [question.id]: optionIndex }))} /><span>{String.fromCharCode(65 + optionIndex)}. {option}</span></label>)}</div>
-            {itemResult && <div className="quiz-explanation"><strong>{itemResult.correct ? "Đúng" : "Sai"}</strong> · {itemResult.explanation} <small>{itemResult.source_title ? `${itemResult.source_title} · ` : ""}{itemResult.source_locator}</small></div>}
-          </article>;
-        })}
-        {!result ? <button type="button" className="btn btn-primary" onClick={submit} disabled={loading}>{loading ? "Đang chấm bài…" : "Nộp bài & xem giải thích"}</button> : <div className="quiz-score"><strong>Kết quả: {result.score}/{result.total} câu đúng · {result.score_30}/30 · {result.score_10}/10</strong><span>{result.weak_count ? `Cần ôn lại ${result.weak_count} câu sai bên dưới, theo đúng tài liệu nguồn.` : "Tuyệt vời — bạn trả lời đúng toàn bộ câu hỏi."}</span>{result.weak_items?.length > 0 && <div className="quiz-weak-list"><b>Điểm cần khắc phục</b>{result.weak_items.slice(0, 6).map((item) => <span key={item.id}>{item.source_title || "Tài liệu"} · {item.source_locator}</span>)}</div>}</div>}
+        <QuizFlashCard quiz={quiz} answers={answers} result={result} currentIndex={currentQuestion} loading={loading} onAnswer={(questionId, optionIndex) => setAnswers((current) => ({ ...current, [questionId]: optionIndex }))} onNavigate={setCurrentQuestion} onSubmit={submit} />
+        {result && <QuizResultSummary quiz={quiz} result={result} onReviewQuestion={setCurrentQuestion} />}
       </div>}
       {!quiz && <section className="quiz-history"><div><span className="eyebrow">LỊCH SỬ ÔN TẬP</span><h3>Các bài Quiz đã làm</h3></div>{history.length ? <div className="quiz-history-list">{history.map((item) => <article key={item.id}><div><strong>{item.title}</strong><small>{item.question_count} câu · {new Date(item.created_at).toLocaleDateString("vi-VN")}</small></div>{item.attempts?.length ? <b>{item.attempts[0].score}/{item.attempts[0].total} · {item.attempts[0].score_10}/10</b> : <span>Chưa nộp bài</span>}</article>)}</div> : <p className="muted">Chưa có lịch sử. Hãy chọn tài liệu để bắt đầu bài Quiz đầu tiên.</p>}</section>}
       {error && <p className="form-error" role="alert">{error}</p>}
