@@ -18,6 +18,7 @@ import {
   uploadDocument,
 } from "./api";
 import AITutorPage from "./components/ai-tutor/AITutorPage";
+import AIAssistant from "./components/AIAssistant/AIAssistant";
 import QuizWorkspace from "./components/QuizWorkspace";
 import LearningRoadmapPage from "./components/LearningRoadmapPage";
 import { buildSubjectHashMap, findSubject, quickSortSubjects } from "./utils/subjectAlgorithms";
@@ -1342,6 +1343,7 @@ export default function App() {
         </Modal>
       )}
       {toast && <div className="toast">{toast}</div>}
+      {user && <AIAssistant />}
     </div>
   );
 }
