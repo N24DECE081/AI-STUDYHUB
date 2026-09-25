@@ -35,6 +35,41 @@ CREATE INDEX IF NOT EXISTS ix_auth_sessions_user_expires
 CREATE INDEX IF NOT EXISTS ix_auth_sessions_expires
     ON auth_sessions(expires_at);
 
+CREATE TABLE IF NOT EXISTS study_sessions (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id          INTEGER NOT NULL,
+    session_key      TEXT NOT NULL UNIQUE,
+    started_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ended_at         TEXT,
+    duration_seconds INTEGER NOT NULL DEFAULT 0 CHECK(duration_seconds >= 0),
+    status           TEXT NOT NULL DEFAULT 'active'
+                     CHECK(status IN ('active', 'completed')),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    CHECK((status = 'active' AND ended_at IS NULL) OR
+          (status = 'completed' AND ended_at IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS ix_study_sessions_user_started
+    ON study_sessions(user_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS ix_study_sessions_user_status
+    ON study_sessions(user_id, status);
+
+CREATE TABLE IF NOT EXISTS external_knowledge_cache (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    cache_key   TEXT NOT NULL UNIQUE,
+    keywords    TEXT NOT NULL,
+    question    TEXT NOT NULL,
+    answer      TEXT NOT NULL,
+    provider    TEXT,
+    hit_count   INTEGER NOT NULL DEFAULT 0 CHECK(hit_count >= 0),
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS ix_external_cache_updated
+    ON external_knowledge_cache(updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS user_streaks (
     user_id             INTEGER PRIMARY KEY,
     current_streak      INTEGER NOT NULL DEFAULT 0 CHECK(current_streak >= 0),
@@ -417,3 +452,7 @@ INSERT OR IGNORE INTO schema_migrations(version,description)
 VALUES(2,'Persistent secure authentication sessions');
 INSERT OR IGNORE INTO schema_migrations(version,description)
 VALUES(3,'AI Tutor learning journey: conversations, assessments, roadmaps, exercises, grading');
+INSERT OR IGNORE INTO schema_migrations(version,description)
+VALUES(4,'Real-time study sessions and document progress reporting');
+INSERT OR IGNORE INTO schema_migrations(version,description)
+VALUES(5,'Keyword document retrieval with persistent external knowledge cache');

@@ -43,9 +43,14 @@ class AITutorJourneyTests(unittest.TestCase):
             'STUDYHUB_DB_MODE': 'sqlite',
             'STUDYHUB_DB_PATH': str(Path(cls.tmp.name) / 'ai_tutor.db'),
             'PYTHONUNBUFFERED': '1',
+            'PYTHONIOENCODING': 'utf-8',
+            'STUDYHUB_API_RATE_LIMIT_PER_MINUTE': '10000',
+            'STUDYHUB_API_BURST': '1000',
+            'STUDYHUB_AUTH_RATE_LIMIT_PER_MINUTE': '10000',
+            'STUDYHUB_AUTH_BURST': '1000',
         })
         cls.proc = subprocess.Popen([sys.executable, 'server.py'], cwd=str(ROOT),
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, env=env)
         deadline = time.time() + 30
         while time.time() < deadline:
             try:
@@ -61,6 +66,7 @@ class AITutorJourneyTests(unittest.TestCase):
                 cls.proc.kill(); out = ''
             raise RuntimeError('server did not start: ' + out)
         cls.cookie = cls.register()
+        cls.upload_owned_document()
 
     @classmethod
     def tearDownClass(cls):
@@ -91,6 +97,30 @@ class AITutorJourneyTests(unittest.TestCase):
         status, headers, body = cls.raw('/api/register', 'POST', payload, {'Content-Type': 'application/json'})
         assert status == 201, body
         return headers.get('Set-Cookie').split(';', 1)[0]
+
+    @classmethod
+    def upload_owned_document(cls):
+        status, _, raw_subjects = cls.raw('/api/subjects')
+        assert status == 200, raw_subjects
+        subject_id = json.loads(raw_subjects)[0]['id']
+        boundary = '----NovaJourneyDocument'
+        content = (
+            'Object-oriented programming uses classes and objects. '
+            'Inheritance lets a child class reuse behavior from a parent class. '
+            'Polymorphism allows one interface to support multiple implementations.'
+        )
+        body = (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="title"\r\n\r\nNova owned notes\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="subject_id"\r\n\r\n{subject_id}\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="nova-notes.txt"\r\n'
+            f'Content-Type: text/plain\r\n\r\n{content}\r\n'
+            f'--{boundary}--\r\n'
+        ).encode()
+        status, _, response = cls.raw('/api/upload', 'POST', body, {
+            'Cookie': cls.cookie,
+            'Content-Type': f'multipart/form-data; boundary={boundary}',
+        })
+        assert status == 201, response
 
     @classmethod
     def api(cls, path, method='GET', payload=None):

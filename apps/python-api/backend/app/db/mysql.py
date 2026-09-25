@@ -128,11 +128,13 @@ class MySQLDatabase:
             "original_filename": "VARCHAR(255)", "file_type": "VARCHAR(32)",
             "mime_type": "VARCHAR(127)", "role": "VARCHAR(20)", "status": "VARCHAR(20)",
             "visibility": "VARCHAR(20)", "billing_cycle": "VARCHAR(10)",
+            "session_key": "VARCHAR(64)",
+            "cache_key": "VARCHAR(64)",
         }
         for column, mysql_type in indexed_varchars.items():
             schema = re.sub(rf"(\b{column}\s+)LONGTEXT\b", rf"\g<1>{mysql_type}", schema)
         schema = re.sub(
-            r"\b(created_at|updated_at|last_seen_at|applied_at|started_at|expires_at|last_login_at|effective_at|enrolled_at|completed_at)\s+LONGTEXT\b",
+            r"\b(created_at|updated_at|last_seen_at|applied_at|started_at|ended_at|expires_at|last_login_at|effective_at|enrolled_at|completed_at)\s+LONGTEXT\b",
             lambda match: f"{match.group(1)} DATETIME",
             schema,
         )

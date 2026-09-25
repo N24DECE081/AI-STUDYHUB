@@ -13,6 +13,7 @@ from email.policy import default
 from backend.app.db.runtime import get_runtime_database
 from backend.app.db.seed import seed as seed_database
 from backend.app.security import authenticate, register as register_user, current_user, revoke_session, SESSION_COOKIE
+from backend.app.security.session import token_hash
 from backend.app.ai_tutor import (
     EngineError as TutorEngineError,
     GradingError as TutorGradingError,
@@ -131,53 +132,245 @@ def require_user(handler):
 def session_cookie(token, max_age=7 * 24 * 60 * 60):
     return f'{SESSION_COOKIE}={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'
 
-def document_text(row):
+def utc_stamp():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+def parse_timestamp(value):
+    if not value:
+        return None
+    try:
+        parsed=datetime.fromisoformat(str(value).replace('Z','+00:00'))
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    except (TypeError,ValueError):
+        return None
+
+def elapsed_seconds(started_at, ended_at):
+    started=parse_timestamp(started_at); ended=parse_timestamp(ended_at)
+    if not started or not ended:return 0
+    return max(0,int((ended-started).total_seconds()))
+
+def ensure_study_session(connection, user_id, token):
+    """Create/touch the study clock belonging to the authenticated login."""
+    if not token:return None
+    key=token_hash(token); now=utc_stamp()
+    row=connection.execute('SELECT * FROM study_sessions WHERE session_key=?',(key,)).fetchone()
+    if row:
+        if row['status']=='active':
+            connection.execute('UPDATE study_sessions SET last_seen_at=? WHERE id=?',(now,row['id']))
+        connection.commit()
+        return row['id']
+    session_id=connection.execute(
+        'INSERT INTO study_sessions(user_id,session_key,started_at,last_seen_at,status) VALUES(?,?,?,?,?)',
+        (user_id,key,now,now,'active'),
+    ).lastrowid
+    connection.commit()
+    return session_id
+
+def close_study_session(connection, token):
+    if not token:return None
+    key=token_hash(token); now=utc_stamp()
+    row=connection.execute(
+        'SELECT * FROM study_sessions WHERE session_key=? AND status=?',(key,'active')
+    ).fetchone()
+    if not row:return None
+    duration=elapsed_seconds(row['started_at'],now)
+    connection.execute(
+        'UPDATE study_sessions SET last_seen_at=?,ended_at=?,duration_seconds=?,status=? WHERE id=?',
+        (now,now,duration,'completed',row['id']),
+    )
+    connection.commit()
+    return duration
+
+def study_time_summary(connection, user_id, token):
+    now=utc_stamp(); current_key=token_hash(token) if token else None
+    rows=connection.execute(
+        'SELECT id,session_key,started_at,last_seen_at,ended_at,duration_seconds,status '
+        'FROM study_sessions WHERE user_id=? ORDER BY started_at DESC',(user_id,)
+    ).fetchall()
+    total=0; current=0; history=[]
+    for row in rows:
+        if row['status']=='active':
+            end=now if row['session_key']==current_key else row['last_seen_at']
+            seconds=elapsed_seconds(row['started_at'],end)
+        else:
+            seconds=max(0,int(row['duration_seconds'] or 0))
+        total+=seconds
+        if row['status']=='active' and row['session_key']==current_key:current=seconds
+        if len(history)<10:
+            history.append({
+                'id':row['id'],'started_at':row['started_at'],'ended_at':row['ended_at'],
+                'duration_seconds':seconds,'status':row['status'],
+            })
+    return {'total_seconds':total,'current_session_seconds':current,'session_count':len(rows),'active':current_key is not None and any(row['status']=='active' and row['session_key']==current_key for row in rows),'sessions':history}
+
+def document_text(row, connection=None):
+    if connection is not None:
+        chunks=connection.execute(
+            'SELECT content FROM document_chunks WHERE document_id=? ORDER BY chunk_index',
+            (row['id'],),
+        ).fetchall()
+        if chunks:
+            return '\n\n'.join(chunk['content'] for chunk in chunks)
     path=row['storage_path']
     fp=path if os.path.isabs(path) else os.path.join(ROOT,path)
-    if os.path.exists(fp) and os.path.splitext(fp)[1].lower() in ('.txt','.md','.csv','.log'):
-        return open(fp,'r',encoding='utf-8',errors='replace').read()
-    return ''
+    return extract_document_text(fp)
 
-def tutor_context(file_ids, question, limit=3, fallback=False):
+def split_document_text(text, chunk_size=1024 * 1024):
+    """Normalize extracted text into database-sized chunks without losing content."""
+    clean=str(text or '').replace('\x00','').replace('\r\n','\n').replace('\r','\n').strip()
+    if not clean:
+        return []
+    chunks=[]
+    while clean:
+        if len(clean)<=chunk_size:
+            chunks.append(clean)
+            break
+        split_at=max(clean.rfind('\n',0,chunk_size),clean.rfind(' ',0,chunk_size))
+        if split_at<chunk_size//2:
+            split_at=chunk_size
+        chunks.append(clean[:split_at].strip())
+        clean=clean[split_at:].strip()
+    return [chunk for chunk in chunks if chunk]
+
+def store_document_chunks(connection, document_id, text):
+    chunks=split_document_text(text)
+    for index, content in enumerate(chunks):
+        connection.execute(
+            'INSERT INTO document_chunks(document_id,chunk_index,content,token_count) VALUES(?,?,?,?)',
+            (document_id,index,content,len(re.findall(r'\w+',content))),
+        )
+    return len(chunks)
+
+class DocumentTextError(ValueError):
+    pass
+
+def tutor_context(user_id, file_ids, question, limit=3, fallback=False):
     """Retrieve the document context server-side; the client never sends answers.
 
     `fallback` is for requests about the library itself (summarize / quiz with no
     topic words): there the newest documents are the intended material, not an
     unrelated guess, so no fake context is created.
     """
-    tokens=[token.lower() for token in re.findall(r'\w+',question) if len(token)>2]
+    query_keywords=tutor_engine.keywords(question,10)
     with db() as c:
         ids=[]
         for raw in (file_ids or [])[:5]:
             try: ids.append(int(raw))
             except (TypeError,ValueError): continue
+        ids=list(dict.fromkeys(ids))
         if ids:
             marks=','.join('?' for _ in ids)
-            rows=c.execute(f'SELECT id,title,description,storage_path FROM documents WHERE id IN ({marks})',ids).fetchall()
+            rows=c.execute(
+                f'SELECT id,title,description,storage_path FROM documents WHERE uploaded_by=? AND id IN ({marks})',
+                [user_id,*ids],
+            ).fetchall()
+            if len(rows)!=len(ids):
+                raise LookupError('document not found')
         else:
-            rows=c.execute('SELECT id,title,description,storage_path FROM documents ORDER BY created_at DESC').fetchall()
-    scored=[]
-    for row in rows:
-        text=document_text(row)
-        haystack=(row['title']+' '+(row['description'] or '')+' '+text).lower()
-        scored.append((sum(haystack.count(token) for token in tokens),row,text))
+            rows=c.execute(
+                'SELECT id,title,description,storage_path FROM documents WHERE uploaded_by=? ORDER BY created_at DESC',
+                (user_id,),
+            ).fetchall()
+        scored=[]
+        for row in rows:
+            text=document_text(row,c)
+            haystack=(row['title']+' '+(row['description'] or '')+' '+text).lower()
+            matched_terms=[token for token in query_keywords if token in haystack]
+            score=sum(min(3,haystack.count(token)) for token in matched_terms)
+            scored.append((score,len(matched_terms),row,text))
     scored.sort(key=lambda item:item[0],reverse=True)
     matched=[item for item in scored if item[0]>0][:limit]
     if matched:
         picked=matched
-    elif ids or fallback:
+    elif fallback or (ids and set(query_keywords).issubset({'tài','liệu','nội','dung','giải','thích'})):
         picked=scored[:limit]
     else:
         picked=[]
     parts=[]; sources=[]
-    for _,row,text in picked:
+    for _,_,row,text in picked:
         source=text or row['description'] or row['title']
         # One titled block per document: paragraphs stay inside it (blank lines
         # separate documents, not paragraphs), so every quote keeps its source.
         body=re.sub(r'\n\s*\n+','\n',source[:1200].strip())
         parts.append(f"{row['title']}: {body}")
-        sources.append({'id':row['id'],'title':row['title']})
-    return '\n\n'.join(parts), sources
+        sources.append({'id':row['id'],'title':row['title'],'type':'document'})
+    return '\n\n'.join(parts), sources, query_keywords
+
+def external_cache_key(question, query_keywords=None):
+    keywords=query_keywords or tutor_engine.keywords(question,10)
+    basis=' '.join(sorted(set(keywords))) or re.sub(r'\s+',' ',question.strip().lower())
+    return hashlib.sha256(basis.encode('utf-8')).hexdigest(),keywords
+
+def external_cache_lookup(question, query_keywords=None):
+    """Find exact or strongly overlapping general-knowledge cache entries."""
+    key,keywords=external_cache_key(question,query_keywords)
+    wanted=set(keywords)
+    with db() as c:
+        exact=c.execute('SELECT * FROM external_knowledge_cache WHERE cache_key=?',(key,)).fetchone()
+        candidates=[exact] if exact else c.execute(
+            'SELECT * FROM external_knowledge_cache ORDER BY updated_at DESC LIMIT 200'
+        ).fetchall()
+        best=None; best_score=0
+        for row in candidates:
+            try:cached=set(json.loads(row['keywords']))
+            except (TypeError,ValueError,json.JSONDecodeError):cached=set()
+            overlap=len(wanted & cached)
+            required=1 if min(len(wanted),len(cached))<=1 else 2
+            if overlap>=required and overlap>best_score:
+                best=row; best_score=overlap
+        if not best:return None
+        c.execute(
+            'UPDATE external_knowledge_cache SET hit_count=hit_count+1,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+            (best['id'],),
+        )
+        c.commit()
+        return {'id':best['id'],'answer':best['answer'],'question':best['question'],'provider':best['provider'],'keywords':keywords}
+
+def external_cache_store(question, answer, query_keywords=None, provider=None):
+    answer=str(answer or '').strip()
+    if not answer:return None
+    key,keywords=external_cache_key(question,query_keywords)
+    with db() as c:
+        row=c.execute('SELECT id FROM external_knowledge_cache WHERE cache_key=?',(key,)).fetchone()
+        if row:
+            c.execute('''UPDATE external_knowledge_cache SET question=?,answer=?,keywords=?,provider=?,
+              updated_at=CURRENT_TIMESTAMP WHERE id=?''',
+              (question[:1000],answer[:16000],json.dumps(keywords,ensure_ascii=False),provider,row['id']))
+            cache_id=row['id']
+        else:
+            cache_id=c.execute('''INSERT INTO external_knowledge_cache(
+              cache_key,keywords,question,answer,provider) VALUES(?,?,?,?,?)''',
+              (key,json.dumps(keywords,ensure_ascii=False),question[:1000],answer[:16000],provider)).lastrowid
+        c.commit()
+    return cache_id
+
+def advance_document_progress(connection, user_id, document_id, progress_percent, last_position=0):
+    """Advance a document from verified learning activity; progress never moves backwards."""
+    try:
+        document_id=int(document_id); progress_percent=max(0,min(100,int(progress_percent)))
+        last_position=max(0,int(last_position or 0))
+    except (TypeError,ValueError):
+        return None
+    owned=connection.execute(
+        'SELECT id FROM documents WHERE id=? AND uploaded_by=?',(document_id,user_id)
+    ).fetchone()
+    if not owned:return None
+    current=connection.execute(
+        'SELECT id,progress_percent,last_position FROM user_progress WHERE user_id=? AND document_id=?',
+        (user_id,document_id),
+    ).fetchone()
+    if current:
+        progress=max(int(current['progress_percent'] or 0),progress_percent)
+        position=max(int(current['last_position'] or 0),last_position)
+        connection.execute('''UPDATE user_progress SET progress_percent=?,last_position=?,completed=?,
+          updated_at=CURRENT_TIMESTAMP WHERE id=?''',(progress,position,int(progress==100),current['id']))
+        progress_id=current['id']
+    else:
+        progress=progress_percent
+        progress_id=connection.execute('''INSERT INTO user_progress(
+          user_id,document_id,progress_percent,last_position,completed) VALUES(?,?,?,?,?)''',
+          (user_id,document_id,progress,last_position,int(progress==100))).lastrowid
+    return progress_id
 
 def chat_quiz(engine, topic, context):
     """Sinh quiz trắc nghiệm CÓ CẤU TRÚC để UI render thành câu hỏi bấm chọn được.
@@ -382,7 +575,7 @@ class H(BaseHTTPRequestHandler):
     self.send_header('Access-Control-Allow-Credentials', 'true')
 
 
-def cors_origin(self):
+ def cors_origin(self):
     origin = self.headers.get('Origin', '')
     configured = os.environ.get('STUDYHUB_CORS_ORIGINS', '')
     allowed = [value.strip() for value in configured.split(',') if value.strip()]
@@ -453,7 +646,11 @@ def cors_origin(self):
  def do_GET(self):
   if not self.gateway_access(): return
   p=urlparse(self.path); path=p.path
-  if path in ('/api/me','/api/auth/me'): return self.json({'user':user_from(self)})
+  if path in ('/api/me','/api/auth/me'):
+   token=cookie_value(self,SESSION_COOKIE); user=user_from(self)
+   if user and token:
+    with db() as c:ensure_study_session(c,user['id'],token)
+   return self.json({'user':user})
   if path=='/api/subjects':
     c=db(); rows=[dict(r) for r in c.execute('SELECT * FROM subjects ORDER BY name')]; c.close(); return self.json(rows)
   if path=='/api/subscription':
@@ -467,10 +664,12 @@ def cors_origin(self):
    change={'plan':codes.get(str(scheduled['name']).lower(),'free'),'billing_cycle':scheduled['billing_cycle'],'effective_at':scheduled['effective_at']} if scheduled else None
    return self.json({'plan':codes.get(str(current['name']).lower(),'free'),'status':current['status'],'billing_cycle':'month','scheduled_change':change})
   if path=='/api/documents':
-    qs=parse_qs(p.query); q=qs.get('q',[''])[0]; sub=qs.get('subject',[''])[0]; c=db(); sql='SELECT d.*, d.original_filename AS file_name, d.storage_path AS file_path, d.uploaded_by AS uploader_id, s.code subject_code,s.name subject_name,u.full_name AS uploader FROM documents d JOIN subjects s ON s.id=d.subject_id JOIN users u ON u.id=d.uploaded_by WHERE 1=1'; args=[]
-    if q: sql+=' AND (d.title LIKE ? OR d.description LIKE ?)'; args += [f'%{q}%',f'%{q}%']
-    if sub: sql+=' AND s.code=?'; args.append(sub)
-    sql+=' ORDER BY d.created_at DESC'; rows=[dict(r) for r in c.execute(sql,args)]; c.close(); return self.json(rows)
+   u=require_user(self)
+   if not u:return
+   qs=parse_qs(p.query); q=qs.get('q',[''])[0]; sub=qs.get('subject',[''])[0]; c=db(); sql='SELECT d.*, d.original_filename AS file_name, d.storage_path AS file_path, d.uploaded_by AS uploader_id, s.code subject_code,s.name subject_name,u.full_name AS uploader FROM documents d JOIN subjects s ON s.id=d.subject_id JOIN users u ON u.id=d.uploaded_by WHERE d.uploaded_by=?'; args=[u['id']]
+   if q: sql+=' AND (d.title LIKE ? OR d.description LIKE ?)'; args += [f'%{q}%',f'%{q}%']
+   if sub: sql+=' AND s.code=?'; args.append(sub)
+   sql+=' ORDER BY d.created_at DESC'; rows=[dict(r) for r in c.execute(sql,args)]; c.close(); return self.json(rows)
   if path=='/api/courses':
     qs=parse_qs(p.query); subject=qs.get('subject',[''])[0]; c=db(); sql='SELECT c.*, s.code subject_code,s.name subject_name,u.full_name AS creator FROM courses c JOIN subjects s ON s.id=c.subject_id JOIN users u ON u.id=c.created_by WHERE c.status != ?'; args=['archived']
     if subject: sql+=' AND s.code=?'; args.append(subject)
@@ -479,10 +678,28 @@ def cors_origin(self):
     u=require_user(self)
     if not u:return
     with db() as c:
-     rows=[dict(r) for r in c.execute('''SELECT p.*, c.title course_title, c.subject_id, s.code subject_code, d.title document_title
-        FROM user_progress p LEFT JOIN courses c ON c.id=p.course_id LEFT JOIN subjects s ON s.id=c.subject_id
-        LEFT JOIN documents d ON d.id=p.document_id WHERE p.user_id=? ORDER BY p.updated_at DESC''',(u['id'],))]
-    return self.json({'items':rows,'summary':{'count':len(rows),'completed':sum(1 for row in rows if row['completed'])}})
+     course_rows=[dict(r) for r in c.execute('''SELECT p.*, c.title course_title, c.subject_id, s.code subject_code, NULL document_title
+        FROM user_progress p JOIN courses c ON c.id=p.course_id JOIN subjects s ON s.id=c.subject_id
+        WHERE p.user_id=? AND p.course_id IS NOT NULL ORDER BY p.updated_at DESC''',(u['id'],))]
+     document_rows=[dict(r) for r in c.execute('''SELECT p.id, p.course_id, d.id document_id,
+        COALESCE(p.progress_percent,0) progress_percent, COALESCE(p.last_position,0) last_position,
+        COALESCE(p.completed,0) completed, p.updated_at, NULL course_title, d.title document_title,
+        d.subject_id, s.code subject_code
+        FROM documents d JOIN subjects s ON s.id=d.subject_id
+        LEFT JOIN user_progress p ON p.document_id=d.id AND p.user_id=?
+        WHERE d.uploaded_by=? ORDER BY d.created_at DESC''',(u['id'],u['id']))]
+    rows=course_rows+document_rows
+    measured=document_rows if document_rows else rows
+    average=round(sum(int(row['progress_percent'] or 0) for row in measured)/len(measured)) if measured else 0
+    return self.json({'items':rows,'summary':{'count':len(measured),'completed':sum(1 for row in measured if row['completed']),'average_percent':average}})
+  if path=='/api/study-time':
+   u=require_user(self)
+   if not u:return
+   token=cookie_value(self,SESSION_COOKIE)
+   with db() as c:
+    ensure_study_session(c,u['id'],token)
+    summary=study_time_summary(c,u['id'],token)
+   return self.json(summary)
   if path=='/api/streak':
     u=require_user(self)
     if not u:return
@@ -519,12 +736,37 @@ def cors_origin(self):
    if not message:return self.json({'error':'Quiz chưa có câu hỏi'},422)
    payload=json.loads(message['content'])
    return self.json(public_quiz_payload(payload,quiz['id'],quiz['created_at']))
+  m=re.fullmatch(r'/api/documents/(\d+)/content',path)
+  if m:
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    row=c.execute('''SELECT d.*, d.original_filename AS file_name, s.code subject_code,
+      s.name subject_name FROM documents d JOIN subjects s ON s.id=d.subject_id
+      WHERE d.id=? AND d.uploaded_by=?''',(m.group(1),u['id'])).fetchone()
+    if not row:return self.json({'error':'Tài liệu không tồn tại'},404)
+    try:content=document_text(row,c)
+    except (OSError,DocumentTextError,ValueError) as error:
+     self.log_error('document text read failed for %s: %r',row['id'],error)
+     return self.json({'error':'Không thể đọc nội dung văn bản của tài liệu'},422)
+    advance_document_progress(c,u['id'],row['id'],25,len(content or ''))
+    c.commit()
+   return self.json({
+    'id':row['id'],'title':row['title'],'file_name':row['file_name'],
+    'file_type':row['file_type'],'subject_code':row['subject_code'],
+    'subject_name':row['subject_name'],'content':content or '',
+    'character_count':len(content or ''),'display_mode':'plain_text',
+   })
   m=re.fullmatch(r'/api/documents/(\d+)',path)
   if m:
-    c=db(); r=c.execute('SELECT d.*, d.original_filename AS file_name, d.storage_path AS file_path, d.uploaded_by AS uploader_id, s.code subject_code,s.name subject_name,u.full_name AS uploader FROM documents d JOIN subjects s ON s.id=d.subject_id JOIN users u ON u.id=d.uploaded_by WHERE d.id=?',(m.group(1),)).fetchone(); c.close(); return self.json(dict(r) if r else {'error':'not found'},200 if r else 404)
+   u=require_user(self)
+   if not u:return
+   c=db(); r=c.execute('SELECT d.*, d.original_filename AS file_name, d.storage_path AS file_path, d.uploaded_by AS uploader_id, s.code subject_code,s.name subject_name,u.full_name AS uploader FROM documents d JOIN subjects s ON s.id=d.subject_id JOIN users u ON u.id=d.uploaded_by WHERE d.id=? AND d.uploaded_by=?',(m.group(1),u['id'])).fetchone(); c.close(); return self.json(dict(r) if r else {'error':'not found'},200 if r else 404)
   m=re.fullmatch(r'/view/(\d+)',path)
   if m:
-   c=db(); r=c.execute('SELECT * FROM documents WHERE id=?',(m.group(1),)).fetchone()
+   u=require_user(self)
+   if not u:return
+   c=db(); r=c.execute('SELECT * FROM documents WHERE id=? AND uploaded_by=?',(m.group(1),u['id'])).fetchone()
    if not r or not r['storage_path']: c.close(); return self.json({'error':'document has no physical file'},404)
    fp=os.path.normpath(r['storage_path'] if os.path.isabs(r['storage_path']) else os.path.join(ROOT,r['storage_path']))
    if not os.path.exists(fp): c.close(); return self.json({'error':'file missing'},404)
@@ -537,17 +779,19 @@ def cors_origin(self):
    return self.send(200,page.encode('utf-8'),'text/html; charset=utf-8')
   m=re.fullmatch(r'/download/(\d+)',path)
   if m:
-    view=parse_qs(p.query).get('view',['0'])[0]=='1'
-    c=db(); r=c.execute('SELECT * FROM documents WHERE id=?',(m.group(1),)).fetchone();
-    if not r or not r['storage_path']: c.close(); return self.json({'error':'document has no physical file'},404)
-    rel=r['storage_path']; fp=os.path.normpath(rel if os.path.isabs(rel) else os.path.join(ROOT, rel))
-    try: inside = os.path.commonpath([ROOT, fp]) == ROOT
-    except ValueError: inside = False
-    if not inside: c.close(); return self.json({'error':'invalid file path'},400)
-    if not os.path.exists(fp): c.close(); return self.json({'error':'file missing'},404)
-    if not view:
-     c.execute('UPDATE documents SET downloads=downloads+1 WHERE id=?',(m.group(1),)); c.commit()
-    c.close(); data=open(fp,'rb').read(); disposition='inline' if view else 'attachment'; fallback=re.sub(r'[^A-Za-z0-9._-]','_',r['original_filename']) or 'download'; encoded=quote(r['original_filename'],safe=''); return self.send(200,data,mimetypes.guess_type(fp)[0] or 'application/octet-stream',{'Content-Disposition':f'{disposition}; filename="{fallback}"; filename*=UTF-8\'\'{encoded}'})
+   u=require_user(self)
+   if not u:return
+   view=parse_qs(p.query).get('view',['0'])[0]=='1'
+   c=db(); r=c.execute('SELECT * FROM documents WHERE id=? AND uploaded_by=?',(m.group(1),u['id'])).fetchone();
+   if not r or not r['storage_path']: c.close(); return self.json({'error':'document has no physical file'},404)
+   rel=r['storage_path']; fp=os.path.normpath(rel if os.path.isabs(rel) else os.path.join(ROOT, rel))
+   try: inside = os.path.commonpath([ROOT, fp]) == ROOT
+   except ValueError: inside = False
+   if not inside: c.close(); return self.json({'error':'invalid file path'},400)
+   if not os.path.exists(fp): c.close(); return self.json({'error':'file missing'},404)
+   if not view:
+    c.execute('UPDATE documents SET downloads=downloads+1 WHERE id=?',(m.group(1),)); c.commit()
+   c.close(); data=open(fp,'rb').read(); disposition='inline' if view else 'attachment'; fallback=re.sub(r'[^A-Za-z0-9._-]','_',r['original_filename']) or 'download'; encoded=quote(r['original_filename'],safe=''); return self.send(200,data,mimetypes.guess_type(fp)[0] or 'application/octet-stream',{'Content-Disposition':f'{disposition}; filename="{fallback}"; filename*=UTF-8\'\'{encoded}'})
   if path=='/api/ai-tutor/engine':
    u=require_user(self)
    if not u:return
@@ -604,10 +848,39 @@ def cors_origin(self):
     conversations=tutor_store.conversations_for(c,u['id'])
    return self.json({'conversations':conversations},200)
   if path.startswith('/api/'):
-    return self.json({'error':'not found'},404)
+   return self.json({'error':'not found'},404)
   fp=os.path.join(WEB,'index.html' if path=='/' else path.lstrip('/'))
   if not os.path.isfile(fp): return self.json({'error':'not found'},404)
   ext=os.path.splitext(fp)[1]; ct={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'application/javascript; charset=utf-8','.svg':'image/svg+xml'}.get(ext,'application/octet-stream'); return self.send(200,open(fp,'rb').read(),ct)
+ def do_DELETE(self):
+  if not self.gateway_access(): return
+  path=urlparse(self.path).path
+  match=re.fullmatch(r'/api/documents/(\d+)',path)
+  if not match:return self.json({'error':'not found'},404)
+  user=require_user(self)
+  if not user:return
+  with db() as connection:
+   document=connection.execute(
+    'SELECT id,storage_path FROM documents WHERE id=? AND uploaded_by=?',
+    (match.group(1),user['id']),
+   ).fetchone()
+   if not document:return self.json({'error':'Tài liệu không tồn tại'},404)
+   connection.execute('DELETE FROM documents WHERE id=?',(document['id'],))
+   connection.commit()
+  stored_path=document['storage_path']
+  file_path=os.path.abspath(stored_path if os.path.isabs(stored_path) else os.path.join(ROOT,stored_path))
+  upload_root=os.path.abspath(UP)
+  try:
+   inside_uploads=os.path.commonpath([upload_root,file_path])==upload_root
+  except ValueError:
+   inside_uploads=False
+  file_removed=False
+  if inside_uploads and os.path.isfile(file_path):
+   try:
+    os.remove(file_path); file_removed=True
+   except OSError as error:
+    self.log_error('document file cleanup failed after delete: %r',error)
+  return self.json({'ok':True,'document_id':document['id'],'file_removed':file_removed},200)
  def do_POST(self):
   if not self.gateway_access(): return
   try:
@@ -634,7 +907,8 @@ def cors_origin(self):
    placeholders=','.join('?' for _ in document_ids)
    with db() as c:
     rows=c.execute(f'''SELECT d.id,d.title,d.description,d.storage_path,d.original_filename,s.name subject_name
-      FROM documents d JOIN subjects s ON s.id=d.subject_id WHERE d.id IN ({placeholders})''',document_ids).fetchall()
+      FROM documents d JOIN subjects s ON s.id=d.subject_id
+      WHERE d.uploaded_by=? AND d.id IN ({placeholders})''',[u['id'],*document_ids]).fetchall()
     by_id={row['id']:row for row in rows}
     if len(by_id)!=len(document_ids): return self.json({'error':'Một hoặc nhiều tài liệu không tồn tại'},404)
     docs=[]
@@ -677,6 +951,10 @@ def cors_origin(self):
      items.append({'id':row['id'],'question':row['question'],'selected_index':selected,'correct_index':row['correct_index'],'correct':correct,'explanation':row['explanation'],'source_document_id':row['document_id'],'source_title':row.get('source_title'),'source_locator':row['source_locator'],'options':row['options']})
     attempt_payload={'kind':'quiz_attempt','score':score,'total':len(rows),'answers':answers}
     attempt_id=c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(quiz['id'],'user',json.dumps(attempt_payload,ensure_ascii=False))).lastrowid
+    automatic_progress=60+round((score/max(len(rows),1))*40)
+    document_ids=quiz_payload.get('document_ids') or [item['source_document_id'] for item in items]
+    for source_document_id in dict.fromkeys(document_ids):
+     advance_document_progress(c,u['id'],source_document_id,automatic_progress,score)
     c.commit()
    total=len(rows)
    return self.json({'attempt_id':attempt_id,'score':score,'total':total,'score_30':round(score*30/total,2),'score_10':round(score*10/total,2),'weak_count':sum(1 for item in items if not item['correct']),'weak_items':[item for item in items if not item['correct']],'items':items},200)
@@ -694,10 +972,12 @@ def cors_origin(self):
    if error:
     return self.json({'error':error},403 if error == 'Tài khoản đang bị khóa' else 401)
    user, token, expires_at = result
+   with db() as c:ensure_study_session(c,user['id'],token)
    return self.json({'user':user,'expires_at':expires_at},200,{'Set-Cookie':session_cookie(token)})
   if path in ('/api/logout','/api/auth/logout'):
    token=cookie_value(self, SESSION_COOKIE)
    with db() as c:
+    close_study_session(c,token)
     revoke_session(c, token)
    return self.json({'ok':True},200,{'Set-Cookie':session_cookie('',0)})
   if path in ('/api/register','/api/auth/register'):
@@ -718,6 +998,7 @@ def cors_origin(self):
    if error:
     return self.json({'error':error},400)
    user, token, expires_at = result
+   with db() as c:ensure_study_session(c,user['id'],token)
    return self.json({'ok':True,'user':user,'expires_at':expires_at},201,{'Set-Cookie':session_cookie(token)})
   if path=='/api/subjects':
    u=require_user(self)
@@ -807,8 +1088,13 @@ def cors_origin(self):
       raw_id=course_id if course_id is not None else document_id
       try: raw_id=int(raw_id)
       except (TypeError,ValueError): return self.json({'error':'Đối tượng học không hợp lệ'},400)
-      table='courses' if target=='course_id' else 'documents'
-      if not c.execute(f'SELECT id FROM {table} WHERE id=?',(raw_id,)).fetchone(): return self.json({'error':'Đối tượng học không tồn tại'},404)
+      if target=='document_id':
+       target_row=c.execute('SELECT id FROM documents WHERE id=? AND uploaded_by=?',(raw_id,u['id'])).fetchone()
+      else:
+       target_row=c.execute('SELECT id FROM courses WHERE id=?',(raw_id,)).fetchone()
+      if not target_row:return self.json({'error':'Đối tượng học không tồn tại'},404)
+      if target=='document_id':
+       return self.json({'error':'Tiến độ tài liệu được hệ thống cập nhật tự động từ hoạt động học'},403)
       existing=c.execute(f'SELECT id FROM user_progress WHERE user_id=? AND {target}=?',(u['id'],raw_id)).fetchone()
       if existing:
        c.execute('UPDATE user_progress SET progress_percent=?,last_position=?,completed=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',(progress,last_position,int(completed),existing['id']))
@@ -827,9 +1113,9 @@ def cors_origin(self):
     x.get('message', '')
     if tutor_contract
     else x.get('question', '')
-).strip()
+   ).strip()
 
-    document_id = x.get('document_id')
+   document_id = x.get('document_id')
 
    if tutor_contract:
     # code xử lý AI Tutor ở đây
@@ -845,17 +1131,14 @@ def cors_origin(self):
     if document_id:
      try: document_id=int(document_id)
      except (TypeError,ValueError): return self.json({'error':'invalid document id'},400)
-     rows=c.execute('SELECT id,title,description,storage_path FROM documents WHERE id=?',(document_id,)).fetchall()
+     rows=c.execute('SELECT id,title,description,storage_path FROM documents WHERE id=? AND uploaded_by=?',(document_id,u['id'])).fetchall()
      if not rows:return self.json({'error':'document not found'},404)
     else:
-     rows=c.execute('SELECT id,title,description,storage_path FROM documents ORDER BY created_at DESC').fetchall()
+     rows=c.execute('SELECT id,title,description,storage_path FROM documents WHERE uploaded_by=? ORDER BY created_at DESC',(u['id'],)).fetchall()
     tokens=[token.lower() for token in re.findall(r'\w+',question) if len(token)>2]
     matches=[]
     for row in rows:
-     fp=row['storage_path'] if os.path.isabs(row['storage_path']) else os.path.join(ROOT,row['storage_path'])
-     text=''
-     if os.path.exists(fp) and os.path.splitext(fp)[1].lower() in ('.txt','.md','.csv','.log'):
-      text=open(fp,'r',encoding='utf-8',errors='replace').read()
+     text=document_text(row,c)
      haystack=(row['title']+' '+(row['description'] or '')+' '+text).lower()
      score=sum(haystack.count(token) for token in tokens)
      if score: matches.append((score,row,text))
@@ -890,10 +1173,25 @@ def cors_origin(self):
     mode=tutor_engine.detect_mode(message)
    if mode not in ('explain','solve','hint','summarize','generate_quiz'):
     return self.json({'error':'invalid tutor mode'},400)
-   file_ids=x.get('file_ids') if isinstance(x.get('file_ids'),list) else []
+   file_ids=x.get('file_ids',[])
+   if not isinstance(file_ids,list):
+    return self.json({'error':'Danh sách tài liệu không hợp lệ'},400)
+   if len(file_ids)>5:
+    return self.json({'error':'Nova chỉ hỗ trợ tối đa 5 tài liệu trong một cuộc trò chuyện'},400)
    conversation_key=str(x.get('conversation_id') or '').strip() or secrets.token_hex(16)
-   context,sources=tutor_context(file_ids,message,fallback=mode in ('summarize','generate_quiz'))
+   try:
+    context,sources,query_keywords=tutor_context(u['id'],file_ids,message,fallback=mode in ('summarize','generate_quiz'))
+   except LookupError:
+    return self.json({'error':'Tài liệu không tồn tại hoặc không thuộc tài khoản này'},404)
    engine=get_engine()
+   retrieval_tier='documents' if context else 'miss'
+   cached_knowledge=None
+   if not context:
+    cached_knowledge=external_cache_lookup(message,query_keywords)
+    if cached_knowledge:
+     context=f"Bộ nhớ kiến thức bên ngoài: {cached_knowledge['answer']}"
+     sources=[{'id':cached_knowledge['id'],'title':'Kho kiến thức bên ngoài','type':'external_cache'}]
+     retrieval_tier='external_cache'
    with db() as c:
     conversation=tutor_store.conversation_for(c,u['id'],conversation_key,mode=mode,title=message[:60])
     conversation_id=int(conversation['id']); conversation_title=str(conversation['title'] or '')
@@ -905,19 +1203,37 @@ def cors_origin(self):
     if quiz:
      answer=(f'## Quiz nhanh: {quiz_topic}\n\n'
              f'{len(quiz["questions"])} câu hỏi bám theo tài liệu. Chọn đáp án rồi bấm **Kiểm tra** để xem kết quả.')
+    elif retrieval_tier=='miss' and not getattr(engine,'uses_model',False):
+     answer=('## Chưa tìm thấy kiến thức phù hợp\n\n'
+             'Nova đã lọc từ khóa chính, kiểm tra tài liệu của bạn và tra kho kiến thức bên ngoài '
+             'nhưng chưa có kết quả. Hãy bổ sung tài liệu liên quan hoặc cấu hình AI provider để '
+             'Nova tìm hiểu và lưu câu trả lời vào cache cho lần sau.')
     else:
      answer=engine.answer(mode=mode,question=message,context=context,history=history)
    except TutorEngineError as error:
     return self.json({'error':f'AI Tutor tạm thời không trả lời được: {error}','retryable':True},502)
    health=tutor_engine.PROVIDER_HEALTH
+   if retrieval_tier=='miss' and getattr(engine,'uses_model',False) and health.get('ok',True):
+    provider=tutor_config.engine_status().get('provider') or 'external-ai'
+    cache_id=external_cache_store(message,answer,query_keywords,provider)
+    retrieval_tier='external_provider'
+    sources=[{'id':cache_id,'title':f'Kiến thức chung · {provider}','type':'external_provider'}]
+   elif retrieval_tier=='external_cache' and not quiz:
+    answer=(f'## Kiến thức ngoài tài liệu\n\n{answer}\n\n'
+            '> Nguồn: kho kiến thức bên ngoài đã lưu, do tài liệu của bạn không có nội dung phù hợp.')
    degraded=bool(getattr(engine,'name','')=='provider-resilient' and not health.get('ok',True))
    with db() as c:
     tutor_store.add_message(c,conversation_id,'user',message,mode)
     message_id=tutor_store.add_message(c,conversation_id,'assistant',answer,mode,payload=quiz)
+    for source in sources:
+     if source.get('type')=='document':
+      advance_document_progress(c,u['id'],source.get('id'),60)
     if conversation_title in ('','Cuộc hội thoại mới'):
      tutor_store.rename_conversation(c,conversation_id,message[:60])
+    c.commit()
    return self.json({'conversation_id':conversation_key,'message_id':str(message_id),'role':'assistant','content':answer,'sources':sources,'mode':mode,
      'quiz':quiz,
+     'retrieval':{'tier':retrieval_tier,'keywords':query_keywords},
      'engine_degraded':degraded,'engine_degraded_reason':health.get('reason','') if degraded else ''},200)
   if path=='/api/ai-tutor/assessment/start':
    u=require_user(self)
@@ -1062,8 +1378,12 @@ def cors_origin(self):
    mime={'.pdf':'application/pdf','.txt':'text/plain','.md':'text/markdown','.csv':'text/csv','.doc':'application/msword','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.ppt':'application/vnd.ms-powerpoint','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation'}.get(extension,'application/octet-stream')
    try:
     with open(target,'wb') as fh: fh.write(content)
+    extracted_text=extract_document_text(target)
+    if not split_document_text(extracted_text):
+     raise DocumentTextError('no extractable text')
     storage_path=target if configured_upload_dir else os.path.join('uploads',stored)
-    document_id=c.execute('INSERT INTO documents(title,description,original_filename,storage_filename,file_type,mime_type,file_size,storage_path,status,subject_id,uploaded_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(title,fields.get('description','').strip(),filename,stored,ext,mime,len(content),storage_path,'ready',subject_id,u['id'])).lastrowid
+    document_id=c.execute('INSERT INTO documents(title,description,original_filename,storage_filename,file_type,mime_type,file_size,storage_path,status,visibility,subject_id,uploaded_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(title,fields.get('description','').strip(),filename,stored,ext,mime,len(content),storage_path,'ready','private',subject_id,u['id'])).lastrowid
+    chunk_count=store_document_chunks(c,document_id,extracted_text)
     c.commit()
    except Exception as error:
     cleanup_errors=[]
@@ -1074,8 +1394,10 @@ def cors_origin(self):
     except OSError as cleanup_error: cleanup_errors.append(cleanup_error)
     c.close()
     if cleanup_errors: self.log_error('upload cleanup failed after %r: %r',error,cleanup_errors)
+    if isinstance(error,DocumentTextError):
+     return self.json({'error':'Không đọc được nội dung chữ trong tài liệu. Hãy dùng PDF có text, DOCX, PPTX, TXT, MD hoặc CSV.'},422)
     return self.json({'error':'Không thể lưu tài liệu'},500)
-   c.close(); return self.json({'ok':True,'document_id':document_id,'status':'ready'},201)
+   c.close(); return self.json({'ok':True,'document_id':document_id,'status':'ready','chunk_count':chunk_count},201)
   return self.json({'error':'not found'},404)
 
 class StudyHubHTTPServer(ThreadingHTTPServer):
@@ -1107,7 +1429,7 @@ def main():
     port=int(os.environ.get('STUDYHUB_PORT','5000'))
     host=os.environ.get('STUDYHUB_HOST','127.0.0.1')
     status=tutor_config.engine_status()
-    detail=f" ({status['provider']} · {status['model']})" if status['engine']=='provider' else ' — chưa cấu hình provider key'
+    detail=f" ({status['provider']} / {status['model']})" if status['engine']=='provider' else ' - provider key not configured'
     print(f'AI Tutor engine: {status["engine"]}{detail}')
     print(f'StudyHub running at http://{host}:{port}')
     with StudyHubHTTPServer((host, port), H) as server:

@@ -155,3 +155,49 @@
 
 /* Progress card mini-grid: 2x2 layout */
 .progress-card .mini-grid{grid-template-columns:repeat(2,1fr)}
+
+/* Keep long forms reachable on short desktop and mobile viewports. */
+.modal-backdrop{overflow-y:auto;overscroll-behavior:contain}
+.modal{max-height:calc(100dvh - 30px);overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;box-sizing:border-box}
+
+/* Keep the library summary below the hero copy instead of floating over it. */
+.library-hero{padding-bottom:34px;overflow:hidden}
+.library-hero:after{z-index:0;bottom:-285px}
+.library-metrics{position:relative;left:auto;right:auto;bottom:auto;grid-column:1/-1;margin:8px 0 0}
+.library-metrics div{position:relative;z-index:1;background:rgba(255,255,255,.18)}
+.library-tools{margin-top:24px}
+
+@media(max-width:850px){
+  .library-hero{min-height:0;padding:25px 21px}
+  .library-metrics{left:auto;right:auto;margin-top:6px}
+}
+
+@media(max-width:520px){
+  .library-metrics{grid-template-columns:1fr}
+}
+
+.stat-box .study-time-value{font-size:clamp(22px,3vw,35px);line-height:1.2;overflow-wrap:anywhere}
+
+.document-card-clickable{cursor:pointer}
+.document-card-clickable:focus-within{border-color:#6557dd;box-shadow:0 0 0 3px rgba(101,87,221,.12)}
+.document-card-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:auto}
+.document-card-actions .text-link{display:inline-flex;align-items:center;gap:5px}
+.document-card-actions svg{width:16px;height:16px}
+.document-preview-modal{width:min(960px,calc(100vw - 30px));max-width:960px;height:min(82dvh,820px);display:flex;flex-direction:column;overflow:hidden}
+.document-preview-modal>header{flex:none;padding-bottom:14px;border-bottom:1px solid #e2e8f1}
+.document-preview-meta{display:flex;flex-wrap:wrap;gap:7px;padding:12px 0}
+.document-preview-meta span{padding:5px 8px;border-radius:6px;background:#f1f4f8;color:#5e7086;font-size:11px}
+.document-preview-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;border:1px solid #e0e7ef;border-radius:8px;background:#fbfcfe}
+.document-preview-body pre{min-height:100%;box-sizing:border-box;margin:0;padding:22px;white-space:pre-wrap;overflow-wrap:anywhere;color:#172a42;font:14px/1.75 "Cascadia Mono","Consolas","Courier New",monospace;letter-spacing:0;tab-size:4}
+.document-preview-status,.document-preview-error{margin:0;padding:28px;color:#687b91;text-align:center}
+.document-preview-error{color:#b42332}
+.document-preview-actions{display:flex;justify-content:flex-end;gap:10px;padding-top:14px}
+.automatic-progress-bar{flex:1;height:9px;overflow:hidden;border-radius:999px;background:#e7edf4}
+.automatic-progress-bar span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#e23d48,#6254dc);transition:width .35s ease}
+
+@media(max-width:600px){
+  .document-card-actions{align-items:flex-start;flex-direction:column}
+  .document-preview-modal{width:calc(100vw - 20px);height:calc(100dvh - 20px);padding:16px}
+  .document-preview-body pre{padding:16px;font-size:13px}
+  .document-preview-actions .btn{flex:1}
+}

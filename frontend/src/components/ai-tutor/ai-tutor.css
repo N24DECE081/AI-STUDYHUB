@@ -69,9 +69,15 @@
 .tutor-input-shell textarea::placeholder{color:#9aa8ba}
 .tutor-input-actions{display:flex;align-items:center;gap:8px}
 .tutor-file-upload{display:flex;align-items:center;gap:5px;min-width:0;overflow:auto}
-.tutor-attach{flex:none;border:0;background:transparent;color:var(--red);font-size:12px;font-weight:800;cursor:pointer;padding:6px 3px}
-.tutor-file-chip{white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis;font-size:11px;background:var(--soft);color:var(--soft-ink);border:1px solid var(--line);border-radius:999px;padding:4px 8px}
-.tutor-file-chip button{border:0;background:transparent;font-size:15px;line-height:10px;color:var(--danger);cursor:pointer}
+.tutor-attach{flex:none;display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:var(--red);font-size:12px;font-weight:800;cursor:pointer;padding:6px 3px}
+.tutor-attach:disabled{opacity:.45;cursor:not-allowed}
+.tutor-file-count{flex:none;font-size:10px;font-weight:800;color:#738196}
+.tutor-file-chip{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;max-width:190px;font-size:11px;background:var(--soft);color:var(--soft-ink);border:1px solid var(--line);border-radius:999px;padding:4px 5px 4px 8px}
+.tutor-file-chip>span{overflow:hidden;text-overflow:ellipsis}
+.tutor-file-chip.error{border-color:#efb6b8;color:var(--danger)}
+.tutor-file-chip button{display:grid;place-items:center;flex:none;width:22px;height:22px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--danger);cursor:pointer}
+.tutor-file-chip button:hover:not(:disabled){background:#feecee}
+.tutor-file-chip button:disabled{opacity:.45;cursor:not-allowed}
 .tutor-keyboard-tip{margin-left:auto;font-size:11px;color:#9aa8ba}
 .tutor-send{border:0;border-radius:7px;background:var(--red);color:#fff;padding:9px 15px;font-size:12px;font-weight:800;cursor:pointer;box-shadow:0 8px 18px rgba(222,53,59,.18)}
 .tutor-send:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}

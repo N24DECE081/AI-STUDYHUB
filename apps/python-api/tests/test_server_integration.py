@@ -1,4 +1,4 @@
-import os, subprocess, sys, time, urllib.request, urllib.error, tempfile, json, sqlite3
+import os, subprocess, sys, time, urllib.request, urllib.error, tempfile, json, sqlite3, hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 import unittest
@@ -19,6 +19,7 @@ class ServerIntegrationTest(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         env = os.environ.copy()
         env['STUDYHUB_PORT'] = str(cls.port)
+        env['PYTHONIOENCODING'] = 'utf-8'
         env['STUDYHUB_DB_PATH'] = str(Path(cls.tmp.name) / 'integration.db')
         env['STUDYHUB_UPLOAD_DIR'] = str(Path(cls.tmp.name) / 'uploads')
         env['STUDYHUB_DB_MODE'] = 'sqlite'
@@ -31,7 +32,7 @@ class ServerIntegrationTest(unittest.TestCase):
         env.pop('MYSQL_DATABASE', None)
         env['STUDYHUB_CORS_ORIGINS'] = 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175'
         cls.proc = subprocess.Popen([sys.executable, str(ROOT/'run.py')], cwd=ROOT, env=env,
-                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, text=True)
         deadline=time.time()+5
         while time.time()<deadline:
             try:
@@ -70,8 +71,8 @@ class ServerIntegrationTest(unittest.TestCase):
     def test_real_http_assets_and_api(self):
         status,ctype,body=self.get('/api/subjects')
         self.assertEqual(status,200); self.assertEqual(ctype,'application/json'); self.assertIn(b'ATTT',body)
-        status,ctype,body=self.get('/api/documents')
-        self.assertEqual(status,200); self.assertEqual(ctype,'application/json')
+        status,_,body=self.request('/api/documents')
+        self.assertEqual(status,401); self.assertIn('error',body)
         if not (ROOT/'web').is_dir():
             self.skipTest('vanilla web/ UI is not shipped; the React frontend owns the assets')
         status,ctype,body=self.get('/')
@@ -125,6 +126,61 @@ class ServerIntegrationTest(unittest.TestCase):
             me=json.loads(r.read())
         self.assertIsNone(me['user'])
 
+    def test_real_time_study_session_and_document_progress(self):
+        email=f'progress_clock_{time.time_ns()}@example.com'
+        status,headers,body=self.request('/api/auth/register','POST',{
+            'name':'Progress Clock','email':email,'password':'StrongPass123!'
+        })
+        self.assertEqual(status,201,body)
+        cookie=headers['Set-Cookie'].split(';',1)[0]
+        connection=sqlite3.connect(Path(self.tmp.name) / 'integration.db')
+        user_id=connection.execute('SELECT id FROM users WHERE email=?',(email,)).fetchone()[0]
+        subject_id=connection.execute('SELECT id FROM subjects ORDER BY id LIMIT 1').fetchone()[0]
+        document_id=connection.execute('''INSERT INTO documents(
+            subject_id,uploaded_by,title,original_filename,storage_filename,file_type,
+            mime_type,file_size,storage_path,status,visibility
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?)''',(
+            subject_id,user_id,'Real progress document','progress.txt',f'{time.time_ns()}.txt',
+            'txt','text/plain',4,'uploads/progress.txt','ready','private'
+        )).lastrowid
+        connection.execute(
+            "UPDATE study_sessions SET started_at=datetime('now','-3665 seconds') "
+            "WHERE user_id=? AND status='active'",(user_id,)
+        )
+        connection.commit(); connection.close()
+
+        status,_,progress=self.request('/api/progress',headers={'Cookie':cookie})
+        self.assertEqual(status,200,progress)
+        document=next(item for item in progress['items'] if item.get('document_id')==document_id)
+        self.assertEqual(document['progress_percent'],0)
+        status,_,saved=self.request('/api/progress','POST',{
+            'document_id':document_id,'progress_percent':60,'completed':False
+        },{'Cookie':cookie})
+        self.assertEqual(status,403,saved)
+        self.assertIn('tự động',saved['error'])
+        status,_,content=self.request(
+            f'/api/documents/{document_id}/content',headers={'Cookie':cookie}
+        )
+        self.assertEqual(status,200,content)
+        status,_,progress=self.request('/api/progress',headers={'Cookie':cookie})
+        document=next(item for item in progress['items'] if item.get('document_id')==document_id)
+        self.assertEqual(document['progress_percent'],25)
+        status,_,study_time=self.request('/api/study-time',headers={'Cookie':cookie})
+        self.assertEqual(status,200,study_time)
+        self.assertTrue(study_time['active'])
+        self.assertGreaterEqual(study_time['current_session_seconds'],3665)
+
+        status,_,logout=self.request('/api/auth/logout','POST',{}, {'Cookie':cookie})
+        self.assertEqual(status,200,logout)
+        connection=sqlite3.connect(Path(self.tmp.name) / 'integration.db')
+        closed=connection.execute(
+            'SELECT status,duration_seconds FROM study_sessions WHERE user_id=? ORDER BY id DESC LIMIT 1',
+            (user_id,),
+        ).fetchone()
+        connection.close()
+        self.assertEqual(closed[0],'completed')
+        self.assertGreaterEqual(closed[1],3665)
+
     def test_course_creation_and_progress_round_trip(self):
         student_cookie=self.login_cookie('student@studyhub.local','Student123!')
         subjects=json.loads(self.get('/api/subjects')[2]); subject_id=subjects[0]['id']
@@ -170,10 +226,67 @@ class ServerIntegrationTest(unittest.TestCase):
         with urllib.request.urlopen(req, timeout=2) as r:
             self.assertEqual(r.status,201); uploaded=json.loads(r.read())
         self.assertTrue(uploaded['ok'])
-        document=json.loads(self.get(f"/api/documents/{uploaded['document_id']}")[2])
+        status,_,document=self.request(f"/api/documents/{uploaded['document_id']}",headers={'Cookie':cookie})
+        self.assertEqual(status,200,document)
         stored=ROOT / document['file_path']
         self.assertEqual(stored.parent.resolve(), (Path(self.tmp.name) / 'uploads').resolve())
-        if stored.exists(): stored.unlink()
+        connection=sqlite3.connect(Path(self.tmp.name) / 'integration.db')
+        saved=connection.execute(
+            'SELECT d.uploaded_by,d.visibility,c.content FROM documents d '
+            'JOIN document_chunks c ON c.document_id=d.id WHERE d.id=?',
+            (uploaded['document_id'],),
+        ).fetchone()
+        connection.close()
+        self.assertIsNotNone(saved)
+        self.assertEqual(saved[1],'private')
+        self.assertEqual(saved[2],'student file')
+        status,_,content=self.request(
+            f"/api/documents/{uploaded['document_id']}/content",headers={'Cookie':cookie}
+        )
+        self.assertEqual(status,200,content)
+        self.assertEqual(content['content'],'student file')
+        self.assertEqual(content['display_mode'],'plain_text')
+        status,_,tutor_result=self.request('/api/ai-tutor/chat','POST',{
+            'conversation_id':f'auto-progress-{time.time_ns()}',
+            'message':'Giải thích nội dung student file','mode':'explain',
+            'file_ids':[uploaded['document_id']],
+        },{'Cookie':cookie})
+        self.assertEqual(status,200,tutor_result)
+        self.assertEqual(tutor_result['retrieval']['tier'],'documents')
+        status,_,automatic_progress=self.request('/api/progress',headers={'Cookie':cookie})
+        learned=next(item for item in automatic_progress['items']
+                     if item.get('document_id')==uploaded['document_id'])
+        self.assertEqual(learned['progress_percent'],60)
+        teacher=self.login_cookie('teacher@studyhub.local','Teacher123!')
+        status,_,other_document=self.request(f"/api/documents/{uploaded['document_id']}",headers={'Cookie':teacher})
+        self.assertEqual(status,404,other_document)
+        status,_,other_content=self.request(
+            f"/api/documents/{uploaded['document_id']}/content",headers={'Cookie':teacher}
+        )
+        self.assertEqual(status,404,other_content)
+        status,_,teacher_documents=self.request('/api/documents',headers={'Cookie':teacher})
+        self.assertEqual(status,200,teacher_documents)
+        self.assertNotIn(uploaded['document_id'],[item['id'] for item in teacher_documents])
+        status,_,cross_user_tutor=self.request('/api/ai-tutor/chat','POST',{
+            'message':'Tóm tắt tài liệu','mode':'summarize','file_ids':[uploaded['document_id']],
+        },{'Cookie':teacher})
+        self.assertEqual(status,404,cross_user_tutor)
+        status,_,cross_user_delete=self.request(
+            f"/api/documents/{uploaded['document_id']}",'DELETE',headers={'Cookie':teacher}
+        )
+        self.assertEqual(status,404,cross_user_delete)
+        status,_,deleted=self.request(
+            f"/api/documents/{uploaded['document_id']}",'DELETE',headers={'Cookie':cookie}
+        )
+        self.assertEqual(status,200,deleted)
+        self.assertTrue(deleted['ok'])
+        connection=sqlite3.connect(Path(self.tmp.name) / 'integration.db')
+        remaining=connection.execute(
+            'SELECT COUNT(*) FROM document_chunks WHERE document_id=?',(uploaded['document_id'],)
+        ).fetchone()[0]
+        connection.close()
+        self.assertEqual(remaining,0)
+        self.assertFalse(stored.exists())
 
     def test_missing_asset_is_404(self):
         with self.assertRaises(urllib.error.HTTPError) as cm:
@@ -206,6 +319,28 @@ class ServerIntegrationTest(unittest.TestCase):
         self.assertTrue(result['message_id'])
         self.assertIsInstance(result['content'],str)
 
+    def test_ai_tutor_uses_external_cache_when_documents_do_not_match(self):
+        cookie=self.login_cookie('student@studyhub.local','Student123!')
+        cached_answer=('Xenolith quasar là mục kiến thức thử nghiệm được lưu trong '
+                       'bộ nhớ kiến thức bên ngoài của StudyHub.')
+        connection=sqlite3.connect(Path(self.tmp.name) / 'integration.db')
+        connection.execute('''INSERT INTO external_knowledge_cache(
+            cache_key,keywords,question,answer,provider
+        ) VALUES(?,?,?,?,?)''',(
+            hashlib.sha256(str(time.time_ns()).encode()).hexdigest(),
+            json.dumps(['quasar','xenolith']),
+            'Quasar xenolith là gì?',cached_answer,'test-cache',
+        ))
+        connection.commit(); connection.close()
+        status,_,result=self.request('/api/ai-tutor/chat','POST',{
+            'conversation_id':f'external-cache-{time.time_ns()}',
+            'message':'Giải thích quasar xenolith','mode':'explain','file_ids':[],
+        },{'Cookie':cookie})
+        self.assertEqual(status,200,result)
+        self.assertEqual(result['retrieval']['tier'],'external_cache')
+        self.assertEqual(result['sources'][0]['type'],'external_cache')
+        self.assertIn('Xenolith quasar',result['content'])
+
     def test_ai_tutor_invalid_utf8_returns_json_error_without_dropping_connection(self):
         cookie=self.login_cookie('student@studyhub.local','Student123!')
         status,headers,result=self.request('/api/ai-tutor/chat','POST',b'{"message":"\xff"}',{
@@ -214,6 +349,14 @@ class ServerIntegrationTest(unittest.TestCase):
         self.assertEqual(status,400,result)
         self.assertEqual(headers.get_content_type(),'application/json')
         self.assertIn('error',result)
+
+    def test_ai_tutor_rejects_more_than_five_files(self):
+        cookie=self.login_cookie('student@studyhub.local','Student123!')
+        status,_,result=self.request('/api/ai-tutor/chat','POST',{
+            'message':'Tóm tắt các tài liệu','mode':'summarize','file_ids':[1,2,3,4,5,6],
+        },{'Cookie':cookie})
+        self.assertEqual(status,400,result)
+        self.assertIn('5',result['error'])
 
     def test_subscription_upgrade_and_downgrade_are_persisted(self):
         cookie=self.login_cookie('student@studyhub.local','Student123!')
@@ -263,7 +406,8 @@ class ServerIntegrationTest(unittest.TestCase):
         ).encode()
         status,_,uploaded=self.request('/api/upload','POST',upload,{'Cookie':student,'Content-Type':f'multipart/form-data; boundary={boundary}'})
         self.assertEqual(status,201,uploaded)
-        source=json.loads(self.get(f"/api/documents/{uploaded['document_id']}")[2])
+        status,_,source=self.request(f"/api/documents/{uploaded['document_id']}",headers={'Cookie':student})
+        self.assertEqual(status,200,source)
         stored=ROOT / source['file_path']
         self.assertEqual(stored.parent.resolve(), (Path(self.tmp.name) / 'uploads').resolve())
         self.addCleanup(lambda path=stored: path.unlink(missing_ok=True))

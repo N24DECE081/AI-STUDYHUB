@@ -8,7 +8,7 @@ from app.db.database import Database
 from app.db.seed import seed
 
 EXPECTED_TABLES = {
-    "schema_migrations", "auth_sessions",
+    "schema_migrations", "auth_sessions", "study_sessions", "external_knowledge_cache",
     "users", "subjects", "documents", "courses", "course_documents", "user_streaks",
     "course_enrollments", "plans", "subscriptions", "chat_sessions",
     "chat_messages", "document_chunks", "user_progress", "subscription_changes",
@@ -154,6 +154,8 @@ class DatabasePhase1Tests(unittest.TestCase):
             "ux_user_progress_course", "ux_user_progress_document",
             "ux_active_subscription_per_user", "ix_documents_subject_created",
             "ix_chat_messages_session_created", "ix_chunks_document_index",
+            "ix_study_sessions_user_started", "ix_study_sessions_user_status",
+            "ix_external_cache_updated",
         }:
             self.assertIn(required, names)
         triggers = {

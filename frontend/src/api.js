@@ -1,3 +1,5 @@
+import { buildSubjectHashMap, findSubject } from "./utils/subjectAlgorithms";
+
 // Local development uses Vite's same-origin /api proxy, including when Vite
 // falls back to another port. Set an explicit API URL only for separate hosting.
 const configuredApiBase = String(import.meta.env.VITE_API_BASE_URL || "").trim();
@@ -57,7 +59,12 @@ export const createSubject = ({ name, code, description }) =>
     body: JSON.stringify({ name, code, description }),
   });
 export const getDocuments = () => request("/documents");
+export const getDocumentContent = (documentId) =>
+  request(`/documents/${documentId}/content`);
+export const deleteDocument = (documentId) =>
+  request(`/documents/${documentId}`, { method: "DELETE" });
 export const getProgress = () => request("/progress");
+export const getStudyTime = () => request("/study-time");
 export const getStreak = () => request("/streak");
 
 export async function uploadDocument({
@@ -68,11 +75,7 @@ export async function uploadDocument({
 }) {
   const subjects = await request("/subjects");
   const normalizedSubject = String(subjectCode ?? "").trim();
-  const subject = subjects.find(
-    (item) =>
-      String(item.code).toLowerCase() === normalizedSubject.toLowerCase() ||
-      String(item.id) === normalizedSubject,
-  );
+  const subject = findSubject(buildSubjectHashMap(subjects), normalizedSubject);
   if (!subject)
     throw new Error("Môn học không tồn tại hoặc chưa được tải lại.");
   const body = new FormData();

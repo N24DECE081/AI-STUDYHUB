@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import {
   checkoutSubscription,
   cancelSubscription,
   createSubject,
   getCurrentUser,
+  getDocumentContent,
   getDocuments,
   getProgress,
+  getStudyTime,
   getStreak,
   getSubscription,
   getSubjects,
@@ -18,6 +20,7 @@ import {
 import AITutorPage from "./components/ai-tutor/AITutorPage";
 import QuizWorkspace from "./components/QuizWorkspace";
 import LearningRoadmapPage from "./components/LearningRoadmapPage";
+import { buildSubjectHashMap, findSubject, quickSortSubjects } from "./utils/subjectAlgorithms";
 import {
   ArrowRightIcon,
   AcademicCapIcon,
@@ -91,6 +94,40 @@ const PLANS = {
   },
 };
 
+const EMPTY_STUDY_TIME = {
+  total_seconds: 0,
+  current_session_seconds: 0,
+  session_count: 0,
+  active: false,
+};
+
+function formatStudyDuration(totalSeconds) {
+  const minutes = Math.floor(Math.max(0, totalSeconds) / 60);
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return hours ? `${hours} giờ ${remainingMinutes} phút` : `${minutes} phút`;
+}
+
+function formatStudyClock(totalSeconds) {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = String(Math.floor(seconds / 3600)).padStart(2, "0");
+  const minutes = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
+  const remainingSeconds = String(seconds % 60).padStart(2, "0");
+  return `${hours}:${minutes}:${remainingSeconds}`;
+}
+
+function mapDocumentProgress(result) {
+  return (result.items || [])
+    .filter((item) => item.document_id)
+    .map((item) => ({
+      id: item.id || `document-${item.document_id}`,
+      documentId: item.document_id,
+      title: item.document_title || "Tài liệu học tập",
+      subject: item.subject_code || "",
+      percent: item.progress_percent || 0,
+    }));
+}
+
 function StreakCard({ user, streak, onLogin }) {
   const today = new Date().toISOString().slice(0, 10);
   const todayActive = Boolean(user && streak.last_activity_date === today);
@@ -144,12 +181,12 @@ function StreakCard({ user, streak, onLogin }) {
   );
 }
 
-function Modal({ title, children, onClose, icon, subtitle }) {
+function Modal({ title, children, onClose, icon, subtitle, className = "" }) {
   const isCheckout = title === "Xác nhận thay đổi gói";
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <section
-        className={`modal ${isCheckout ? "checkout-modal" : ""} ${icon ? "modal-with-icon" : ""}`}
+        className={`modal ${isCheckout ? "checkout-modal" : ""} ${icon ? "modal-with-icon" : ""} ${className}`.trim()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-heading-title"
@@ -243,6 +280,7 @@ export default function App() {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [progress, setProgress] = useState([]);
+  const [studyTime, setStudyTime] = useState(EMPTY_STUDY_TIME);
   const [streak, setStreak] = useState({
     current_streak: 0,
     recovery_count: 0,
@@ -252,30 +290,33 @@ export default function App() {
   const [authMode, setAuthMode] = useState("login");
   const [toast, setToast] = useState("");
   const [selectedDocument, setSelectedDocument] = useState(null);
+  const [documentPreview, setDocumentPreview] = useState(null);
+  const documentPreviewRequest = useRef(0);
   const [subscription, setSubscription] = useState({
     plan: "free",
     status: "active",
   });
   const [pendingPlan, setPendingPlan] = useState(null);
   const [billingCycle] = useState("month");
-  const subjectOptions = subjects;
+  const subjectOptions = useMemo(() => quickSortSubjects(subjects), [subjects]);
+  const subjectIndex = useMemo(() => buildSubjectHashMap(subjectOptions), [subjectOptions]);
   const average = progress.length
     ? Math.round(
         progress.reduce((total, item) => total + item.percent, 0) /
           progress.length,
       )
     : 0;
-  const filteredDocs = useMemo(
-    () =>
-      documents.filter(
-        (doc) =>
-          (filter === "all" || doc.subject_code === filter) &&
-          `${doc.title} ${doc.description || ""}`
-            .toLowerCase()
-            .includes(search.toLowerCase()),
-      ),
-    [documents, filter, search],
-  );
+  const filteredDocs = useMemo(() => {
+    const normalizedSearch = search.trim().toLocaleLowerCase("vi");
+    const matchedSubject = normalizedSearch ? findSubject(subjectIndex, normalizedSearch) : null;
+    return documents.filter(
+      (doc) =>
+        (filter === "all" || doc.subject_code === filter) &&
+        (!normalizedSearch ||
+          `${doc.title} ${doc.description || ""}`.toLocaleLowerCase("vi").includes(normalizedSearch) ||
+          (matchedSubject && doc.subject_code === matchedSubject.code)),
+    );
+  }, [documents, filter, search, subjectIndex]);
   const notify = (message) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 3200);
@@ -302,6 +343,16 @@ export default function App() {
       setDocuments([]);
     }
   };
+  const loadProgress = async () => {
+    try {
+      setProgress(mapDocumentProgress(await getProgress()));
+    } catch {
+      setProgress([]);
+    }
+  };
+  const loadDocumentsAndProgress = async () => {
+    await Promise.all([loadDocuments(), loadProgress()]);
+  };
   const loadSubjects = async () => {
     try {
       setSubjects(await getSubjects());
@@ -318,6 +369,7 @@ export default function App() {
       setDocuments([]);
       setSubjects([]);
       setProgress([]);
+      setStudyTime(EMPTY_STUDY_TIME);
       setStreak({ current_streak: 0, recovery_count: 0, last_activity_date: null });
       setSubscription({ plan: "free", status: "active" });
       setFilter("all");
@@ -332,10 +384,11 @@ export default function App() {
       } catch {
         setQuizDecks([]);
       }
-      const [documentsResult, subjectsResult, progressResult, streakResult, subscriptionResult] = await Promise.allSettled([
+      const [documentsResult, subjectsResult, progressResult, studyTimeResult, streakResult, subscriptionResult] = await Promise.allSettled([
         getDocuments(),
         getSubjects(),
         getProgress(),
+        getStudyTime(),
         getStreak(),
         getSubscription(),
       ]);
@@ -343,14 +396,9 @@ export default function App() {
       if (documentsResult.status === "fulfilled") setDocuments(documentsResult.value);
       if (subjectsResult.status === "fulfilled") setSubjects(subjectsResult.value);
       if (progressResult.status === "fulfilled") {
-        setProgress((progressResult.value.items || []).map((item) => ({
-          id: item.id,
-          title: item.course_title || item.document_title || "Mục học tập",
-          subject: item.subject_code || "",
-          percent: item.progress_percent || 0,
-          minutes: 0,
-        })));
+        setProgress(mapDocumentProgress(progressResult.value));
       }
+      if (studyTimeResult.status === "fulfilled") setStudyTime(studyTimeResult.value);
       if (streakResult.status === "fulfilled") setStreak(streakResult.value);
       if (subscriptionResult.status === "fulfilled") {
         setSubscription(subscriptionResult.value);
@@ -361,6 +409,23 @@ export default function App() {
     return () => {
       active = false;
       window.clearTimeout(timer);
+    };
+  }, [userKey]);
+  useEffect(() => {
+    if (!userKey) return undefined;
+    const clock = window.setInterval(() => {
+      setStudyTime((current) => current.active ? {
+        ...current,
+        total_seconds: current.total_seconds + 1,
+        current_session_seconds: current.current_session_seconds + 1,
+      } : current);
+    }, 1000);
+    const sync = window.setInterval(() => {
+      getStudyTime().then(setStudyTime).catch(() => {});
+    }, 15000);
+    return () => {
+      window.clearInterval(clock);
+      window.clearInterval(sync);
     };
   }, [userKey]);
   useRevealOnScroll(`${view}-${documents.length}-${quizDecks.length}`);
@@ -387,8 +452,28 @@ export default function App() {
   };
   const go = (next) => {
     if (next === "tutor" && requireLogin()) return;
+    if (next === "dashboard" && user) void loadProgress();
     setView(next);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const openDocumentPreview = async (document) => {
+    const requestId = ++documentPreviewRequest.current;
+    setDocumentPreview({ document, loading: true, content: "", error: "" });
+    setModal("document-preview");
+    try {
+      const result = await getDocumentContent(document.id);
+      if (requestId !== documentPreviewRequest.current) return;
+      setDocumentPreview({ document: { ...document, ...result }, loading: false, content: result.content || "", error: "" });
+      void loadProgress();
+    } catch (error) {
+      if (requestId !== documentPreviewRequest.current) return;
+      setDocumentPreview({ document, loading: false, content: "", error: error.message });
+    }
+  };
+  const closeDocumentPreview = () => {
+    documentPreviewRequest.current += 1;
+    setModal(null);
+    setDocumentPreview(null);
   };
   const signOut = async () => {
     try {
@@ -400,6 +485,7 @@ export default function App() {
     setDocuments([]);
     setSubjects([]);
     setProgress([]);
+    setStudyTime(EMPTY_STUDY_TIME);
     setStreak({ current_streak: 0, recovery_count: 0, last_activity_date: null });
     setSubscription({ plan: "free", status: "active" });
     setView("home");
@@ -420,6 +506,7 @@ export default function App() {
       // Clear old user's data first before saving new user
       setDocuments([]);
       setProgress([]);
+      setStudyTime(EMPTY_STUDY_TIME);
       setSubjects([]);
       setSubscription({ plan: "free", status: "active" });
       // Now save the new user (this triggers effect to load their data)
@@ -456,7 +543,7 @@ export default function App() {
         subjectCode: data.get("subject"),
       });
       setModal(null);
-      await loadDocuments();
+      await loadDocumentsAndProgress();
       notify("Đã tải tài liệu vào kho học liệu.");
     } catch (error) {
       notify(`Upload thất bại: ${error.message}`);
@@ -784,19 +871,35 @@ export default function App() {
             </div>
             <div className="document-grid reveal-stagger" aria-live="polite">
               {filteredDocs.map((doc) => (
-                <article className="document-card" key={doc.id}>
+                <article
+                  className="document-card document-card-clickable"
+                  key={doc.id}
+                  onClick={() => openDocumentPreview(doc)}
+                >
                   <span>{doc.subject_code || "DOC"}</span>
                   <h3>{doc.title}</h3>
                   <p>{doc.description || "Tài liệu chưa có mô tả."}</p>
-                  <button
-                    className="text-link"
-                    onClick={() => {
-                      setSelectedDocument(doc);
-                      go("tutor");
-                    }}
-                  >
-                    Hỏi Nova về tài liệu →
-                  </button>
+                  <div className="document-card-actions">
+                    <button
+                      className="text-link document-view-link"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openDocumentPreview(doc);
+                      }}
+                    >
+                      <BookOpenIcon aria-hidden="true" /> Xem nội dung
+                    </button>
+                    <button
+                      className="text-link"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setSelectedDocument(doc);
+                        go("tutor");
+                      }}
+                    >
+                      Hỏi Nova →
+                    </button>
+                  </div>
                 </article>
               ))}
               {!filteredDocs.length && (
@@ -866,12 +969,12 @@ export default function App() {
               <div className="stat-box red">
                 <span>Tiến độ</span>
                 <strong>{average}%</strong>
-                <small>trung bình các mục</small>
+                <small>trung bình {progress.length} tài liệu</small>
               </div>
               <div className="stat-box blue">
                 <span>Thời gian học</span>
-                <strong>—</strong>
-                <small>Chưa có dữ liệu từ backend</small>
+                <strong className="study-time-value">{formatStudyDuration(studyTime.total_seconds)}</strong>
+                <small>Phiên hiện tại: {formatStudyClock(studyTime.current_session_seconds)}</small>
               </div>
               <div className="stat-box dark">
                 <span>Tài liệu</span>
@@ -892,34 +995,22 @@ export default function App() {
               <div className="progress-list reveal-stagger">
                 {!progress.length && <p className="empty-state">Chưa có dữ liệu tiến độ.</p>}
                 {progress.map((item) => (
-                  <div className="progress-row" key={item.id}>
+                  <div className="progress-row" key={item.documentId}>
                     <div className="progress-info">
                       <strong>{item.title}</strong>
                       {item.subject && <small>{item.subject}</small>}
                     </div>
                     <div className="progress-control">
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={item.percent}
-                        onChange={(e) =>
-                          setProgress((all) =>
-                            all.map((current) =>
-                              current.id === item.id
-                                ? {
-                                    ...current,
-                                    percent: +e.target.value,
-                                    minutes: Math.max(
-                                      current.minutes,
-                                      Math.round(+e.target.value * 1.2),
-                                    ),
-                                  }
-                                : current,
-                            ),
-                          )
-                        }
-                      />
+                      <div
+                        className="automatic-progress-bar"
+                        role="progressbar"
+                        aria-label={`Tiến độ tự động của tài liệu ${item.title}`}
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        aria-valuenow={item.percent}
+                      >
+                        <span style={{ width: `${item.percent}%` }} />
+                      </div>
                       <span>{item.percent}%</span>
                     </div>
                   </div>
@@ -929,7 +1020,7 @@ export default function App() {
           </section>
         )}
         {view === "tutor" && (
-          <AITutorPage selectedDocument={selectedDocument} />
+          <AITutorPage selectedDocument={selectedDocument} user={user} onDocumentsChanged={loadDocumentsAndProgress} onDocumentDeleted={(documentId) => setSelectedDocument((current) => String(current?.id) === String(documentId) ? null : current)} />
         )}
         {view === "pricing" && (
           <section className="pricing-page">
@@ -1013,6 +1104,50 @@ export default function App() {
           </section>
         )}
       </main>
+      {modal === "document-preview" && documentPreview && (
+        <Modal
+          title={documentPreview.document.title || "Nội dung tài liệu"}
+          subtitle="Bản văn bản thuần được trích xuất từ tài liệu gốc."
+          icon={<BookOpenIcon />}
+          className="document-preview-modal"
+          onClose={closeDocumentPreview}
+        >
+          <div className="document-preview-meta">
+            <span>{documentPreview.document.subject_code || "Tài liệu"}</span>
+            <span>{documentPreview.document.file_name || documentPreview.document.original_filename || ""}</span>
+            {!documentPreview.loading && !documentPreview.error && (
+              <span>{documentPreview.content.length.toLocaleString("vi-VN")} ký tự</span>
+            )}
+          </div>
+          <div className="document-preview-body" aria-live="polite">
+            {documentPreview.loading && <p className="document-preview-status">Đang tải toàn bộ nội dung...</p>}
+            {documentPreview.error && (
+              <p className="document-preview-error">Không thể hiển thị tài liệu: {documentPreview.error}</p>
+            )}
+            {!documentPreview.loading && !documentPreview.error && documentPreview.content && (
+              <pre>{documentPreview.content}</pre>
+            )}
+            {!documentPreview.loading && !documentPreview.error && !documentPreview.content && (
+              <p className="document-preview-status">Tài liệu không có nội dung văn bản để hiển thị.</p>
+            )}
+          </div>
+          <footer className="document-preview-actions">
+            <button type="button" className="btn btn-ghost" onClick={closeDocumentPreview}>Đóng</button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                setSelectedDocument(documentPreview.document);
+                setModal(null);
+                setDocumentPreview(null);
+                go("tutor");
+              }}
+            >
+              Hỏi Nova về tài liệu
+            </button>
+          </footer>
+        </Modal>
+      )}
       {modal === "auth" && (
         <Modal
           title={authMode === "login" ? "Đăng nhập StudyHub" : "Tạo tài khoản"}

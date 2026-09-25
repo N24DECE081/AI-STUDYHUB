@@ -1,6 +1,9 @@
 /** Local cache + server history merge for the Nova chat sidebar. */
 
-export const STORE = 'studyhub-nova-conversations-v2';
+export const STORE = 'studyhub-nova-conversations-v3';
+const LEGACY_STORE_PREFIX = 'studyhub-nova-conversations-v2';
+
+const storageKey = (userScope) => `${STORE}:${String(userScope || 'guest')}`;
 
 export const newId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -13,18 +16,22 @@ export const welcome = () => ({
 
 export const freshConversation = () => ({ id: newId(), title: 'Cuộc hội thoại mới', updatedAt: Date.now(), messages: [welcome()] });
 
-export const loadConversations = () => {
+export const loadConversations = (userScope) => {
   try {
-    const value = JSON.parse(localStorage.getItem(STORE));
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith(LEGACY_STORE_PREFIX)) localStorage.removeItem(key);
+    }
+    const value = JSON.parse(localStorage.getItem(storageKey(userScope)));
     return Array.isArray(value) && value.length && value.every((item) => item?.id && Array.isArray(item.messages)) ? value : [freshConversation()];
   } catch {
     return [freshConversation()];
   }
 };
 
-export const persistConversations = (conversations) => {
+export const persistConversations = (conversations, userScope) => {
   try {
-    localStorage.setItem(STORE, JSON.stringify(conversations));
+    localStorage.setItem(storageKey(userScope), JSON.stringify(conversations));
   } catch {
     /* chế độ riêng tư: chỉ giữ trong state */
   }
