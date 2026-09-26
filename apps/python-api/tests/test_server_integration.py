@@ -143,6 +143,13 @@ class ServerIntegrationTest(unittest.TestCase):
         status,_,unauthorized=self.request('/api/subjects?scope=mine')
         self.assertEqual(status,401,unauthorized)
 
+    def test_google_oauth_status_does_not_expose_secrets(self):
+        status,_,body=self.request('/api/auth/oauth/status')
+        self.assertEqual(status,200,body)
+        self.assertIn('google',body['providers'])
+        self.assertFalse(body['providers']['google']['configured'])
+        self.assertNotIn('secret',json.dumps(body).lower())
+
     def test_real_time_study_session_and_document_progress(self):
         email=f'progress_clock_{time.time_ns()}@example.com'
         status,headers,body=self.request('/api/auth/register','POST',{

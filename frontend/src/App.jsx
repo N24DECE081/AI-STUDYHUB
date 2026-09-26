@@ -8,6 +8,8 @@ import {
   deleteDocument,
   getDocumentContent,
   getDocuments,
+  getOAuthLoginUrl,
+  getOAuthStatus,
   getProgress,
   getStudyTime,
   getStreak,
@@ -281,6 +283,7 @@ export default function App() {
   });
   const [modal, setModal] = useState(null);
   const [authMode, setAuthMode] = useState("login");
+  const [oauthStatus, setOAuthStatus] = useState({ google: false });
   const [toast, setToast] = useState("");
   const [selectedDocument, setSelectedDocument] = useState(null);
   const [documentPreview, setDocumentPreview] = useState(null);
@@ -460,6 +463,38 @@ export default function App() {
       active = false;
     };
   }, []);
+  useEffect(() => {
+    if (modal !== "auth") return undefined;
+    let active = true;
+    getOAuthStatus()
+      .then((result) => {
+        if (active) setOAuthStatus({ google: Boolean(result.providers?.google?.configured) });
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [modal]);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const oauthResult = params.get("oauth");
+    const oauthError = params.get("oauth_error");
+    if (!oauthResult && !oauthError) return;
+    window.history.replaceState({}, "", window.location.pathname);
+    if (oauthResult === "success") {
+      getCurrentUser().then((result) => {
+        if (result.user) {
+          saveUser(result.user);
+          notify("Đăng nhập Google thành công.");
+        }
+      }).catch(() => notify("Không thể tải phiên đăng nhập Google."));
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setAuthMode("login");
+      setModal("auth");
+      notify(oauthError === "access_denied" ? "Bạn đã hủy đăng nhập Google." : "Đăng nhập Google chưa thành công.");
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
   const requireLogin = () => {
     if (user) return false;
     setAuthMode("login");
@@ -567,6 +602,13 @@ export default function App() {
     } catch (error) {
       notify(`Upload thất bại: ${error.message}`);
     }
+  };
+  const chooseGoogleLogin = () => {
+    if (!oauthStatus.google) {
+      notify("Đăng nhập Google chưa được cấu hình Client ID và Client Secret trên backend.");
+      return;
+    }
+    window.location.assign(getOAuthLoginUrl("google"));
   };
   const removeLibraryDocument = async (event, document) => {
     event.stopPropagation();
@@ -1150,6 +1192,17 @@ export default function App() {
           title={authMode === "login" ? "Đăng nhập StudyHub" : "Tạo tài khoản"}
           onClose={() => setModal(null)}
         >
+          <button
+            type="button"
+            className="oauth-button oauth-google"
+            onClick={chooseGoogleLogin}
+            aria-disabled={!oauthStatus.google}
+            title={oauthStatus.google ? "Đăng nhập bằng tài khoản Google" : "Cần cấu hình Google OAuth trên backend"}
+          >
+            <span className="oauth-google-mark" aria-hidden="true">G</span>
+            Tiếp tục với Google
+          </button>
+          <div className="auth-divider"><span>hoặc dùng email</span></div>
           <form className="auth-form" onSubmit={submitAuth}>
             {authMode === "register" && (
               <label>

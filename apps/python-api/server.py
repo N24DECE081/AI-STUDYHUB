@@ -12,8 +12,10 @@ from email.policy import default
 
 from backend.app.db.runtime import get_runtime_database
 from backend.app.db.seed import seed as seed_database
-from backend.app.security import authenticate, register as register_user, current_user, revoke_session, SESSION_COOKIE
+from backend.app.security import authenticate, create_session, hash_password, register as register_user, current_user, public_user, revoke_session, SESSION_COOKIE
+from backend.app.security.service import update_streak
 from backend.app.security.session import token_hash
+from backend.app.security.oauth import OAuthError, authorization_url as oauth_authorization_url, exchange_profile as oauth_exchange_profile, provider_status as oauth_provider_status
 from backend.app.ai_tutor import (
     EngineError as TutorEngineError,
     GradingError as TutorGradingError,
@@ -133,6 +135,51 @@ def session_cookie(token, max_age=7 * 24 * 60 * 60):
     cross_site = os.environ.get('STUDYHUB_SECURE_COOKIES', '').lower() in ('1', 'true', 'yes')
     policy = 'SameSite=None; Secure' if cross_site else 'SameSite=Lax'
     return f'{SESSION_COOKIE}={token}; Path=/; Max-Age={max_age}; HttpOnly; {policy}'
+
+OAUTH_STATE_COOKIE='studyhub_oauth_state'
+
+def oauth_state_cookie(value, max_age=600):
+    secure = os.environ.get('STUDYHUB_SECURE_COOKIES', '').lower() in ('1', 'true', 'yes')
+    suffix = '; Secure' if secure else ''
+    return f'{OAUTH_STATE_COOKIE}={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax{suffix}'
+
+def oauth_frontend_url():
+    return os.environ.get('STUDYHUB_FRONTEND_URL','http://127.0.0.1:5174').strip().rstrip('/')
+
+def oauth_user_session(provider, profile):
+    with db() as c:
+        account=c.execute(
+            'SELECT user_id FROM oauth_accounts WHERE provider=? AND provider_user_id=?',
+            (provider,profile['provider_user_id']),
+        ).fetchone()
+        row=c.execute('SELECT * FROM users WHERE id=?',(account['user_id'],)).fetchone() if account else None
+        if not row:
+            row=c.execute('SELECT * FROM users WHERE email=?',(profile['email'],)).fetchone()
+        if not row:
+            full_name=profile['name'] if len(profile['name'])>=2 else 'StudyHub User'
+            user_id=c.execute(
+                'INSERT INTO users(full_name,email,password_hash,role,status,avatar_url) VALUES(?,?,?,?,?,?)',
+                (full_name,profile['email'],hash_password(secrets.token_urlsafe(32)),'student','active',profile['avatar_url'] or None),
+            ).lastrowid
+            row=c.execute('SELECT * FROM users WHERE id=?',(user_id,)).fetchone()
+        if row['status']!='active':
+            raise OAuthError('Tài khoản StudyHub đang bị khóa')
+        linked=c.execute('SELECT id FROM oauth_accounts WHERE provider=? AND provider_user_id=?',
+                         (provider,profile['provider_user_id'])).fetchone()
+        if linked:
+            c.execute('UPDATE oauth_accounts SET user_id=?,provider_email=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                      (row['id'],profile['email'],linked['id']))
+        else:
+            c.execute('INSERT INTO oauth_accounts(user_id,provider,provider_user_id,provider_email) VALUES(?,?,?,?)',
+                      (row['id'],provider,profile['provider_user_id'],profile['email']))
+        c.execute('UPDATE users SET avatar_url=COALESCE(?,avatar_url),last_login_at=CURRENT_TIMESTAMP WHERE id=?',
+                  (profile['avatar_url'] or None,row['id']))
+        streak=update_streak(c,row['id'])
+        token,expires_at=create_session(c,row['id'])
+        c.commit()
+        user=public_user(c.execute('SELECT * FROM users WHERE id=?',(row['id'],)).fetchone())
+        user['streak']=streak
+    return user,token,expires_at
 
 def utc_stamp():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -678,6 +725,10 @@ class H(BaseHTTPRequestHandler):
    for k,v in headers.items(): self.send_header(k,v)
   self.end_headers(); self.wfile.write(body)
  def json(self,obj,status=200,headers=None): self.send(status,json.dumps(obj,ensure_ascii=False).encode(),headers=headers)
+ def redirect(self,location,cookies=()):
+  self.send_response(302); self.send_header('Location',location); self.send_header('Cache-Control','no-store')
+  for cookie in cookies:self.send_header('Set-Cookie',cookie)
+  self.end_headers()
  def gateway_access(self):
   path=urlparse(self.path).path
   if path!='/api' and not path.startswith('/api/'): return True
@@ -733,6 +784,33 @@ class H(BaseHTTPRequestHandler):
   p=urlparse(self.path); path=p.path
   if path=='/api/health':
    return self.json({'status':'ok','service':'studyhub-api'})
+  if path=='/api/auth/oauth/status':
+   return self.json({'providers':oauth_provider_status()})
+  oauth_start=re.fullmatch(r'/api/auth/oauth/(google)',path)
+  if oauth_start:
+   provider=oauth_start.group(1); state=secrets.token_urlsafe(32)
+   try:location=oauth_authorization_url(provider,state)
+   except OAuthError as error:return self.json({'error':str(error)},503)
+   return self.redirect(location,[oauth_state_cookie(f'{provider}:{state}')])
+  oauth_callback=re.fullmatch(r'/api/auth/oauth/(google)/callback',path)
+  if oauth_callback:
+   provider=oauth_callback.group(1); query=parse_qs(p.query); state=query.get('state',[''])[0]; code=query.get('code',[''])[0]
+   stored=cookie_value(self,OAUTH_STATE_COOKIE) or ''; clear_state=oauth_state_cookie('',0)
+   if query.get('error'):
+    return self.redirect(f'{oauth_frontend_url()}/?oauth_error=access_denied',[clear_state])
+   if not state or not secrets.compare_digest(stored,f'{provider}:{state}'):
+    return self.redirect(f'{oauth_frontend_url()}/?oauth_error=invalid_state',[clear_state])
+   if not code:
+    return self.redirect(f'{oauth_frontend_url()}/?oauth_error=missing_code',[clear_state])
+   try:
+    profile=oauth_exchange_profile(provider,code); user,token,_=oauth_user_session(provider,profile)
+    with db() as c:ensure_study_session(c,user['id'],token)
+   except OAuthError:
+    return self.redirect(f'{oauth_frontend_url()}/?oauth_error=provider_failed',[clear_state])
+   except Exception as error:
+    self.log_error('OAuth callback failed: %r',error)
+    return self.redirect(f'{oauth_frontend_url()}/?oauth_error=server_failed',[clear_state])
+   return self.redirect(f'{oauth_frontend_url()}/?oauth=success',[clear_state,session_cookie(token)])
   if path in ('/api/me','/api/auth/me'):
    token=cookie_value(self,SESSION_COOKIE); user=user_from(self)
    if user and token:

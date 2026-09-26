@@ -35,6 +35,20 @@ CREATE INDEX IF NOT EXISTS ix_auth_sessions_user_expires
 CREATE INDEX IF NOT EXISTS ix_auth_sessions_expires
     ON auth_sessions(expires_at);
 
+CREATE TABLE IF NOT EXISTS oauth_accounts (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id             INTEGER NOT NULL,
+    provider            TEXT NOT NULL CHECK(provider IN ('google')),
+    provider_user_id    TEXT NOT NULL,
+    provider_email      TEXT NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(provider, provider_user_id),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS ix_oauth_accounts_user ON oauth_accounts(user_id);
+
 CREATE TABLE IF NOT EXISTS study_sessions (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id          INTEGER NOT NULL,
@@ -460,3 +474,5 @@ INSERT OR IGNORE INTO schema_migrations(version,description)
 VALUES(5,'Keyword document retrieval with persistent external knowledge cache');
 INSERT OR IGNORE INTO schema_migrations(version,description)
 VALUES(8,'User-owned learning-library subjects');
+INSERT OR IGNORE INTO schema_migrations(version,description)
+VALUES(9,'Google OAuth account links');
