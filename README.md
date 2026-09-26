@@ -104,3 +104,13 @@ npm run lint
 cd ../apps/python-api
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
+
+## CI/CD với GitHub Actions
+
+Workflow `.github/workflows/ci-cd.yml` tự động:
+
+- Chạy test backend, lint và build frontend khi mở Pull Request và khi push vào `main`.
+- Chỉ deploy frontend lên GitHub Pages sau khi cả backend và frontend đều thành công trên `main`.
+- Có thể chạy thủ công từ tab **Actions** bằng `workflow_dispatch`.
+
+Thiết lập một lần trên GitHub: vào **Settings → Pages → Build and deployment → Source**, chọn **GitHub Actions**. Nếu backend đã được deploy ở một domain riêng, tạo Repository Variable `VITE_API_BASE_URL` trong **Settings → Secrets and variables → Actions → Variables** (ví dụ `https://api.example.com/api`). Không lưu API key vào biến frontend này.
