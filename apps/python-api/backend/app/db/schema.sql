@@ -86,8 +86,10 @@ CREATE TABLE IF NOT EXISTS subjects (
     description     TEXT,
     icon             TEXT,
     color            TEXT,
+    created_by       INTEGER,
     created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
     CHECK(length(trim(code)) >= 2),
     CHECK(length(trim(name)) >= 2)
 );
@@ -456,3 +458,5 @@ INSERT OR IGNORE INTO schema_migrations(version,description)
 VALUES(4,'Real-time study sessions and document progress reporting');
 INSERT OR IGNORE INTO schema_migrations(version,description)
 VALUES(5,'Keyword document retrieval with persistent external knowledge cache');
+INSERT OR IGNORE INTO schema_migrations(version,description)
+VALUES(8,'User-owned learning-library subjects');

@@ -51,7 +51,7 @@ export const register = (name, email, password) =>
   });
 export const logout = () => request("/auth/logout", { method: "POST" });
 export const getCurrentUser = () => request("/me");
-export const getSubjects = () => request("/subjects");
+export const getSubjects = () => request("/subjects?scope=mine");
 export const createSubject = ({ name, code, description }) =>
   request("/subjects", {
     method: "POST",
@@ -73,7 +73,7 @@ export async function uploadDocument({
   description,
   subjectCode,
 }) {
-  const subjects = await request("/subjects");
+  const subjects = await request("/subjects?scope=mine");
   const normalizedSubject = String(subjectCode ?? "").trim();
   const subject = findSubject(buildSubjectHashMap(subjects), normalizedSubject);
   if (!subject)

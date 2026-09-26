@@ -190,6 +190,7 @@
 .document-card-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:auto}
 .document-card-actions .text-link{display:inline-flex;align-items:center;gap:5px}
 .document-card-actions svg{width:16px;height:16px}
+.library-sort-wrap{display:flex;align-items:center;gap:12px}.library-sort-wrap select{min-width:150px;padding:8px 34px 8px 11px;border:1px solid #dce5ee;border-radius:8px;background:#fff;color:#243950}.document-delete-button{display:grid;place-items:center;width:34px;height:34px;margin-left:auto;border:1px solid rgba(220,53,69,.24);border-radius:9px;background:rgba(220,53,69,.08);color:#dc3545;cursor:pointer;transition:transform .2s ease,background .2s ease}.document-delete-button:hover{transform:translateY(-2px);background:rgba(220,53,69,.16)}.document-delete-button svg{width:17px;height:17px}
 .document-preview-modal{width:min(960px,calc(100vw - 30px));max-width:960px;height:min(82dvh,820px);display:flex;flex-direction:column;overflow:hidden}
 .document-preview-modal>header{flex:none;padding-bottom:14px;border-bottom:1px solid #e2e8f1}
 .document-preview-meta{display:flex;flex-wrap:wrap;gap:7px;padding:12px 0}

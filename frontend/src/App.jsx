@@ -5,6 +5,7 @@ import {
   cancelSubscription,
   createSubject,
   getCurrentUser,
+  deleteDocument,
   getDocumentContent,
   getDocuments,
   getProgress,
@@ -39,6 +40,7 @@ import {
   RectangleStackIcon,
   XMarkIcon,
   SparklesIcon,
+  TrashIcon,
 } from "@heroicons/react/24/outline";
 
 const PLANS = {
@@ -268,6 +270,7 @@ export default function App() {
   const [subjects, setSubjects] = useState([]);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [documentSort, setDocumentSort] = useState("newest");
   const [progress, setProgress] = useState([]);
   const [progressAnalytics, setProgressAnalytics] = useState(EMPTY_PROGRESS_ANALYTICS);
   const [studyTime, setStudyTime] = useState(EMPTY_STUDY_TIME);
@@ -295,14 +298,22 @@ export default function App() {
   const filteredDocs = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase("vi");
     const matchedSubject = normalizedSearch ? findSubject(subjectIndex, normalizedSearch) : null;
-    return documents.filter(
+    const matched = documents.filter(
       (doc) =>
         (filter === "all" || doc.subject_code === filter) &&
         (!normalizedSearch ||
           `${doc.title} ${doc.description || ""}`.toLocaleLowerCase("vi").includes(normalizedSearch) ||
           (matchedSubject && doc.subject_code === matchedSubject.code)),
     );
-  }, [documents, filter, search, subjectIndex]);
+    return [...matched].sort((left, right) => {
+      if (documentSort === "title") return String(left.title || "").localeCompare(String(right.title || ""), "vi");
+      if (documentSort === "progress") {
+        const progressByDocument = new Map(progress.map((item) => [String(item.documentId), item.percent || 0]));
+        return (progressByDocument.get(String(right.id)) || 0) - (progressByDocument.get(String(left.id)) || 0);
+      }
+      return String(right.created_at || "").localeCompare(String(left.created_at || ""));
+    });
+  }, [documents, documentSort, filter, progress, search, subjectIndex]);
   const notify = (message) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 3200);
@@ -419,6 +430,21 @@ export default function App() {
       window.clearInterval(sync);
     };
   }, [userKey]);
+  useEffect(() => {
+    if (!userKey || view !== "library") return undefined;
+    let active = true;
+    const refresh = async () => {
+      const [documentsResult, progressResult] = await Promise.allSettled([getDocuments(), getProgress()]);
+      if (!active) return;
+      if (documentsResult.status === "fulfilled") setDocuments(documentsResult.value);
+      if (progressResult.status === "fulfilled") {
+        setProgress(mapDocumentProgress(progressResult.value));
+        setProgressAnalytics(progressResult.value.analytics || EMPTY_PROGRESS_ANALYTICS);
+      }
+    };
+    void refresh();
+    return () => { active = false; };
+  }, [userKey, view]);
   useRevealOnScroll(`${view}-${documents.length}-${quizDecks.length}`);
   useEffect(() => {
     let active = true;
@@ -540,6 +566,19 @@ export default function App() {
       notify("Đã tải tài liệu vào kho học liệu.");
     } catch (error) {
       notify(`Upload thất bại: ${error.message}`);
+    }
+  };
+  const removeLibraryDocument = async (event, document) => {
+    event.stopPropagation();
+    if (!window.confirm(`Xóa “${document.title}” khỏi kho học liệu?`)) return;
+    try {
+      await deleteDocument(document.id);
+      if (String(documentPreview?.document?.id) === String(document.id)) closeDocumentPreview();
+      setSelectedDocument((current) => String(current?.id) === String(document.id) ? null : current);
+      await loadDocumentsAndProgress();
+      notify("Đã xóa tài liệu khỏi kho học liệu.");
+    } catch (error) {
+      notify(`Không thể xóa tài liệu: ${error.message}`);
     }
   };
   const submitSubject = async (event) => {
@@ -865,7 +904,17 @@ export default function App() {
             </form>
             <div className="library-actions">
               <button className="btn btn-outline" onClick={() => !requireLogin() && setModal("subject")}><PlusIcon aria-hidden="true" /> Thêm môn học</button>
-              <span>{filteredDocs.length} tài liệu phù hợp</span>
+              <div className="library-sort-wrap">
+                <span>{filteredDocs.length} tài liệu phù hợp</span>
+                <label>
+                  <span className="sr-only">Sắp xếp tài liệu</span>
+                  <select value={documentSort} onChange={(event) => setDocumentSort(event.target.value)}>
+                    <option value="newest">Mới nhất</option>
+                    <option value="title">Tên A–Z</option>
+                    <option value="progress">Tiến độ cao nhất</option>
+                  </select>
+                </label>
+              </div>
             </div>
             <div className="document-grid reveal-stagger" aria-live="polite">
               {filteredDocs.map((doc) => (
@@ -876,7 +925,7 @@ export default function App() {
                 >
                   <span>{doc.subject_code || "DOC"}</span>
                   <h3>{doc.title}</h3>
-                  <p>{doc.description || "Tài liệu chưa có mô tả."}</p>
+                  <p>{doc.content_preview || doc.description || "Tài liệu chưa có nội dung xem trước."}</p>
                   <div className="document-card-actions">
                     <button
                       className="text-link document-view-link"
@@ -896,6 +945,15 @@ export default function App() {
                       }}
                     >
                       Hỏi Nova →
+                    </button>
+                    <button
+                      type="button"
+                      className="document-delete-button"
+                      title={`Xóa ${doc.title}`}
+                      aria-label={`Xóa ${doc.title}`}
+                      onClick={(event) => removeLibraryDocument(event, doc)}
+                    >
+                      <TrashIcon aria-hidden="true" />
                     </button>
                   </div>
                 </article>

@@ -739,6 +739,11 @@ class H(BaseHTTPRequestHandler):
     with db() as c:ensure_study_session(c,user['id'],token)
    return self.json({'user':user})
   if path=='/api/subjects':
+    scope=parse_qs(p.query).get('scope',['all'])[0]
+    if scope=='mine':
+     u=require_user(self)
+     if not u:return
+     c=db(); rows=[dict(r) for r in c.execute('SELECT * FROM subjects WHERE created_by IS NULL OR created_by=? ORDER BY name',(u['id'],))]; c.close(); return self.json(rows)
     c=db(); rows=[dict(r) for r in c.execute('SELECT * FROM subjects ORDER BY name')]; c.close(); return self.json(rows)
   if path=='/api/subscription':
    u=require_user(self)
@@ -753,7 +758,7 @@ class H(BaseHTTPRequestHandler):
   if path=='/api/documents':
    u=require_user(self)
    if not u:return
-   qs=parse_qs(p.query); q=qs.get('q',[''])[0]; sub=qs.get('subject',[''])[0]; c=db(); sql='SELECT d.*, d.original_filename AS file_name, d.storage_path AS file_path, d.uploaded_by AS uploader_id, s.code subject_code,s.name subject_name,u.full_name AS uploader FROM documents d JOIN subjects s ON s.id=d.subject_id JOIN users u ON u.id=d.uploaded_by WHERE d.uploaded_by=?'; args=[u['id']]
+   qs=parse_qs(p.query); q=qs.get('q',[''])[0]; sub=qs.get('subject',[''])[0]; c=db(); sql='SELECT d.*, d.original_filename AS file_name, d.storage_path AS file_path, d.uploaded_by AS uploader_id, s.code subject_code,s.name subject_name,u.full_name AS uploader, (SELECT substr(dc.content,1,320) FROM document_chunks dc WHERE dc.document_id=d.id ORDER BY dc.chunk_index LIMIT 1) AS content_preview FROM documents d JOIN subjects s ON s.id=d.subject_id JOIN users u ON u.id=d.uploaded_by WHERE d.uploaded_by=?'; args=[u['id']]
    if q: sql+=' AND (d.title LIKE ? OR d.description LIKE ?)'; args += [f'%{q}%',f'%{q}%']
    if sub: sql+=' AND s.code=?'; args.append(sub)
    sql+=' ORDER BY d.created_at DESC'; rows=[dict(r) for r in c.execute(sql,args)]; c.close(); return self.json(rows)
@@ -1103,7 +1108,7 @@ class H(BaseHTTPRequestHandler):
    if not 2 <= len(code) <= 12:return self.json({'error':'Mã môn học phải từ 2 đến 12 ký tự'},400)
    with db() as c:
     if c.execute('SELECT id FROM subjects WHERE code=?',(code,)).fetchone():return self.json({'error':'Mã môn học đã tồn tại'},409)
-    row=c.execute('INSERT INTO subjects(code,name,description) VALUES(?,?,?)',(code,name,description)).lastrowid
+    row=c.execute('INSERT INTO subjects(code,name,description,created_by) VALUES(?,?,?,?)',(code,name,description,u['id'])).lastrowid
     c.commit(); subject=c.execute('SELECT id,code,name,description FROM subjects WHERE id=?',(row,)).fetchone()
    return self.json(dict(subject),201)
   if path=='/api/subscription/checkout':

@@ -162,6 +162,7 @@ class Database:
         """
         additions = {
             'tutor_messages': {'payload': 'TEXT'},
+            'subjects': {'created_by': 'INTEGER REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE'},
         }
         for table, columns in additions.items():
             existing = {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}

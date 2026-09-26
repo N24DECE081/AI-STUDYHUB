@@ -126,6 +126,23 @@ class ServerIntegrationTest(unittest.TestCase):
             me=json.loads(r.read())
         self.assertIsNone(me['user'])
 
+    def test_library_subjects_are_scoped_to_their_owner(self):
+        student=self.login_cookie('student@studyhub.local','Student123!')
+        teacher=self.login_cookie('teacher@studyhub.local','Teacher123!')
+        code=f'U{time.time_ns()}'[-12:]
+        status,_,created=self.request('/api/subjects','POST',{
+            'name':'Private library subject','code':code,'description':'Student only'
+        },{'Cookie':student})
+        self.assertEqual(status,201,created)
+        status,_,student_subjects=self.request('/api/subjects?scope=mine',headers={'Cookie':student})
+        self.assertEqual(status,200,student_subjects)
+        self.assertIn(created['id'],[subject['id'] for subject in student_subjects])
+        status,_,teacher_subjects=self.request('/api/subjects?scope=mine',headers={'Cookie':teacher})
+        self.assertEqual(status,200,teacher_subjects)
+        self.assertNotIn(created['id'],[subject['id'] for subject in teacher_subjects])
+        status,_,unauthorized=self.request('/api/subjects?scope=mine')
+        self.assertEqual(status,401,unauthorized)
+
     def test_real_time_study_session_and_document_progress(self):
         email=f'progress_clock_{time.time_ns()}@example.com'
         status,headers,body=self.request('/api/auth/register','POST',{
@@ -278,6 +295,10 @@ class ServerIntegrationTest(unittest.TestCase):
         self.assertEqual(status,200,content)
         self.assertEqual(content['content'],'student file')
         self.assertEqual(content['display_mode'],'plain_text')
+        status,_,documents=self.request('/api/documents',headers={'Cookie':cookie})
+        self.assertEqual(status,200,documents)
+        listed=next(item for item in documents if item['id']==uploaded['document_id'])
+        self.assertEqual(listed['content_preview'],'student file')
         status,_,tutor_result=self.request('/api/ai-tutor/chat','POST',{
             'conversation_id':f'auto-progress-{time.time_ns()}',
             'message':'Giải thích nội dung student file','mode':'explain',
