@@ -130,7 +130,9 @@ def require_user(handler):
     return user
 
 def session_cookie(token, max_age=7 * 24 * 60 * 60):
-    return f'{SESSION_COOKIE}={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'
+    cross_site = os.environ.get('STUDYHUB_SECURE_COOKIES', '').lower() in ('1', 'true', 'yes')
+    policy = 'SameSite=None; Secure' if cross_site else 'SameSite=Lax'
+    return f'{SESSION_COOKIE}={token}; Path=/; Max-Age={max_age}; HttpOnly; {policy}'
 
 def utc_stamp():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -646,6 +648,8 @@ class H(BaseHTTPRequestHandler):
  def do_GET(self):
   if not self.gateway_access(): return
   p=urlparse(self.path); path=p.path
+  if path=='/api/health':
+   return self.json({'status':'ok','service':'studyhub-api'})
   if path in ('/api/me','/api/auth/me'):
    token=cookie_value(self,SESSION_COOKIE); user=user_from(self)
    if user and token:
@@ -1426,8 +1430,8 @@ class StudyHubHTTPServer(ThreadingHTTPServer):
 
 def main():
     init_db()
-    port=int(os.environ.get('STUDYHUB_PORT','5000'))
-    host=os.environ.get('STUDYHUB_HOST','127.0.0.1')
+    port=int(os.environ.get('PORT') or os.environ.get('STUDYHUB_PORT','5000'))
+    host=os.environ.get('STUDYHUB_HOST') or ('0.0.0.0' if os.environ.get('PORT') else '127.0.0.1')
     status=tutor_config.engine_status()
     detail=f" ({status['provider']} / {status['model']})" if status['engine']=='provider' else ' - provider key not configured'
     print(f'AI Tutor engine: {status["engine"]}{detail}')

@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: ai-studyhub-api
+    runtime: python
+    plan: free
+    rootDir: apps/python-api
+    buildCommand: python -m pip install -r requirements.txt
+    startCommand: python run.py
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: STUDYHUB_NO_DOTENV
+        value: "1"
+      - key: STUDYHUB_SECURE_COOKIES
+        value: "1"
+      - key: STUDYHUB_CORS_ORIGINS
+        value: https://n24dece081.github.io
