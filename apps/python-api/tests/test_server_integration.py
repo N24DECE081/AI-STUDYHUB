@@ -147,7 +147,9 @@ class ServerIntegrationTest(unittest.TestCase):
         status,_,body=self.request('/api/auth/oauth/status')
         self.assertEqual(status,200,body)
         self.assertIn('google',body['providers'])
+        self.assertIn('facebook',body['providers'])
         self.assertFalse(body['providers']['google']['configured'])
+        self.assertFalse(body['providers']['facebook']['configured'])
         self.assertNotIn('secret',json.dumps(body).lower())
 
     def test_real_time_study_session_and_document_progress(self):

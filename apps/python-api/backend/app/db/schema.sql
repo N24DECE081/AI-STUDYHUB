@@ -38,7 +38,7 @@ CREATE INDEX IF NOT EXISTS ix_auth_sessions_expires
 CREATE TABLE IF NOT EXISTS oauth_accounts (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id             INTEGER NOT NULL,
-    provider            TEXT NOT NULL CHECK(provider IN ('google')),
+    provider            TEXT NOT NULL CHECK(provider IN ('google', 'facebook')),
     provider_user_id    TEXT NOT NULL,
     provider_email      TEXT NOT NULL,
     created_at          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -475,4 +475,4 @@ VALUES(5,'Keyword document retrieval with persistent external knowledge cache');
 INSERT OR IGNORE INTO schema_migrations(version,description)
 VALUES(8,'User-owned learning-library subjects');
 INSERT OR IGNORE INTO schema_migrations(version,description)
-VALUES(9,'Google OAuth account links');
+VALUES(9,'Google and Facebook OAuth account links');

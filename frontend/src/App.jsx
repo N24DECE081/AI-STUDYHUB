@@ -273,6 +273,7 @@ export default function App() {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [documentSort, setDocumentSort] = useState("newest");
+  const [documentType, setDocumentType] = useState("all");
   const [progress, setProgress] = useState([]);
   const [progressAnalytics, setProgressAnalytics] = useState(EMPTY_PROGRESS_ANALYTICS);
   const [studyTime, setStudyTime] = useState(EMPTY_STUDY_TIME);
@@ -283,11 +284,16 @@ export default function App() {
   });
   const [modal, setModal] = useState(null);
   const [authMode, setAuthMode] = useState("login");
-  const [oauthStatus, setOAuthStatus] = useState({ google: false });
+  const [oauthStatus, setOAuthStatus] = useState({ google: false, facebook: false });
   const [toast, setToast] = useState("");
   const [selectedDocument, setSelectedDocument] = useState(null);
   const [documentPreview, setDocumentPreview] = useState(null);
+  const [deleteCandidate, setDeleteCandidate] = useState(null);
+  const [uploadPhase, setUploadPhase] = useState("idle");
+  const [uploadFileName, setUploadFileName] = useState("");
+  const [uploadDragActive, setUploadDragActive] = useState(false);
   const documentPreviewRequest = useRef(0);
+  const uploadInput = useRef(null);
   const [subscription, setSubscription] = useState({
     plan: "free",
     status: "active",
@@ -304,19 +310,23 @@ export default function App() {
     const matched = documents.filter(
       (doc) =>
         (filter === "all" || doc.subject_code === filter) &&
+        (documentType === "all" || String(doc.file_type || "").replace(/^\./, "").toLowerCase() === documentType) &&
         (!normalizedSearch ||
-          `${doc.title} ${doc.description || ""}`.toLocaleLowerCase("vi").includes(normalizedSearch) ||
+          `${doc.title} ${doc.original_filename || ""} ${doc.file_type || ""} ${doc.description || ""} ${doc.content_preview || ""}`.toLocaleLowerCase("vi").includes(normalizedSearch) ||
           (matchedSubject && doc.subject_code === matchedSubject.code)),
     );
     return [...matched].sort((left, right) => {
       if (documentSort === "title") return String(left.title || "").localeCompare(String(right.title || ""), "vi");
+      if (documentSort === "title-desc") return String(right.title || "").localeCompare(String(left.title || ""), "vi");
+      if (documentSort === "oldest") return String(left.created_at || "").localeCompare(String(right.created_at || ""));
+      if (documentSort === "size") return Number(right.file_size || 0) - Number(left.file_size || 0);
       if (documentSort === "progress") {
         const progressByDocument = new Map(progress.map((item) => [String(item.documentId), item.percent || 0]));
         return (progressByDocument.get(String(right.id)) || 0) - (progressByDocument.get(String(left.id)) || 0);
       }
       return String(right.created_at || "").localeCompare(String(left.created_at || ""));
     });
-  }, [documents, documentSort, filter, progress, search, subjectIndex]);
+  }, [documents, documentSort, documentType, filter, progress, search, subjectIndex]);
   const notify = (message) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 3200);
@@ -468,7 +478,10 @@ export default function App() {
     let active = true;
     getOAuthStatus()
       .then((result) => {
-        if (active) setOAuthStatus({ google: Boolean(result.providers?.google?.configured) });
+        if (active) setOAuthStatus({
+          google: Boolean(result.providers?.google?.configured),
+          facebook: Boolean(result.providers?.facebook?.configured),
+        });
       })
       .catch(() => {});
     return () => { active = false; };
@@ -578,46 +591,64 @@ export default function App() {
   };
   const submitUpload = async (event) => {
     event.preventDefault();
+    setUploadPhase("validating");
     const data = new FormData(event.currentTarget);
     const file = data.get("file");
-    if (!file?.name) return notify("Hãy chọn tài liệu trước.");
+    if (!file?.name) { setUploadPhase("error"); return notify("Hãy chọn tài liệu trước."); }
     const title = String(data.get("title") || "").trim();
     const extension = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
-    if (!title) return notify("Tiêu đề tài liệu không được để trống.");
-    if (file.size === 0) return notify("File không được rỗng.");
-    if (file.size > 10 * 1024 * 1024) return notify("File tối đa 10MB.");
+    if (!title) { setUploadPhase("error"); return notify("Tiêu đề tài liệu không được để trống."); }
+    if (file.size === 0) { setUploadPhase("error"); return notify("File không được rỗng."); }
+    if (file.size > 10 * 1024 * 1024) { setUploadPhase("error"); return notify("File tối đa 10MB."); }
     if (![".pdf", ".txt", ".md", ".csv", ".doc", ".docx", ".ppt", ".pptx"].includes(extension)) {
-      return notify("Định dạng file chưa được hỗ trợ.");
+      setUploadPhase("error"); return notify("Định dạng file chưa được hỗ trợ.");
     }
     try {
+      setUploadPhase("uploading");
       await uploadDocument({
         file,
         title,
         description: data.get("description"),
         subjectCode: data.get("subject"),
       });
-      setModal(null);
+      setUploadPhase("processing");
       await loadDocumentsAndProgress();
+      setUploadPhase("success");
       notify("Đã tải tài liệu vào kho học liệu.");
+      window.setTimeout(() => { setModal(null); setUploadPhase("idle"); setUploadFileName(""); }, 650);
     } catch (error) {
+      setUploadPhase("error");
       notify(`Upload thất bại: ${error.message}`);
     }
   };
-  const chooseGoogleLogin = () => {
-    if (!oauthStatus.google) {
-      notify("Đăng nhập Google chưa được cấu hình Client ID và Client Secret trên backend.");
+  const chooseOAuthLogin = (provider) => {
+    if (!oauthStatus[provider]) {
+      notify(`Đăng nhập ${provider === "google" ? "Google" : "Facebook"} chưa được cấu hình trên backend.`);
       return;
     }
-    window.location.assign(getOAuthLoginUrl("google"));
+    window.location.assign(getOAuthLoginUrl(provider));
+  };
+  const selectUploadFile = (file) => {
+    if (!file || !uploadInput.current) return;
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    uploadInput.current.files = transfer.files;
+    setUploadFileName(file.name);
+    setUploadPhase("idle");
   };
   const removeLibraryDocument = async (event, document) => {
     event.stopPropagation();
-    if (!window.confirm(`Xóa “${document.title}” khỏi kho học liệu?`)) return;
+    setDeleteCandidate(document);
+  };
+  const confirmLibraryDocumentDelete = async () => {
+    const document = deleteCandidate;
+    if (!document) return;
     try {
       await deleteDocument(document.id);
       if (String(documentPreview?.document?.id) === String(document.id)) closeDocumentPreview();
       setSelectedDocument((current) => String(current?.id) === String(document.id) ? null : current);
       await loadDocumentsAndProgress();
+      setDeleteCandidate(null);
       notify("Đã xóa tài liệu khỏi kho học liệu.");
     } catch (error) {
       notify(`Không thể xóa tài liệu: ${error.message}`);
@@ -949,10 +980,26 @@ export default function App() {
               <div className="library-sort-wrap">
                 <span>{filteredDocs.length} tài liệu phù hợp</span>
                 <label>
+                  <span className="sr-only">Lọc theo định dạng</span>
+                  <select value={documentType} onChange={(event) => setDocumentType(event.target.value)}>
+                    <option value="all">Mọi định dạng</option>
+                    <option value="pdf">PDF</option>
+                    <option value="doc">DOC</option>
+                    <option value="docx">DOCX</option>
+                    <option value="ppt">PPT</option>
+                    <option value="pptx">PPTX</option>
+                    <option value="txt">TXT</option>
+                    <option value="md">Markdown</option>
+                  </select>
+                </label>
+                <label>
                   <span className="sr-only">Sắp xếp tài liệu</span>
                   <select value={documentSort} onChange={(event) => setDocumentSort(event.target.value)}>
                     <option value="newest">Mới nhất</option>
+                    <option value="oldest">Cũ nhất</option>
                     <option value="title">Tên A–Z</option>
+                    <option value="title-desc">Tên Z–A</option>
+                    <option value="size">Dung lượng lớn nhất</option>
                     <option value="progress">Tiến độ cao nhất</option>
                   </select>
                 </label>
@@ -967,6 +1014,7 @@ export default function App() {
                 >
                   <span>{doc.subject_code || "DOC"}</span>
                   <h3>{doc.title}</h3>
+                  <small className="document-file-meta">{String(doc.file_type || "file").replace(/^\./, "").toUpperCase()} · {Math.max(1, Math.round(Number(doc.file_size || 0) / 1024))} KB</small>
                   <p>{doc.content_preview || doc.description || "Tài liệu chưa có nội dung xem trước."}</p>
                   <div className="document-card-actions">
                     <button
@@ -1046,7 +1094,7 @@ export default function App() {
           </section>
         )}
         {view === "roadmap" && (
-          <LearningRoadmapPage documents={documents} subjects={subjects} />
+          <LearningRoadmapPage documents={documents} subjects={subjects} progress={progress} />
         )}
         {view === "dashboard" && (
           <ProgressDashboard
@@ -1195,12 +1243,22 @@ export default function App() {
           <button
             type="button"
             className="oauth-button oauth-google"
-            onClick={chooseGoogleLogin}
+            onClick={() => chooseOAuthLogin("google")}
             aria-disabled={!oauthStatus.google}
             title={oauthStatus.google ? "Đăng nhập bằng tài khoản Google" : "Cần cấu hình Google OAuth trên backend"}
           >
             <span className="oauth-google-mark" aria-hidden="true">G</span>
             Tiếp tục với Google
+          </button>
+          <button
+            type="button"
+            className="oauth-button oauth-facebook"
+            onClick={() => chooseOAuthLogin("facebook")}
+            aria-disabled={!oauthStatus.facebook}
+            title={oauthStatus.facebook ? "Đăng nhập bằng tài khoản Facebook" : "Cần cấu hình Facebook OAuth trên backend"}
+          >
+            <span className="oauth-facebook-mark" aria-hidden="true">f</span>
+            Tiếp tục với Facebook
           </button>
           <div className="auth-divider"><span>hoặc dùng email</span></div>
           <form className="auth-form" onSubmit={submitAuth}>
@@ -1267,16 +1325,37 @@ export default function App() {
             </fieldset>
             <fieldset className="upload-card">
               <legend>Tệp & môn học</legend>
-              <label htmlFor="upload-file">
-                Tệp tài liệu <span className="required-mark">*</span>
-              </label>
-              <input
-                id="upload-file"
-                name="file"
-                type="file"
-                accept=".pdf,.txt,.md,.csv,.doc,.docx,.ppt,.pptx"
-                required
-              />
+              <div
+                className={`smart-upload-zone ${uploadDragActive ? "is-dragging" : ""} ${uploadPhase !== "idle" ? `is-${uploadPhase}` : ""}`}
+                onDragOver={(event) => { event.preventDefault(); setUploadDragActive(true); }}
+                onDragLeave={() => setUploadDragActive(false)}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setUploadDragActive(false);
+                  selectUploadFile(event.dataTransfer.files?.[0]);
+                }}
+              >
+                <span className="upload-pixel-character" aria-hidden="true">⚡</span>
+                <strong>ENTER THE KNOWLEDGE VAULT</strong>
+                <p>{uploadFileName || "Kéo và thả tài liệu vào đây"}</p>
+                <label className="btn btn-outline" htmlFor="upload-file">+ Chọn tài liệu</label>
+                <small>PDF · DOCX · PPTX · TXT · MD · tối đa 10MB</small>
+                <input
+                  ref={uploadInput}
+                  id="upload-file"
+                  name="file"
+                  type="file"
+                  accept=".pdf,.txt,.md,.csv,.doc,.docx,.ppt,.pptx"
+                  onChange={(event) => { setUploadFileName(event.target.files?.[0]?.name || ""); setUploadPhase("idle"); }}
+                  required
+                />
+              </div>
+              {uploadPhase !== "idle" && (
+                <div className={`upload-pipeline is-${uploadPhase}`} role="status">
+                  <span className="upload-pipeline-bar"><i /></span>
+                  <strong>{uploadPhase === "validating" ? "Đang kiểm tra tệp..." : uploadPhase === "uploading" ? "Đang tải lên..." : uploadPhase === "processing" ? "Đang lập chỉ mục tài liệu..." : uploadPhase === "success" ? "✓ Sẵn sàng để học" : "Không thể xử lý tệp"}</strong>
+                </div>
+              )}
               <label htmlFor="upload-subject">
                 Môn học <span className="required-mark">*</span>
               </label>
@@ -1304,9 +1383,21 @@ export default function App() {
               >
                 Hủy bỏ
               </button>
-              <button className="btn btn-primary">Tải lên & Xử lý</button>
+              <button className="btn btn-primary" disabled={["validating", "uploading", "processing"].includes(uploadPhase)}>Tải lên & Xử lý</button>
             </footer>
           </form>
+        </Modal>
+      )}
+      {deleteCandidate && (
+        <Modal title="Xóa tài liệu?" onClose={() => setDeleteCandidate(null)}>
+          <div className="delete-document-confirm">
+            <p>“{deleteCandidate.title}”</p>
+            <span>Thao tác này không thể hoàn tác. Chỉ tài liệu thuộc tài khoản hiện tại mới có thể bị xóa.</span>
+            <div>
+              <button type="button" className="btn btn-ghost" onClick={() => setDeleteCandidate(null)}>Hủy</button>
+              <button type="button" className="btn delete-confirm-button" onClick={confirmLibraryDocumentDelete}>Xóa tài liệu</button>
+            </div>
+          </div>
         </Modal>
       )}
       {modal === "subject" && (

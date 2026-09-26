@@ -14,6 +14,13 @@ PROVIDERS = {
         "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
         "token_url": "https://oauth2.googleapis.com/token",
     },
+    "facebook": {
+        "client_id": "STUDYHUB_FACEBOOK_CLIENT_ID",
+        "client_secret": "STUDYHUB_FACEBOOK_CLIENT_SECRET",
+        "redirect_uri": "STUDYHUB_FACEBOOK_REDIRECT_URI",
+        "authorize_url": "https://www.facebook.com/dialog/oauth",
+        "token_url": "https://graph.facebook.com/oauth/access_token",
+    },
 }
 
 
@@ -29,7 +36,7 @@ def provider_config(provider, environ=None):
     config = {key: (environ.get(spec[key]) or "").strip()
               for key in ("client_id", "client_secret", "redirect_uri")}
     if not all(config.values()):
-        raise OAuthError("Đăng nhập Google chưa được cấu hình")
+        raise OAuthError(f"Đăng nhập {provider.title()} chưa được cấu hình")
     return {**config, "authorize_url": spec["authorize_url"], "token_url": spec["token_url"]}
 
 
@@ -47,9 +54,11 @@ def authorization_url(provider, state, environ=None):
         "redirect_uri": config["redirect_uri"],
         "response_type": "code",
         "state": state,
-        "scope": "openid email profile",
-        "prompt": "select_account",
     }
+    if provider == "google":
+        params.update({"scope": "openid email profile", "prompt": "select_account"})
+    else:
+        params["scope"] = "email,public_profile"
     return f'{config["authorize_url"]}?{urllib.parse.urlencode(params)}'
 
 
@@ -67,30 +76,42 @@ def _json_request(url, *, data=None, headers=None):
 
 def exchange_profile(provider, code, environ=None):
     config = provider_config(provider, environ)
-    token = _json_request(
-        config["token_url"],
-        data=urllib.parse.urlencode({
-            "client_id": config["client_id"],
-            "client_secret": config["client_secret"],
-            "redirect_uri": config["redirect_uri"],
-            "code": code,
-            "grant_type": "authorization_code",
-        }).encode("ascii"),
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
-    profile = _json_request(
-        "https://openidconnect.googleapis.com/v1/userinfo",
-        headers={"Authorization": f'Bearer {token.get("access_token", "")}'},
-    )
-    if profile.get("email_verified") not in (True, "true"):
-        raise OAuthError("Tài khoản Google chưa xác minh email")
+    token_payload = {
+        "client_id": config["client_id"],
+        "client_secret": config["client_secret"],
+        "redirect_uri": config["redirect_uri"],
+        "code": code,
+        "grant_type": "authorization_code",
+    }
+    if provider == "google":
+        token = _json_request(
+            config["token_url"],
+            data=urllib.parse.urlencode(token_payload).encode("ascii"),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        profile = _json_request(
+            "https://openidconnect.googleapis.com/v1/userinfo",
+            headers={"Authorization": f'Bearer {token.get("access_token", "")}'},
+        )
+        if profile.get("email_verified") not in (True, "true"):
+            raise OAuthError("Tài khoản Google chưa xác minh email")
+    else:
+        token = _json_request(f'{config["token_url"]}?{urllib.parse.urlencode(token_payload)}')
+        fields = urllib.parse.urlencode({
+            "fields": "id,name,email,picture.type(large)",
+            "access_token": token.get("access_token", ""),
+        })
+        profile = _json_request(f"https://graph.facebook.com/me?{fields}")
     email = str(profile.get("email") or "").strip().lower()
-    provider_user_id = str(profile.get("sub") or "").strip()
+    provider_user_id = str(profile.get("sub") or profile.get("id") or "").strip()
     if not email or not provider_user_id:
-        raise OAuthError("Google không trả về email tài khoản")
+        raise OAuthError("Nhà cung cấp không trả về email tài khoản")
+    picture = profile.get("picture") or ""
+    if isinstance(picture, dict):
+        picture = picture.get("data", {}).get("url", "")
     return {
         "provider_user_id": provider_user_id,
         "email": email,
         "name": str(profile.get("name") or email.split("@", 1)[0]).strip(),
-        "avatar_url": str(profile.get("picture") or "").strip(),
+        "avatar_url": str(picture or "").strip(),
     }

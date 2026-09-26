@@ -31,7 +31,7 @@ const TRACKS = [
   },
 ];
 
-export default function LearningRoadmapPage({ documents = [], subjects = [] }) {
+export default function LearningRoadmapPage({ documents = [], subjects = [], progress = [] }) {
   const [track, setTrack] = useState("active");
   const [centralTopic, setCentralTopic] = useState("");
   const [mainBranchesInput, setMainBranchesInput] = useState("");
@@ -54,6 +54,44 @@ export default function LearningRoadmapPage({ documents = [], subjects = [] }) {
   }, [centralTopic, weakTopic]);
   const completeCount = checked.length;
   const totalDays = 7;
+  const progressByDocument = useMemo(
+    () => new Map(progress.map((item) => [String(item.documentId), Number(item.percent || 0)])),
+    [progress],
+  );
+  const selectedSubject = useMemo(() => {
+    const normalized = centralTopic.trim().toLocaleLowerCase("vi");
+    return subjects.find((subject) =>
+      [subject.name, subject.code].some((value) => String(value || "").toLocaleLowerCase("vi") === normalized),
+    );
+  }, [centralTopic, subjects]);
+  const subjectDocuments = useMemo(() => {
+    if (!centralTopic.trim()) return [];
+    return documents.filter((document) =>
+      selectedSubject
+        ? String(document.subject_code) === String(selectedSubject.code)
+        : String(document.subject_name || "").toLocaleLowerCase("vi") === centralTopic.trim().toLocaleLowerCase("vi"),
+    );
+  }, [centralTopic, documents, selectedSubject]);
+  const destinyNodes = useMemo(() => {
+    const documentNodes = subjectDocuments.map((document, index) => {
+      const percent = progressByDocument.get(String(document.id)) || 0;
+      const previous = index ? subjectDocuments[index - 1] : null;
+      const previousPercent = previous ? progressByDocument.get(String(previous.id)) || 0 : 100;
+      return {
+        id: `document-${document.id}`,
+        title: document.title,
+        type: index % 3 === 2 ? "PRACTICE" : "DOCUMENT",
+        progress: percent,
+        status: percent >= 100 ? "completed" : previousPercent >= 60 ? "unlocked" : "locked",
+      };
+    });
+    return [
+      { id: "start", title: centralTopic.trim() ? `Bắt đầu ${centralTopic.trim()}` : "Chọn môn học", type: "START", progress: 100, status: "completed" },
+      ...documentNodes,
+      { id: "boss", title: `Final Boss · ${centralTopic.trim() || "Môn học"}`, type: "BOSS", progress: 0, status: documentNodes.length && documentNodes.every((node) => node.progress >= 60) ? "unlocked" : "locked" },
+    ];
+  }, [centralTopic, progressByDocument, subjectDocuments]);
+  const petState = destinyNodes.some((node) => node.status === "unlocked") ? "FOLLOW" : centralTopic ? "THINK" : "IDLE";
 
   const toggleDay = (day) => setChecked((current) => current.includes(day) ? current.filter((value) => value !== day) : [...current, day]);
 
@@ -99,6 +137,22 @@ export default function LearningRoadmapPage({ documents = [], subjects = [] }) {
       <section className="roadmap-panel roadmap-weeks" aria-labelledby="micro-learning-heading">
         <div className="roadmap-section-heading"><div><span className="eyebrow">B · MICRO-LEARNING</span><h2 id="micro-learning-heading">{activeTrack.title}: chia nhỏ theo tuần & ngày</h2><p>{activeTrack.description}</p></div><div className="roadmap-progress" aria-live="polite"><strong>{completeCount}/{totalDays}</strong><span>mốc đã hoàn thành</span><progress value={completeCount} max={totalDays} aria-label={`${completeCount} trên ${totalDays} mốc đã hoàn thành`} /></div></div>
         <div className="week-grid">{weeks.map((week) => <article className={`week-card ${week.tone}`} key={week.title}><div className="week-card__header"><div><span>{week.title}</span><h3>{week.label}</h3></div><ClockIcon aria-hidden="true" /></div><div className="week-day-list">{week.days.map(([day, title, detail]) => <label className={`week-day ${checked.includes(day) ? "is-done" : ""}`} key={day}><input type="checkbox" checked={checked.includes(day)} onChange={() => toggleDay(day)} /><span className="week-day__marker">{checked.includes(day) ? <CheckIcon aria-hidden="true" /> : day.slice(-1)}</span><span><strong>{day}</strong><b>{title}</b><small>{detail}</small></span></label>)}</div></article>)}</div>
+      </section>
+
+      <section className="roadmap-panel destiny-map" aria-labelledby="destiny-map-heading">
+        <div className="roadmap-section-heading">
+          <div><span className="eyebrow">PERSONALIZED PATH</span><h2 id="destiny-map-heading">Your destiny · {centralTopic || "chọn một môn học"}</h2><p>Các node được dựng từ chính tài liệu và tiến độ của tài khoản hiện tại.</p></div>
+          <div className={`roadmap-pet is-${petState.toLowerCase()}`} aria-label={`Tiểu Hắc đang ở trạng thái ${petState}`}><span>🐈‍⬛</span><strong>Tiểu Hắc · {petState}</strong><small>{petState === "FOLLOW" ? "Nice! Let's continue." : petState === "THINK" ? "Đang phân tích kho tài liệu..." : "Ready to begin?"}</small></div>
+        </div>
+        <div className="destiny-node-list">
+          {destinyNodes.map((node, index) => (
+            <article className={`destiny-node is-${node.status} type-${node.type.toLowerCase()}`} key={node.id}>
+              <span>{index ? String(index).padStart(2, "0") : "🏠"}</span>
+              <div><small>{node.type}</small><strong>{node.title}</strong><progress value={node.progress} max="100" /><em>{node.status === "locked" ? "Đang khóa · hoàn thành node trước ≥ 60%" : `${node.progress}% mastery`}</em></div>
+            </article>
+          ))}
+        </div>
+        {centralTopic && !subjectDocuments.length && <p className="empty-state">Môn này chưa có tài liệu. Hãy upload tài liệu vào Vault để sinh node học tập.</p>}
       </section>
 
       <section className={`roadmap-panel roadmap-focus ${activeTrack.accent}`}><div><span className="eyebrow">LỘ TRÌNH ĐANG CHỌN</span><h2>{activeTrack.title}</h2><p>{activeTrack.subtitle}. Các mốc chính được thiết kế để đi từ hiểu bản chất đến tự kiểm tra.</p></div><div className="roadmap-focus-list">{activeTrack.focus.map((item, index) => <span key={item}><strong>0{index + 1}</strong>{item}</span>)}</div></section>

@@ -786,13 +786,13 @@ class H(BaseHTTPRequestHandler):
    return self.json({'status':'ok','service':'studyhub-api'})
   if path=='/api/auth/oauth/status':
    return self.json({'providers':oauth_provider_status()})
-  oauth_start=re.fullmatch(r'/api/auth/oauth/(google)',path)
+  oauth_start=re.fullmatch(r'/api/auth/oauth/(google|facebook)',path)
   if oauth_start:
    provider=oauth_start.group(1); state=secrets.token_urlsafe(32)
    try:location=oauth_authorization_url(provider,state)
    except OAuthError as error:return self.json({'error':str(error)},503)
    return self.redirect(location,[oauth_state_cookie(f'{provider}:{state}')])
-  oauth_callback=re.fullmatch(r'/api/auth/oauth/(google)/callback',path)
+  oauth_callback=re.fullmatch(r'/api/auth/oauth/(google|facebook)/callback',path)
   if oauth_callback:
    provider=oauth_callback.group(1); query=parse_qs(p.query); state=query.get('state',[''])[0]; code=query.get('code',[''])[0]
    stored=cookie_value(self,OAUTH_STATE_COOKIE) or ''; clear_state=oauth_state_cookie('',0)

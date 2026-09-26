@@ -172,6 +172,34 @@ class Database:
                 if name not in existing:
                     conn.execute(f'ALTER TABLE {table} ADD COLUMN {name} {ddl}')
 
+    def _ensure_oauth_providers(self, conn: sqlite3.Connection) -> None:
+        """Expand the original Google-only constraint without losing account links."""
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='oauth_accounts'"
+        ).fetchone()
+        if not row or not row[0] or "'facebook'" in row[0]:
+            return
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("ALTER TABLE oauth_accounts RENAME TO oauth_accounts_google_only")
+        conn.execute("""CREATE TABLE oauth_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            provider TEXT NOT NULL CHECK(provider IN ('google', 'facebook')),
+            provider_user_id TEXT NOT NULL,
+            provider_email TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(provider, provider_user_id),
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+        )""")
+        conn.execute("""INSERT INTO oauth_accounts(
+            id,user_id,provider,provider_user_id,provider_email,created_at,updated_at
+        ) SELECT id,user_id,provider,provider_user_id,provider_email,created_at,updated_at
+          FROM oauth_accounts_google_only""")
+        conn.execute("DROP TABLE oauth_accounts_google_only")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_oauth_accounts_user ON oauth_accounts(user_id)")
+        conn.execute("PRAGMA foreign_keys = ON")
+
     def initialize(self) -> None:
         with self.connect() as conn:
             if self._needs_legacy_migration(conn):
@@ -180,6 +208,7 @@ class Database:
                 self._repair_legacy_foreign_keys(conn)
                 self._create_schema(conn)
             self._ensure_columns(conn)
+            self._ensure_oauth_providers(conn)
             conn.commit()
 
     def execute(self, sql: str, params: Iterable = ()) -> int:
