@@ -181,6 +181,38 @@ class ServerIntegrationTest(unittest.TestCase):
         self.assertEqual(closed[0],'completed')
         self.assertGreaterEqual(closed[1],3665)
 
+    def test_progress_analytics_uses_quiz_completion_and_correct_answers(self):
+        email=f'progress_analytics_{time.time_ns()}@example.com'
+        status,headers,body=self.request('/api/auth/register','POST',{
+            'name':'Progress Analytics','email':email,'password':'StrongPass123!'
+        })
+        self.assertEqual(status,201,body)
+        cookie=headers['Set-Cookie'].split(';',1)[0]
+        connection=sqlite3.connect(Path(self.tmp.name) / 'integration.db')
+        user_id=connection.execute('SELECT id FROM users WHERE email=?',(email,)).fetchone()[0]
+        session_id=connection.execute(
+            "INSERT INTO chat_sessions(user_id,title) VALUES(?,?)",
+            (user_id,'QUIZ_CARD:Analytics test')
+        ).lastrowid
+        connection.execute(
+            "INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)",
+            (session_id,'user',json.dumps({
+                'kind':'quiz_attempt','score':6,'total':10,
+                'answers':{f'q{index}':index % 4 for index in range(1,9)},
+            }))
+        )
+        connection.commit(); connection.close()
+
+        status,_,result=self.request('/api/progress',headers={'Cookie':cookie})
+        self.assertEqual(status,200,result)
+        summary=result['analytics']['summary']
+        self.assertEqual(summary['completion_percent'],80)
+        self.assertEqual(summary['accuracy_percent'],60)
+        self.assertEqual(summary['learning_percent'],70)
+        self.assertEqual(summary['xp'],65)
+        self.assertEqual(result['analytics']['today']['questions_answered'],8)
+        self.assertEqual(result['analytics']['ranges']['day'][-1]['learning_percent'],70)
+
     def test_course_creation_and_progress_round_trip(self):
         student_cookie=self.login_cookie('student@studyhub.local','Student123!')
         subjects=json.loads(self.get('/api/subjects')[2]); subject_id=subjects[0]['id']

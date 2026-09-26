@@ -21,6 +21,8 @@ import AITutorPage from "./components/ai-tutor/AITutorPage";
 import QuizWorkspace from "./components/QuizWorkspace";
 import LearningRoadmapPage from "./components/LearningRoadmapPage";
 import PaymentCheckout from "./components/PaymentCheckout";
+import ProgressDashboard from "./components/progress/ProgressDashboard";
+import { EMPTY_PROGRESS_ANALYTICS } from "./components/progress/progressDefaults";
 import StudyDeckSession from "./components/StudyDeckSession";
 import { buildSubjectHashMap, findSubject, quickSortSubjects } from "./utils/subjectAlgorithms";
 import {
@@ -102,21 +104,6 @@ const EMPTY_STUDY_TIME = {
   session_count: 0,
   active: false,
 };
-
-function formatStudyDuration(totalSeconds) {
-  const minutes = Math.floor(Math.max(0, totalSeconds) / 60);
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return hours ? `${hours} giờ ${remainingMinutes} phút` : `${minutes} phút`;
-}
-
-function formatStudyClock(totalSeconds) {
-  const seconds = Math.max(0, Math.floor(totalSeconds));
-  const hours = String(Math.floor(seconds / 3600)).padStart(2, "0");
-  const minutes = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
-  const remainingSeconds = String(seconds % 60).padStart(2, "0");
-  return `${hours}:${minutes}:${remainingSeconds}`;
-}
 
 function mapDocumentProgress(result) {
   return (result.items || [])
@@ -282,6 +269,7 @@ export default function App() {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [progress, setProgress] = useState([]);
+  const [progressAnalytics, setProgressAnalytics] = useState(EMPTY_PROGRESS_ANALYTICS);
   const [studyTime, setStudyTime] = useState(EMPTY_STUDY_TIME);
   const [streak, setStreak] = useState({
     current_streak: 0,
@@ -303,12 +291,7 @@ export default function App() {
   const [billingCycle] = useState("month");
   const subjectOptions = useMemo(() => quickSortSubjects(subjects), [subjects]);
   const subjectIndex = useMemo(() => buildSubjectHashMap(subjectOptions), [subjectOptions]);
-  const average = progress.length
-    ? Math.round(
-        progress.reduce((total, item) => total + item.percent, 0) /
-          progress.length,
-      )
-    : 0;
+  const average = progressAnalytics.summary?.learning_percent || 0;
   const filteredDocs = useMemo(() => {
     const normalizedSearch = search.trim().toLocaleLowerCase("vi");
     const matchedSubject = normalizedSearch ? findSubject(subjectIndex, normalizedSearch) : null;
@@ -348,9 +331,12 @@ export default function App() {
   };
   const loadProgress = async () => {
     try {
-      setProgress(mapDocumentProgress(await getProgress()));
+      const result = await getProgress();
+      setProgress(mapDocumentProgress(result));
+      setProgressAnalytics(result.analytics || EMPTY_PROGRESS_ANALYTICS);
     } catch {
       setProgress([]);
+      setProgressAnalytics(EMPTY_PROGRESS_ANALYTICS);
     }
   };
   const loadDocumentsAndProgress = async () => {
@@ -372,6 +358,7 @@ export default function App() {
       setDocuments([]);
       setSubjects([]);
       setProgress([]);
+      setProgressAnalytics(EMPTY_PROGRESS_ANALYTICS);
       setStudyTime(EMPTY_STUDY_TIME);
       setStreak({ current_streak: 0, recovery_count: 0, last_activity_date: null });
       setSubscription({ plan: "free", status: "active" });
@@ -400,6 +387,7 @@ export default function App() {
       if (subjectsResult.status === "fulfilled") setSubjects(subjectsResult.value);
       if (progressResult.status === "fulfilled") {
         setProgress(mapDocumentProgress(progressResult.value));
+        setProgressAnalytics(progressResult.value.analytics || EMPTY_PROGRESS_ANALYTICS);
       }
       if (studyTimeResult.status === "fulfilled") setStudyTime(studyTimeResult.value);
       if (streakResult.status === "fulfilled") setStreak(streakResult.value);
@@ -488,6 +476,7 @@ export default function App() {
     setDocuments([]);
     setSubjects([]);
     setProgress([]);
+    setProgressAnalytics(EMPTY_PROGRESS_ANALYTICS);
     setStudyTime(EMPTY_STUDY_TIME);
     setStreak({ current_streak: 0, recovery_count: 0, last_activity_date: null });
     setSubscription({ plan: "free", status: "active" });
@@ -509,6 +498,7 @@ export default function App() {
       // Clear old user's data first before saving new user
       setDocuments([]);
       setProgress([]);
+      setProgressAnalytics(EMPTY_PROGRESS_ANALYTICS);
       setStudyTime(EMPTY_STUDY_TIME);
       setSubjects([]);
       setSubscription({ plan: "free", status: "active" });
@@ -959,73 +949,14 @@ export default function App() {
           <LearningRoadmapPage documents={documents} subjects={subjects} />
         )}
         {view === "dashboard" && (
-          <section className="page">
-            <div className="page-header">
-              <div>
-                <span className="eyebrow">TIẾN ĐỘ CÁ NHÂN</span>
-                <h2>{user ? `Chào ${user.name}` : "Tiến độ học tập"}</h2>
-                <p className="muted">
-                  Không còn không gian học nhóm — mọi dữ liệu ở đây là của riêng
-                  bạn.
-                </p>
-              </div>
-              <button className="btn btn-primary" onClick={() => go("tutor")}>
-                Mở Nova AI Tutor
-              </button>
-            </div>
-            <div className="stats-grid">
-              <div className="stat-box red">
-                <span>Tiến độ</span>
-                <strong>{average}%</strong>
-                <small>trung bình {progress.length} tài liệu</small>
-              </div>
-              <div className="stat-box blue">
-                <span>Thời gian học</span>
-                <strong className="study-time-value">{formatStudyDuration(studyTime.total_seconds)}</strong>
-                <small>Phiên hiện tại: {formatStudyClock(studyTime.current_session_seconds)}</small>
-              </div>
-              <div className="stat-box dark">
-                <span>Tài liệu</span>
-                <strong>{documents.length}</strong>
-                <small>trong kho cá nhân</small>
-              </div>
-            </div>
-            <div className="dashboard-quick-actions">
-              <button className="btn btn-outline" onClick={() => go("quiz")}><RectangleStackIcon aria-hidden="true" className="btn-icon" /> Quiz Card</button>
-              <button className="btn btn-outline" onClick={() => go("roadmap")}><SparklesIcon aria-hidden="true" className="btn-icon" /> Lộ trình học</button>
-              <button className="btn btn-outline" onClick={() => go("pricing")}><BoltIcon aria-hidden="true" className="btn-icon" /> Gói học</button>
-            </div>
-            <section className="panel-card progress-panel">
-              <div className="panel-head">
-                <h3>Tiến độ của bạn</h3>
-                <span className="panel-chip">{progress.length} mục</span>
-              </div>
-              <div className="progress-list reveal-stagger">
-                {!progress.length && <p className="empty-state">Chưa có dữ liệu tiến độ.</p>}
-                {progress.map((item) => (
-                  <div className="progress-row" key={item.documentId}>
-                    <div className="progress-info">
-                      <strong>{item.title}</strong>
-                      {item.subject && <small>{item.subject}</small>}
-                    </div>
-                    <div className="progress-control">
-                      <div
-                        className="automatic-progress-bar"
-                        role="progressbar"
-                        aria-label={`Tiến độ tự động của tài liệu ${item.title}`}
-                        aria-valuemin="0"
-                        aria-valuemax="100"
-                        aria-valuenow={item.percent}
-                      >
-                        <span style={{ width: `${item.percent}%` }} />
-                      </div>
-                      <span>{item.percent}%</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </section>
+          <ProgressDashboard
+            user={user}
+            analytics={progressAnalytics}
+            progress={progress}
+            studyTime={studyTime}
+            streak={streak}
+            onLogin={() => { setAuthMode("login"); setModal("auth"); }}
+          />
         )}
         {view === "tutor" && (
           <AITutorPage selectedDocument={selectedDocument} user={user} onDocumentsChanged={loadDocumentsAndProgress} onDocumentDeleted={(documentId) => setSelectedDocument((current) => String(current?.id) === String(documentId) ? null : current)} />

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import json, os, re, secrets, sqlite3, hashlib, mimetypes, html, zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from calendar import monthrange
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, quote
@@ -547,6 +547,89 @@ def public_quiz_payload(payload, quiz_id=None, created_at=None):
     if created_at is not None: result['created_at']=created_at
     return result
 
+def _parse_activity_time(value):
+    """Parse database timestamps as UTC without depending on a database dialect."""
+    if not value:
+        return None
+    try:
+        parsed=datetime.fromisoformat(str(value).replace('Z','+00:00'))
+    except (TypeError,ValueError):
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+
+def _shift_month(year, month, offset):
+    index=year*12+(month-1)+offset
+    return index//12,index%12+1
+
+def quiz_progress_analytics(connection, user_id, now=None):
+    """Aggregate real quiz attempts into day/week/month learning progress.
+
+    Learning progress deliberately balances completion (answered questions) and
+    accuracy (correct answers), so submitting an unfinished quiz cannot look the
+    same as completing it with strong results.
+    """
+    current=(now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    rows=connection.execute('''SELECT m.content,m.created_at
+      FROM chat_messages m JOIN chat_sessions s ON s.id=m.session_id
+      WHERE s.user_id=? AND s.title LIKE 'QUIZ_CARD:%' AND m.role='user'
+      ORDER BY m.created_at ASC,m.id ASC''',(user_id,)).fetchall()
+    attempts=[]
+    for row in rows:
+        try: payload=json.loads(row['content'])
+        except (TypeError,json.JSONDecodeError): continue
+        if payload.get('kind')!='quiz_attempt': continue
+        total=max(0,int(payload.get('total') or 0))
+        score=max(0,min(total,int(payload.get('score') or 0)))
+        answers=payload.get('answers') if isinstance(payload.get('answers'),dict) else {}
+        answered=min(total,sum(1 for value in answers.values() if value is not None))
+        occurred_at=_parse_activity_time(row['created_at'])
+        if occurred_at and total:
+            attempts.append({'at':occurred_at,'total':total,'answered':answered,'correct':score})
+
+    def metrics(selected):
+        total=sum(item['total'] for item in selected)
+        answered=sum(item['answered'] for item in selected)
+        correct=sum(item['correct'] for item in selected)
+        completion=round(answered*100/total) if total else 0
+        accuracy=round(correct*100/total) if total else 0
+        return {
+            'attempts':len(selected),'questions_total':total,'questions_answered':answered,
+            'correct_answers':correct,'completion_percent':completion,'accuracy_percent':accuracy,
+            'learning_percent':round((completion+accuracy)/2) if total else 0,
+        }
+
+    def bucket(key, label, start, end):
+        values=[item for item in attempts if start<=item['at']<end]
+        return {'key':key,'label':label,**metrics(values)}
+
+    today=current.date()
+    day=[]
+    for offset in range(-6,1):
+        date=today+timedelta(days=offset)
+        start=datetime(date.year,date.month,date.day,tzinfo=timezone.utc)
+        day.append(bucket(date.isoformat(),date.strftime('%d/%m'),start,start+timedelta(days=1)))
+
+    this_monday=today-timedelta(days=today.weekday())
+    week=[]
+    for offset in range(-7,1):
+        date=this_monday+timedelta(weeks=offset)
+        start=datetime(date.year,date.month,date.day,tzinfo=timezone.utc)
+        week.append(bucket(date.isoformat(),date.strftime('%d/%m'),start,start+timedelta(days=7)))
+
+    month=[]
+    for offset in range(-5,1):
+        year,month_number=_shift_month(today.year,today.month,offset)
+        next_year,next_month=_shift_month(year,month_number,1)
+        start=datetime(year,month_number,1,tzinfo=timezone.utc)
+        end=datetime(next_year,next_month,1,tzinfo=timezone.utc)
+        month.append(bucket(f'{year:04d}-{month_number:02d}',f'{month_number:02d}/{year}',start,end))
+
+    summary=metrics(attempts)
+    summary['xp']=summary['correct_answers']*10+summary['attempts']*5
+    today_start=datetime(today.year,today.month,today.day,tzinfo=timezone.utc)
+    today_metrics=metrics([item for item in attempts if today_start<=item['at']<today_start+timedelta(days=1)])
+    return {'summary':summary,'today':today_metrics,'ranges':{'day':day,'week':week,'month':month}}
+
 def subscription_effective_at(billing_cycle='month', now=None):
     """Calculate a calendar-month/year boundary without database-specific SQL."""
     if billing_cycle not in ('month','year'):
@@ -692,10 +775,11 @@ class H(BaseHTTPRequestHandler):
         FROM documents d JOIN subjects s ON s.id=d.subject_id
         LEFT JOIN user_progress p ON p.document_id=d.id AND p.user_id=?
         WHERE d.uploaded_by=? ORDER BY d.created_at DESC''',(u['id'],u['id']))]
+     analytics=quiz_progress_analytics(c,u['id'])
     rows=course_rows+document_rows
     measured=document_rows if document_rows else rows
     average=round(sum(int(row['progress_percent'] or 0) for row in measured)/len(measured)) if measured else 0
-    return self.json({'items':rows,'summary':{'count':len(measured),'completed':sum(1 for row in measured if row['completed']),'average_percent':average}})
+    return self.json({'items':rows,'summary':{'count':len(measured),'completed':sum(1 for row in measured if row['completed']),'average_percent':average},'analytics':analytics})
   if path=='/api/study-time':
    u=require_user(self)
    if not u:return
