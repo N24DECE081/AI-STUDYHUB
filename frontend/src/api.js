@@ -4,6 +4,17 @@ import { buildSubjectHashMap, findSubject } from "./utils/subjectAlgorithms";
 // falls back to another port. Set an explicit API URL only for separate hosting.
 const configuredApiBase = String(import.meta.env.VITE_API_BASE_URL || "").trim();
 const apiBase = (configuredApiBase || "/api").replace(/\/+$/, "");
+const publicAuthPaths = new Set([
+  "/auth/login",
+  "/auth/register",
+  "/auth/logout",
+  "/auth/password/otp",
+  "/auth/password/verify",
+  "/auth/password/reset",
+  "/auth/oauth/status",
+  "/me",
+  "/auth/me",
+]);
 
 async function readError(response) {
   const text = await response.text();
@@ -26,7 +37,13 @@ async function request(path, options = {}) {
       "Không kết nối được máy chủ StudyHub. Kiểm tra backend rồi thử lại.",
     );
   }
-  if (!response.ok) throw new Error(await readError(response));
+  if (!response.ok) {
+    const message = await readError(response);
+    if (response.status === 401 && !publicAuthPaths.has(path)) {
+      window.dispatchEvent(new Event("studyhub:session-expired"));
+    }
+    throw new Error(message);
+  }
   return response.json();
 }
 
@@ -89,13 +106,7 @@ export async function uploadDocument({
   body.append("title", title);
   body.append("description", description || "");
   body.append("subject_id", subject.id);
-  const response = await fetch(`${apiBase}/upload`, {
-    method: "POST",
-    credentials: "include",
-    body,
-  });
-  if (!response.ok) throw new Error(await readError(response));
-  const result = await response.json();
+  const result = await request("/upload", { method: "POST", body });
   return request(`/documents/${result.document_id}`);
 }
 

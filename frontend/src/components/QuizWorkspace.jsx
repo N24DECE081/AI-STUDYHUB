@@ -12,9 +12,9 @@ const fieldStyle = {
   color: "#172033",
 };
 
-export default function QuizWorkspace({ documents, user }) {
+export default function QuizWorkspace({ documents, user, initialDocumentId }) {
   const [subjectFilter, setSubjectFilter] = useState("all");
-  const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(() => initialDocumentId ? [initialDocumentId] : []);
   const [quiz, setQuiz] = useState(null);
   const [answers, setAnswers] = useState({});
   const [result, setResult] = useState(null);

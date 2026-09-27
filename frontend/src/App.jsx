@@ -3,6 +3,10 @@ import "./App.css";
 import "./Logo3D.css";
 import Logo3D from "./components/Logo3D.jsx";
 import LandingExtras from "./components/LandingExtras.jsx";
+import BeeChatWidget from "./components/BeeChatWidget.jsx";
+import FocusSpaceLogo from "./components/FocusSpaceLogo.jsx";
+import FocusSpacePage from "./components/FocusSpacePage.jsx";
+import studyHubLogo from "./assets/studyhub-logo.png";
 
 import {
   checkoutSubscription,
@@ -121,6 +125,38 @@ const EMPTY_STUDY_TIME = {
   session_count: 0,
   active: false,
 };
+
+const VIEW_PATHS = {
+  home: "/dashboard",
+  library: "/app/materials",
+  quiz: "/app/quiz",
+  roadmap: "/app/roadmap",
+  dashboard: "/app/progress",
+  tutor: "/app/ai-tutor",
+  focusSpace: "/app/focus-space",
+  pricing: "/app/plans",
+};
+const PATH_VIEWS = {
+  "/": "home",
+  "/dashboard": "home",
+  "/app": "home",
+  "/materials": "library",
+  "/app/materials": "library",
+  "/quiz": "quiz",
+  "/app/quiz": "quiz",
+  "/roadmap": "roadmap",
+  "/app/roadmap": "roadmap",
+  "/progress": "dashboard",
+  "/app/progress": "dashboard",
+  "/ai-tutor": "tutor",
+  "/app/ai-tutor": "tutor",
+  "/app/focus-space": "focusSpace",
+  "/plans": "pricing",
+  "/app/plans": "pricing",
+};
+const viewForPath = (path) => PATH_VIEWS[path] || "home";
+const isAuthPath = (path) => path === "/login" || path === "/register";
+const isProtectedPath = (path) => path !== "/" && !isAuthPath(path) && (path in PATH_VIEWS || path.startsWith("/app/"));
 
 const VIETNAM_TIME_ZONE = "Asia/Ho_Chi_Minh";
 const vietnamDateKey = (date = new Date()) => {
@@ -267,7 +303,9 @@ function StudyHubAuthScreen({ mode, user, oauthStatus, error, identifier, onBack
           <ArrowLeftIcon aria-hidden="true" />
         </button>
         <div className="studyhub-auth__brand" aria-label="StudyHub">
-          <span className="studyhub-auth__logo" aria-hidden="true"><b>S</b><i>H</i></span>
+          {mode === "login" || mode === "register"
+            ? <img className="studyhub-auth__logo-image" src={studyHubLogo} alt="" />
+            : <span className="studyhub-auth__logo" aria-hidden="true"><b>S</b><i>H</i></span>}
         </div>
         <header className="studyhub-auth__heading">
           <h1 id="studyhub-auth-title">{heading[0]}</h1>
@@ -389,7 +427,8 @@ function useRevealOnScroll(dependencyKey) {
 }
 
 export default function App() {
-  const [view, setView] = useState("home");
+  const [view, setView] = useState(() => viewForPath(window.location.pathname));
+  const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("studyhub-user"));
@@ -420,8 +459,8 @@ export default function App() {
     recovery_count: 0,
     last_activity_date: null,
   });
-  const [modal, setModal] = useState(null);
-  const [authMode, setAuthMode] = useState("login");
+  const [modal, setModal] = useState(() => isAuthPath(window.location.pathname) ? "auth" : null);
+  const [authMode, setAuthMode] = useState(() => window.location.pathname === "/register" ? "register" : "login");
   const [authError, setAuthError] = useState("");
   const [resetIdentifier, setResetIdentifier] = useState("");
   const [resetToken, setResetToken] = useState("");
@@ -439,11 +478,13 @@ export default function App() {
   const [documentPreview, setDocumentPreview] = useState(null);
   const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [uploadPhase, setUploadPhase] = useState("idle");
+  const [uploadError, setUploadError] = useState("");
   const [uploadFileName, setUploadFileName] = useState("");
   const [uploadDragActive, setUploadDragActive] = useState(false);
   const documentPreviewRequest = useRef(0);
   const userRef = useRef(user);
   const uploadInput = useRef(null);
+  const uploadInFlight = useRef(false);
   const [subscription, setSubscription] = useState({
     plan: "free",
     status: "active",
@@ -548,6 +589,7 @@ export default function App() {
   };
   const userKey = user ? String(user.id || user.email || "") : "";
   useEffect(() => {
+    if (!authReady) return undefined;
     let active = true;
     const refreshUserData = async () => {
       // Clear every user-scoped view before loading the next account. This prevents
@@ -598,9 +640,9 @@ export default function App() {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [userKey]);
+  }, [authReady, userKey]);
   useEffect(() => {
-    if (!userKey) return undefined;
+    if (!authReady || !userKey) return undefined;
     const clock = window.setInterval(() => {
       setStudyTime((current) => current.active ? {
         ...current,
@@ -615,9 +657,9 @@ export default function App() {
       window.clearInterval(clock);
       window.clearInterval(sync);
     };
-  }, [userKey]);
+  }, [authReady, userKey]);
   useEffect(() => {
-    if (!userKey || view !== "library") return undefined;
+    if (!authReady || !userKey || view !== "library") return undefined;
     let active = true;
     const refresh = async () => {
       const [documentsResult, progressResult] = await Promise.allSettled([getDocuments(), getProgress()]);
@@ -630,7 +672,7 @@ export default function App() {
     };
     void refresh();
     return () => { active = false; };
-  }, [userKey, view]);
+  }, [authReady, userKey, view]);
   useRevealOnScroll(`${view}-${documents.length}-${quizDecks.length}`);
   useEffect(() => {
     let active = true;
@@ -648,10 +690,67 @@ export default function App() {
       })
       .catch(() => {
         if (active) saveUser(null);
+      })
+      .finally(() => {
+        if (active) setAuthReady(true);
       });
     return () => {
       active = false;
     };
+  }, [saveUser]);
+  useEffect(() => {
+    if (!authReady) return undefined;
+    const syncRoute = () => {
+      const path = window.location.pathname;
+      if (path.startsWith("/app/") && !(path in PATH_VIEWS)) {
+        window.history.replaceState({}, "", user ? "/dashboard" : "/");
+        setView("home");
+        setToast("Trang này hiện chưa khả dụng. Vui lòng kiểm tra lại đường dẫn.");
+        window.setTimeout(() => setToast(""), 3200);
+        return;
+      }
+      if (user && !user.profile_completed && authMode === "profile") {
+        setModal("auth");
+        return;
+      }
+      if (isAuthPath(path)) {
+        if (user && !(modal === "auth" && authMode === "profile")) {
+          window.history.replaceState({}, "", "/dashboard");
+          setView("home");
+          setModal(null);
+        } else if (!user) {
+          setView("home");
+          setAuthMode(path === "/register" ? "register" : "login");
+          setModal("auth");
+        }
+        return;
+      }
+      if (isProtectedPath(path) && !user) {
+        window.history.replaceState({}, "", "/login");
+        setView("home");
+        setAuthMode("login");
+        setModal("auth");
+        return;
+      }
+      if (user && path === "/") window.history.replaceState({}, "", "/dashboard");
+      setView(viewForPath(path));
+      if (modal === "auth") setModal(null);
+    };
+    window.addEventListener("popstate", syncRoute);
+    syncRoute();
+    return () => window.removeEventListener("popstate", syncRoute);
+  }, [authReady, authMode, modal, user]);
+  useEffect(() => {
+    const expireSession = () => {
+      saveUser(null);
+      setView("home");
+      setAuthMode("login");
+      setAuthError("Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại để tiếp tục.");
+      setModal("auth");
+      window.history.replaceState({}, "", "/login");
+    };
+    window.addEventListener("studyhub:session-expired", expireSession);
+    return () => window.removeEventListener("studyhub:session-expired", expireSession);
   }, [saveUser]);
   useEffect(() => {
     if (modal !== "auth") return undefined;
@@ -693,18 +792,31 @@ export default function App() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [saveUser]);
+  const openAuth = (mode = "login") => {
+    const nextPath = mode === "register" ? "/register" : "/login";
+    setAuthError("");
+    setAuthMode(mode);
+    setModal("auth");
+    if (window.location.pathname !== nextPath) window.history.pushState({}, "", nextPath);
+  };
   const requireLogin = () => {
     if (user) return false;
-    setAuthMode("login");
-    setModal("auth");
+    openAuth("login");
     notify("Đăng nhập để dùng tính năng cá nhân.");
     return true;
   };
   const go = (next) => {
-    if (next === "tutor" && requireLogin()) return;
+    if (!VIEW_PATHS[next]) {
+      notify("Trang này hiện chưa khả dụng. Vui lòng thử lại sau.");
+      return false;
+    }
+    if (next !== "home" && requireLogin()) return false;
     if (next === "dashboard" && user) void loadProgress();
     setView(next);
+    const nextPath = next === "home" && !user ? "/" : VIEW_PATHS[next];
+    if (nextPath && window.location.pathname !== nextPath) window.history.pushState({}, "", nextPath);
     window.scrollTo({ top: 0, behavior: "smooth" });
+    return true;
   };
   const openDocumentPreview = async (document) => {
     const requestId = ++documentPreviewRequest.current;
@@ -740,6 +852,8 @@ export default function App() {
     setStreak({ current_streak: 0, recovery_count: 0, last_activity_date: null });
     setSubscription({ plan: "free", status: "active" });
     setView("home");
+    setModal(null);
+    window.history.replaceState({}, "", "/");
     notify("Đã đăng xuất và xóa phiên làm việc trên trình duyệt.");
   };
   const submitAuth = async (event) => {
@@ -808,18 +922,27 @@ export default function App() {
   };
   const submitUpload = async (event) => {
     event.preventDefault();
+    if (uploadInFlight.current) return;
     setUploadPhase("validating");
+    setUploadError("");
+    const fail = (message) => {
+      setUploadPhase("error");
+      setUploadError(message);
+      notify(message);
+    };
     const data = new FormData(event.currentTarget);
     const file = data.get("file");
-    if (!file?.name) { setUploadPhase("error"); return notify("Hãy chọn tài liệu trước."); }
+    if (!file?.name) return fail("Hãy chọn tài liệu trước.");
     const title = String(data.get("title") || "").trim();
     const extension = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
-    if (!title) { setUploadPhase("error"); return notify("Tiêu đề tài liệu không được để trống."); }
-    if (file.size === 0) { setUploadPhase("error"); return notify("File không được rỗng."); }
-    if (file.size > 10 * 1024 * 1024) { setUploadPhase("error"); return notify("File tối đa 10MB."); }
+    if (!title) return fail("Tiêu đề tài liệu không được để trống.");
+    if (!data.get("subject")) return fail("Hãy chọn hoặc thêm môn học trước.");
+    if (file.size === 0) return fail("File không được rỗng.");
+    if (file.size > 10 * 1024 * 1024) return fail("File tối đa 10MB.");
     if (![".pdf", ".txt", ".md", ".csv", ".doc", ".docx", ".ppt", ".pptx"].includes(extension)) {
-      setUploadPhase("error"); return notify("Định dạng file chưa được hỗ trợ.");
+      return fail("Định dạng file chưa được hỗ trợ.");
     }
+    uploadInFlight.current = true;
     try {
       setUploadPhase("uploading");
       await uploadDocument({
@@ -832,10 +955,11 @@ export default function App() {
       await loadDocumentsAndProgress();
       setUploadPhase("success");
       notify("Đã tải tài liệu vào kho học liệu.");
-      window.setTimeout(() => { setModal(null); setUploadPhase("idle"); setUploadFileName(""); }, 650);
+      window.setTimeout(() => { setModal(null); setUploadPhase("idle"); setUploadFileName(""); }, 1000);
     } catch (error) {
-      setUploadPhase("error");
-      notify(`Upload thất bại: ${error.message}`);
+      fail(`Upload thất bại: ${error.message || "Vui lòng thử lại."}`);
+    } finally {
+      uploadInFlight.current = false;
     }
   };
   const chooseOAuthLogin = (provider) => {
@@ -852,6 +976,7 @@ export default function App() {
     uploadInput.current.files = transfer.files;
     setUploadFileName(file.name);
     setUploadPhase("idle");
+    setUploadError("");
   };
   const removeLibraryDocument = async (event, document) => {
     event.stopPropagation();
@@ -881,6 +1006,8 @@ export default function App() {
         description: data.get("description"),
       });
       await loadSubjects();
+      setUploadPhase("idle");
+      setUploadError("");
       setModal("upload");
       notify("Đã thêm môn học mới.");
     } catch (error) {
@@ -937,7 +1064,8 @@ export default function App() {
       notify(`Không thể hủy gia hạn: ${error.message}`);
     }
   };
-  if (modal === "auth") {
+  if (!authReady) return <div className="auth-checking" role="status" aria-label="Đang kiểm tra phiên đăng nhập"><span /></div>;
+  if ((modal === "auth" && (!user || authMode === "profile")) || (!user && isProtectedPath(window.location.pathname))) {
     return (
       <>
       <div className="auth-theme"><ThemeToggle theme={theme} onToggle={() => setTheme(theme === 'light' ? 'dark' : 'light')} /></div>
@@ -950,10 +1078,15 @@ export default function App() {
         onBack={() => {
           setAuthError("");
           setModal(null);
+          setView("home");
+          window.history.replaceState({}, "", user ? "/dashboard" : "/");
         }}
         onMode={(next) => {
           setAuthError("");
           setAuthMode(next);
+          if (next === "login" || next === "register") {
+            window.history.replaceState({}, "", next === "register" ? "/register" : "/login");
+          }
         }}
         onOAuth={chooseOAuthLogin}
         onSubmit={submitAuth}
@@ -961,11 +1094,12 @@ export default function App() {
       </>
     );
   }
+  if (view === "focusSpace") return <FocusSpacePage user={user} onBack={() => go("home")} />;
   return (
     <div className={`studyhub-app ${theme}`}>
       <header className="topbar">
         <button className="brand-wrap" onClick={() => go("home")} aria-label="StudyHub - Trang chủ">
-          <span className="brand-mark"><AcademicCapIcon aria-hidden="true" /></span>
+          <span className="brand-mark"><BookOpenIcon aria-hidden="true" /></span>
           <span className="brand-text">
             Study<span>Hub</span>
           </span>
@@ -1014,8 +1148,8 @@ export default function App() {
             </>
           ) : (
             <>
-              <button className="btn btn-ghost" onClick={() => { setAuthError(""); setAuthMode("login"); setModal("auth"); }}>Đăng nhập</button>
-              <button className="btn btn-primary" onClick={() => { setAuthError(""); setAuthMode("register"); setModal("auth"); }}>Đăng ký</button>
+              <button className="btn btn-ghost" onClick={() => openAuth("login")}>Đăng nhập</button>
+              <button className="btn btn-primary" onClick={() => openAuth("register")}>Đăng ký</button>
             </>
           )}
         </div>
@@ -1029,70 +1163,47 @@ export default function App() {
                   STUDYHUB · NỀN TẢNG HỌC CÁ NHÂN CÓ ĐỊNH HƯỚNG
                 </span>
                 <h1>
-                  {user ? 'Học sâu hơn.' : 'Học thông minh hơn.'}
+                  Học sâu hơn.
                   <br />
                   <span>Tiến bộ rõ hơn.</span>
                 </h1>
                 <p className="hero-tagline">
-                  Nền tảng AI giúp sinh viên tổ chức tài liệu, tạo Quiz thông minh, xây lộ trình cá nhân và trao đổi trực tiếp với Nova AI Tutor.
+                  Nền tảng AI giúp sinh viên tổ chức tài liệu, tạo Quiz thông minh, xây dựng lộ trình học cá nhân hóa và trao đổi trực tiếp với Nova AI Tutor 24/7.
 
                 </p>
                 <div className="hero-actions">
                   <button
                     className="btn btn-primary large"
-                    onClick={() => user ? go("tutor") : (setAuthMode("register"), setModal("auth"))}
+                    onClick={() => user ? go("tutor") : openAuth("login")}
                   >
                     <SparklesIcon aria-hidden="true" className="btn-icon" />
-                    {user ? 'Hỏi Nova AI Tutor' : 'Bắt đầu học ngay'}
+                    Hỏi Nova AI Tutor
                   </button>
                   <button
                     className="btn btn-outline large"
-                    onClick={() => user ? go("library") : document.getElementById('studyhub-workflow')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })}
+                    onClick={() => user ? go("library") : openAuth("login")}
                   >
                     <BookOpenIcon aria-hidden="true" className="btn-icon" />
-                    {user ? 'Mở kho học liệu' : 'Khám phá StudyHub'}
+                    Mở kho học liệu
                   </button>
                 </div>
                 <div className="hero-badges">
-                  <span className="hero-badge" onClick={() => go("quiz")}><RectangleStackIcon aria-hidden="true" /> Quiz Card AI</span>
-                  <span className="hero-badge" onClick={() => go("roadmap")}><SparklesIcon aria-hidden="true" /> Lộ trình cá nhân</span>
-                  <span className="hero-badge" onClick={() => go("dashboard")}><BoltIcon aria-hidden="true" /> Theo dõi tiến độ</span>
+                  <button type="button" className="hero-badge" onClick={() => go("quiz")}><RectangleStackIcon aria-hidden="true" /> Quiz Card AI</button>
+                  <button type="button" className="hero-badge" onClick={() => go("roadmap")}><SparklesIcon aria-hidden="true" /> Lộ trình cá nhân</button>
+                  <button type="button" className="hero-badge" onClick={() => go("dashboard")}><BoltIcon aria-hidden="true" /> Theo dõi tiến độ</button>
                 </div>
               </div>
               <div className="hero-visual">
-                {!user ? <>
-                  <Logo3D />
+                <Logo3D />
+                {user ? <>
+                  <div className="hero-note hero-note--one"><BookOpenIcon aria-hidden="true" /><div><strong>{documents.length} tài liệu</strong><small>Đã lưu</small></div></div>
+                  <div className="hero-note hero-note--two"><SparklesIcon aria-hidden="true" /><div><strong>{progress.length ? `${average}%` : "—"}</strong><small>Tiến độ</small></div></div>
+                  <div className="hero-note hero-note--three"><FireIcon aria-hidden="true" /><div><strong>{streak.current_streak} ngày</strong><small>Streak</small></div></div>
+                </> : <>
                   <div className="hero-note hero-note--one"><BookOpenIcon aria-hidden="true" /><div><strong>Gọn một nơi</strong><small>Tài liệu & kiến thức</small></div></div>
                   <div className="hero-note hero-note--two"><SparklesIcon aria-hidden="true" /><div><strong>Rõ từng bước</strong><small>Lộ trình của riêng bạn</small></div></div>
                   <div className="hero-note hero-note--three"><FireIcon aria-hidden="true" /><div><strong>Mỗi ngày một chút</strong><small>Xây thói quen học</small></div></div>
-                </> : <div className="progress-card">
-                  <span className="eyebrow">NHỊP HỌC TUẦN NÀY</span>
-                  <div className="big-number">
-                    {progress.length ? average : "—"}
-                    {progress.length > 0 && <span>%</span>}
-                  </div>
-                  <div className="progress-bar">
-                    <span style={{ width: progress.length ? `${average}%` : "0%" }} />
-                  </div>
-                  <div className="mini-grid">
-                    <div className="mini-item">
-                      <strong>{documents.length}</strong>
-                      <small>tài liệu</small>
-                    </div>
-                    <div className="mini-item">
-                      <strong>{progress.length}</strong>
-                      <small>mục đang học</small>
-                    </div>
-                    <div className="mini-item">
-                      <strong>{quizDecks.length}</strong>
-                      <small>bộ Quiz</small>
-                    </div>
-                    <div className="mini-item">
-                      <strong>{user ? streak.current_streak : 0}</strong>
-                      <small>ngày streak</small>
-                    </div>
-                  </div>
-                </div>}
+                </>}
               </div>
             </section>
             <section className="content-section pain-points-section">
@@ -1120,10 +1231,7 @@ export default function App() {
             {user && <StreakCard
               user={user}
               streak={streak}
-              onLogin={() => {
-                setAuthMode("login");
-                setModal("auth");
-              }}
+              onLogin={() => openAuth("login")}
             />}
             <section className="content-section workflow-section" id="studyhub-workflow">
               <span className="eyebrow">WORKFLOW CÁ NHÂN</span>
@@ -1165,7 +1273,7 @@ export default function App() {
                     <span className="step-tag">{num}</span>
                     <h3>{title}</h3>
                     <p>{detail}</p>
-                    <button className="text-link" onClick={() => go(target)}>
+                <button className="text-link" onClick={() => go(target)}>
                       Mở tính năng{" "}
                       <ArrowRightIcon
                         aria-hidden="true"
@@ -1231,7 +1339,7 @@ export default function App() {
                 </div>
               </div>
             </section>
-            {!user && <LandingExtras plans={PLANS} onStart={() => { setAuthError(""); setAuthMode("register"); setModal("auth"); }} onExplore={go} />}
+            {!user && <LandingExtras plans={PLANS} onStart={() => openAuth("register")} onExplore={go} />}
           </>
         )}
         {view === "library" && (
@@ -1244,7 +1352,13 @@ export default function App() {
               </div>
               <button
                 className="btn btn-primary hero-upload"
-                onClick={() => !requireLogin() && setModal("upload")}
+                onClick={() => {
+                  if (requireLogin()) return;
+                  setUploadPhase("idle");
+                  setUploadError("");
+                  setUploadFileName("");
+                  setModal("upload");
+                }}
               >
                 <CloudArrowUpIcon aria-hidden="true" />
                 Upload tài liệu mới
@@ -1378,7 +1492,7 @@ export default function App() {
                 <PlusIcon aria-hidden="true" /> Tạo Bộ Thẻ Mới
               </button>
             </header>
-            <QuizWorkspace documents={documents} user={user} />
+            <QuizWorkspace documents={documents} user={user} initialDocumentId={selectedDocument?.id} />
             {quizDecks.length ? (
               <div className="quiz-deck-grid reveal-stagger">
                 {quizDecks.map((deck) => (
@@ -1404,7 +1518,16 @@ export default function App() {
           </section>
         )}
         {view === "roadmap" && (
-          <LearningRoadmapPage documents={documents} subjects={subjects} progress={progress} onOpenDocument={openDocumentPreview} />
+          <LearningRoadmapPage
+            key={String(user?.id || user?.email || "guest")}
+            documents={documents}
+            progress={progress}
+            onOpenDocument={openDocumentPreview}
+            onTakeQuiz={(document) => { setSelectedDocument(document); go("quiz"); }}
+            user={user}
+            streak={streak}
+            studyTime={studyTime}
+          />
         )}
         {view === "dashboard" && (
           <ProgressDashboard
@@ -1414,7 +1537,7 @@ export default function App() {
             studyTime={studyTime}
             streak={streak}
             quizDecks={quizDecks}
-            onLogin={() => { setAuthMode("login"); setModal("auth"); }}
+            onLogin={() => openAuth("login")}
           />
         )}
         {view === "tutor" && (
@@ -1502,6 +1625,8 @@ export default function App() {
           </section>
         )}
       </main>
+      {view === "home" && <FocusSpaceLogo onOpen={() => go("focusSpace")} />}
+      <BeeChatWidget visible={view === "home"} key={String(user?.id || user?.email || "guest")} user={user} onRequireLogin={() => requireLogin()} onNavigate={go} />
       {modal === "document-preview" && documentPreview && (
         <Modal
           title={documentPreview.document.title || "Nội dung tài liệu"}
@@ -1562,7 +1687,6 @@ export default function App() {
               <input
                 id="upload-title"
                 name="title"
-                required
                 maxLength="200"
                 placeholder="Ví dụ: Chương 1 - Đạo hàm và ứng dụng"
               />
@@ -1573,6 +1697,7 @@ export default function App() {
                 id="upload-description"
                 name="description"
                 rows="3"
+                maxLength="2000"
                 placeholder="Ghi chú ngắn gọn về nội dung tài liệu…"
               />
             </fieldset>
@@ -1588,10 +1713,10 @@ export default function App() {
                   selectUploadFile(event.dataTransfer.files?.[0]);
                 }}
               >
-                <span className="upload-pixel-character" aria-hidden="true">⚡</span>
+                <span className="upload-pixel-character" aria-hidden="true"><CloudArrowUpIcon /></span>
                 <strong>ENTER THE KNOWLEDGE VAULT</strong>
                 <p>{uploadFileName || "Kéo và thả tài liệu vào đây"}</p>
-                <label className="btn btn-outline" htmlFor="upload-file">+ Chọn tài liệu</label>
+                <button type="button" className="btn btn-outline" onClick={() => uploadInput.current?.click()}>Chọn tài liệu</button>
                 <small>PDF · DOCX · PPTX · TXT · MD · tối đa 10MB</small>
                 <input
                   ref={uploadInput}
@@ -1599,14 +1724,13 @@ export default function App() {
                   name="file"
                   type="file"
                   accept=".pdf,.txt,.md,.csv,.doc,.docx,.ppt,.pptx"
-                  onChange={(event) => { setUploadFileName(event.target.files?.[0]?.name || ""); setUploadPhase("idle"); }}
-                  required
+                  onChange={(event) => { setUploadFileName(event.target.files?.[0]?.name || ""); setUploadPhase("idle"); setUploadError(""); }}
                 />
               </div>
               {uploadPhase !== "idle" && (
-                <div className={`upload-pipeline is-${uploadPhase}`} role="status">
+                <div className={`upload-pipeline is-${uploadPhase}`} role={uploadPhase === "error" ? "alert" : "status"}>
                   <span className="upload-pipeline-bar"><i /></span>
-                  <strong>{uploadPhase === "validating" ? "Đang kiểm tra tệp..." : uploadPhase === "uploading" ? "Đang tải lên..." : uploadPhase === "processing" ? "Đang lập chỉ mục tài liệu..." : uploadPhase === "success" ? "✓ Sẵn sàng để học" : "Không thể xử lý tệp"}</strong>
+                  <strong>{uploadPhase === "validating" ? "Đang kiểm tra tệp..." : uploadPhase === "uploading" ? "Đang tải lên..." : uploadPhase === "processing" ? "Đang lập chỉ mục tài liệu..." : uploadPhase === "success" ? "✓ Sẵn sàng để học" : uploadError || "Không thể xử lý tệp"}</strong>
                 </div>
               )}
               <label htmlFor="upload-subject">

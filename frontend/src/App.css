@@ -1295,13 +1295,30 @@ a {
 }
 .optional-mark {color:var(--muted);font-weight:500;font-size:12px;
 }
-.upload-form__.site-footer {display:flex;justify-content:flex-end;gap:10px;margin-top:2px;
+.upload-form__footer {display:flex;justify-content:flex-end;flex-wrap:wrap;gap:10px;margin-top:2px;
 }
 @media (prefers-reduced-motion: reduce) {
 
   .main-shell>* {animation:none;
   }
 }
+
+.auth-checking {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  background: var(--bg-main);
+}
+.auth-checking span {
+  width: 30px;
+  aspect-ratio: 1;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--mint-ink);
+  border-radius: 50%;
+  animation: auth-check-spin 800ms linear infinite;
+}
+@keyframes auth-check-spin { to { transform: rotate(360deg); } }
+
 @media (prefers-reduced-motion: reduce) {
 
   .streak-symbol {animation:none;
@@ -2011,9 +2028,7 @@ a {
 }
 .document-file-meta {display:block;margin-top:-3px;color:var(--text-body);font-size:10px;font-weight:800;letter-spacing:.08em;
 }
-.smart-upload-zone {position:relative;display:grid;justify-items:center;gap:9px;padding:25px 18px;overflow:hidden;border:1px dashed var(--border-color);border-radius:14px;background:var(--bg-alt);text-align:center;transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease;
-}
-.smart-upload-zone:after {content:"";position:absolute;inset:0;pointer-events:none;background:var(--bg-alt);
+.smart-upload-zone {position:relative;display:grid;justify-items:center;gap:9px;min-width:0;padding:25px 18px;border:1px dashed var(--border-color);border-radius:14px;background:var(--bg-alt);text-align:center;transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease;
 }
 .smart-upload-zone.is-dragging {transform:scale(1.015);border-color:var(--border-color);box-shadow:var(--shadow-subtle);
 }
@@ -2025,7 +2040,13 @@ a {
 }
 .smart-upload-zone small {color:var(--mint-ink);
 }
-.upload-pixel-character {display:grid;place-items:center;width:42px;height:42px;border:1px solid var(--border-color);border-radius:10px;background:var(--bg-alt);font-size:22px;animation:pixel-idle 1.8s ease-in-out infinite;
+.smart-upload-zone :is(strong,p,small) {max-width:100%;overflow-wrap:anywhere;line-height:1.45;
+}
+.smart-upload-zone .btn {position:relative;z-index:1;min-height:40px;
+}
+.upload-pixel-character {display:grid;place-items:center;width:44px;height:44px;border:1px solid var(--secondary-mint);border-radius:10px;background:var(--mint-soft);color:var(--mint-ink);
+}
+.upload-pixel-character svg {display:block;width:26px;height:26px;stroke-width:2.2;
 }
 .smart-upload-zone.is-uploading .upload-pixel-character {animation:pixel-work .65s linear infinite;
 }
@@ -2035,13 +2056,17 @@ a {
 }
 .upload-pipeline {display:grid;gap:7px;margin-top:10px;
 }
-.upload-pipeline-bar {height:7px;overflow:hidden;border-radius:99px;background:var(--bg-alt);
+.upload-pipeline-bar {height:7px;overflow:hidden;border-radius:99px;background:var(--border-color);
 }
-.upload-pipeline-bar i {display:block;width:45%;height:100%;border-radius:inherit;background:var(--bg-alt);animation:upload-scan 1s ease-in-out infinite;
+.upload-pipeline-bar i {display:block;width:45%;height:100%;border-radius:inherit;background:var(--mint-ink);animation:upload-scan 1s ease-in-out infinite;
 }
 .upload-pipeline.is-success .upload-pipeline-bar i {width:100%;animation:none;background:var(--secondary-mint);
 }
 .upload-pipeline.is-error {color:var(--pink-ink);
+}
+.upload-pipeline.is-error .upload-pipeline-bar i {width:100%;animation:none;background:var(--pink-ink);
+}
+@keyframes upload-scan {from {transform:translateX(-100%)} to {transform:translateX(230%)}
 }
 .delete-document-confirm {display:grid;gap:13px;margin-top:14px;
 }
@@ -2366,3 +2391,191 @@ a {
 .hero-upload:hover{background:var(--primary-pink-hover)}
 .hero-upload{color:var(--button-ink)}
 .filter-tabs button.active{background:var(--pink-soft);border-color:var(--primary-pink)}
+
+/* --- STUDYHUB DESIGN REQUIREMENTS ENFORCEMENT --- */
+
+/* 1. Header */
+.topbar {
+  background-color: var(--bg-main);
+  border-bottom: 1px solid var(--border-color);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+/* Landing hero */
+.hero-section {
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  background: var(--bg-alt);
+}
+.hero-section.landing-hero, .landing-hero {
+  background: radial-gradient(ellipse at 79% 45%, var(--mint-soft), transparent 55%), var(--bg-alt);
+}
+@media (max-width: 850px) {
+  .hero-section { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* 4. Landing hero notes */
+.hero-note { position: absolute !important; }
+
+/* 5. Pain points section */
+.pain-points-section { text-align: center; }
+.pain-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 24px;
+}
+@media (max-width: 768px) {
+  .pain-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 6. Workflow section */
+.step-tag {
+  background-color: var(--secondary-mint);
+  color: var(--text-darker);
+  border-radius: 50%;
+}
+
+/* 7. Roadmap sample section */
+.roadmap-sample-section { text-align: center; }
+.roadmap-week-card.active { border-color: var(--primary-pink) !important; }
+
+/* 8. Streak habit section */
+.streak-habit-section { background: var(--mint-soft) !important; }
+
+/* 9. Progress bars */
+.progress-bar span, .week-progress span {
+  background: linear-gradient(90deg, var(--secondary-mint), #4ade80) !important;
+}
+
+/* 10. Footer */
+.site-footer { background: var(--bg-alt) !important; }
+
+/* Specific Style Requirements */
+.card, .workflow-card, .document-card, .price-card, .pain-card {
+  background: var(--bg-main) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-subtle) !important;
+}
+
+.btn { border-radius: var(--radius-pill) !important; }
+.btn-primary { background-color: var(--primary-pink) !important; }
+
+.eyebrow {
+  background-color: var(--secondary-mint) !important;
+  border-radius: var(--radius-pill) !important;
+  font-variant: small-caps !important;
+}
+
+/* Consistent, theme-aware interaction states on the homepage. */
+.nav-item,
+.workflow-card,
+.pain-card,
+.hero-badge {
+  transition: color 240ms ease, background-color 240ms ease, border-color 240ms ease, box-shadow 240ms ease, transform 240ms ease;
+}
+
+.nav-item:is(:hover, :focus-visible) {
+  background: var(--interactive-hover-bg);
+  color: var(--interactive-hover-ink);
+  box-shadow: var(--interactive-hover-shadow);
+}
+
+.nav-item.active {
+  background: var(--pink-soft);
+  color: var(--text-dark);
+}
+.nav-item.active:is(:hover, :focus-visible) {
+  background: var(--interactive-hover-bg);
+  color: var(--interactive-hover-ink);
+}
+
+.hero-badge:is(:hover, :focus-visible) {
+  background: var(--interactive-hover-bg);
+  border-color: var(--interactive-hover-bg);
+  color: var(--interactive-hover-ink);
+  box-shadow: var(--interactive-hover-shadow);
+  transform: translateY(-2px);
+}
+.hero-badge:is(:hover, :focus-visible) svg { color: currentColor; }
+
+.workflow-card:is(:hover, :focus-within),
+.pain-card:is(:hover, :focus-within) {
+  background: var(--interactive-hover-bg) !important;
+  border-color: var(--interactive-hover-bg) !important;
+  color: var(--interactive-hover-ink);
+  box-shadow: var(--interactive-hover-shadow) !important;
+  transform: translateY(-2px);
+}
+
+.workflow-card:is(:hover, :focus-within) :is(h3, p, .text-link, .step-tag),
+.pain-card:is(:hover, :focus-within) :is(h3, p, .pain-icon) {
+  color: var(--interactive-hover-ink);
+}
+
+.workflow-card:is(:hover, :focus-within) .step-tag {
+  background: color-mix(in srgb, var(--interactive-hover-ink) 16%, transparent);
+}
+
+.workflow-card .text-link:focus-visible {
+  outline-color: currentColor;
+  outline-offset: 3px;
+}
+
+@media (hover: none) {
+  .nav-item:active,
+  .workflow-card:active,
+  .pain-card:active,
+  .hero-badge:active {
+    background: var(--interactive-hover-bg);
+    color: var(--interactive-hover-ink);
+  }
+  .hero-badge:active { border-color: var(--interactive-hover-bg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-item,
+  .workflow-card,
+  .pain-card,
+  .hero-badge {
+    transition: none;
+  }
+}
+
+.studyhub-auth__logo-image {
+  display: block;
+  width: 84px;
+  height: 84px;
+  object-fit: contain;
+}
+
+@media (max-width: 620px) {
+  .studyhub-auth__logo-image {
+    width: 72px;
+    height: 72px;
+  }
+}
+
+/* Solid pastel controls keep dark ink in both themes. */
+.streak-pill,
+.streak-pill :is(strong,span,svg),
+.streak-symbol,
+.roadmap-pill,
+.step-tag,
+.study-again,
+.study-known,
+.study-session-result > span,
+.quiz-step.is-active,
+.quiz-step.is-active.is-correct,
+.quiz-step.is-active.is-wrong,
+.quiz-flashcard__badge,
+.quiz-flashcard .quiz-option:is(.is-selected,.is-correct,.is-wrong) b,
+.week-day.is-done .week-day__marker,
+.delete-confirm-button,
+.payment-qr-panel > p { color: var(--button-ink); }
+
+.library-hero h1,
+.roadmap-hero h1 { line-height: 1.2; }
+.streak-pill,
+.roadmap-pill,
+.step-tag { min-height: 30px; line-height: 1.4; white-space: normal; }

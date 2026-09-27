@@ -1,0 +1,125 @@
+.focus-space-logo {
+  position: fixed;
+  left: 24px;
+  bottom: 18px;
+  z-index: 54;
+  width: 84px;
+  height: 84px;
+}
+
+.focus-space-logo__button {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transition: transform 180ms ease;
+}
+
+.focus-space-logo__button img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 3px 5px #416e4b3b);
+}
+
+.focus-space-logo:hover .focus-space-logo__button,
+.focus-space-logo.is-open .focus-space-logo__button,
+.focus-space-logo__button:focus-visible { transform: translateY(-4px) scale(1.04); }
+
+.focus-space-logo__tip {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 9px);
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 8px 11px;
+  border: 1px solid #d5ead9;
+  border-radius: 8px;
+  color: #356e53;
+  background: #f7fff9;
+  box-shadow: 0 5px 16px #304b3433;
+  font-size: 12px;
+  font-weight: 800;
+  font-family: inherit;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+  z-index: 3;
+  animation: focus-space-tip-in 160ms ease-out both;
+}
+
+.focus-space-logo__bee {
+  position: absolute;
+  z-index: 2;
+  width: 18px;
+  height: 16px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.focus-space-logo__bee::before {
+  position: absolute;
+  top: 5px;
+  left: 3px;
+  width: 14px;
+  height: 9px;
+  border: 2px solid #6c503c;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #f6d976 0 27%, #6c503c 27% 41%, #f6d976 41% 69%, #6c503c 69% 81%, #f6d976 81%);
+  content: "";
+}
+
+.focus-space-logo__bee::after {
+  position: absolute;
+  top: 0;
+  left: 4px;
+  width: 6px;
+  height: 5px;
+  background: #e8fff3;
+  box-shadow: 5px 0 #e8fff3;
+  content: "";
+}
+
+.focus-space-logo__bee--one { top: 2px; left: -9px; }
+.focus-space-logo__bee--two { top: 21px; right: -10px; }
+.focus-space-logo:hover .focus-space-logo__bee--one,
+.focus-space-logo.is-open .focus-space-logo__bee--one,
+.focus-space-logo:focus-within .focus-space-logo__bee--one { animation: focus-space-bee-one 2.1s ease-in-out infinite; }
+.focus-space-logo:hover .focus-space-logo__bee--two,
+.focus-space-logo.is-open .focus-space-logo__bee--two,
+.focus-space-logo:focus-within .focus-space-logo__bee--two { animation: focus-space-bee-two 2.5s ease-in-out .2s infinite; }
+
+@keyframes focus-space-tip-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes focus-space-bee-one {
+  0%, 100% { opacity: .9; transform: translate(0, 2px) rotate(-12deg); }
+  50% { opacity: 1; transform: translate(-4px, -6px) rotate(7deg); }
+}
+
+@keyframes focus-space-bee-two {
+  0%, 100% { opacity: .8; transform: translate(0, 2px) rotate(8deg); }
+  50% { opacity: 1; transform: translate(5px, -5px) rotate(-8deg); }
+}
+
+@media (max-width: 620px) {
+  .focus-space-logo { left: 12px; bottom: 10px; width: 64px; height: 64px; }
+  .focus-space-logo__tip { font-size: 11px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .focus-space-logo__button { transition: none; }
+  .focus-space-logo__tip,
+  .focus-space-logo__bee { animation: none !important; }
+  .focus-space-logo:hover .focus-space-logo__bee,
+  .focus-space-logo.is-open .focus-space-logo__bee,
+  .focus-space-logo:focus-within .focus-space-logo__bee { opacity: 1; }
+}
