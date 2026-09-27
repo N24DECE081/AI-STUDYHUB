@@ -33,6 +33,7 @@ import {
   verifyPasswordOtp,
 } from "./api";
 import AITutorPage from "./components/ai-tutor/AITutorPage";
+import WebAssistant from "./components/web-assistant/WebAssistant";
 import QuizWorkspace from "./components/QuizWorkspace";
 import LearningRoadmapPage from "./components/LearningRoadmapPage";
 import PaymentCheckout from "./components/PaymentCheckout";
@@ -1889,6 +1890,8 @@ export default function App() {
         </div>
       </footer>
       {toast && <div className="toast">{toast}</div>}
+      {/* Chatbot tư vấn thông tin StudyHub: khung nhỏ nổi ở góc phải, chỉ hiện ở trang chủ. */}
+      {view === "home" && <WebAssistant />}
       {activeStudyDeck && <StudyDeckSession deck={activeStudyDeck} onUpdateDeck={updateStudyDeck} onClose={() => setActiveStudyDeck(null)} />}
     </div>
   );

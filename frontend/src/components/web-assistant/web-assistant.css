@@ -1,0 +1,379 @@
+/* Widget chatbot tư vấn StudyHub — bám theo frame thiết kế: khung nhỏ nổi ở góc
+   phải trang chủ, header hồng, bong bóng chat, 4 gợi ý nhanh và ô nhập câu hỏi. */
+
+.wa-launcher {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  width: 62px;
+  height: 62px;
+  border: 1px solid rgba(32, 26, 46, 0.06);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(24, 20, 42, 0.22);
+  font-size: 28px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 80;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.wa-launcher:hover {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 18px 40px rgba(24, 20, 42, 0.26);
+}
+
+.wa-launcher.is-open {
+  transform: scale(0.94);
+}
+
+.wa-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 100px;
+  width: 366px;
+  max-width: calc(100vw - 32px);
+  height: 540px;
+  max-height: calc(100vh - 140px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid rgba(32, 26, 46, 0.06);
+  border-radius: 24px;
+  box-shadow: 0 26px 60px rgba(24, 20, 42, 0.22);
+  z-index: 80;
+  animation: wa-rise 0.22s ease-out;
+}
+
+@keyframes wa-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.wa-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 14px 14px 16px;
+  background: linear-gradient(135deg, #f9cfdd 0%, #f4bccf 100%);
+}
+
+.wa-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 21px;
+  flex: 0 0 auto;
+}
+
+.wa-identity {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wa-identity strong {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+  color: #2a2438;
+  line-height: 1.25;
+}
+
+.wa-identity small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: #4c4558;
+  line-height: 1.4;
+}
+
+.wa-identity small i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2fa36b;
+  display: inline-block;
+}
+
+.wa-close {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  color: #2a2438;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wa-close:hover {
+  background: #fdeaf1;
+}
+
+.wa-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 16px 4px;
+}
+
+.wa-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.wa-row.user {
+  justify-content: flex-end;
+}
+
+.wa-row-avatar {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #fbdde6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.wa-bubble {
+  max-width: 84%;
+  padding: 11px 14px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #22303a;
+  background: #e8f0e6;
+  border-radius: 4px 16px 16px 16px;
+  overflow-wrap: anywhere;
+}
+
+.wa-row.user .wa-bubble {
+  background: #f7c9d8;
+  color: #2a2438;
+  border-radius: 16px 16px 4px 16px;
+}
+
+.wa-bubble.is-error {
+  background: #fdecec;
+  color: #8a2b2b;
+}
+
+.wa-bubble :is(p, ul, ol) {
+  margin: 0;
+}
+
+.wa-bubble :is(ul, ol) {
+  padding-left: 18px;
+}
+
+.wa-bubble li + li {
+  margin-top: 3px;
+}
+
+.wa-bubble strong {
+  font-weight: 700;
+}
+
+.wa-bubble em {
+  font-style: italic;
+}
+
+.wa-bubble code {
+  background: rgba(34, 48, 58, 0.08);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 12.5px;
+}
+
+.wa-bubble table {
+  border-collapse: collapse;
+  font-size: 12.5px;
+  margin-top: 6px;
+}
+
+.wa-bubble :is(th, td) {
+  border: 1px solid rgba(34, 48, 58, 0.18);
+  padding: 4px 6px;
+}
+
+.wa-typing {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 14px;
+}
+
+.wa-typing i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #7d8a83;
+  animation: wa-blink 1.2s infinite ease-in-out;
+}
+
+.wa-typing i:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.wa-typing i:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes wa-blink {
+  0%, 80%, 100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.wa-suggest {
+  padding: 8px 16px 0;
+}
+
+.wa-suggest-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  color: #9a97a8;
+}
+
+.wa-chips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
+.wa-chips button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border: 1px solid #e8e5ec;
+  border-radius: 999px;
+  background: #fff;
+  color: #3a3550;
+  font-size: 12.5px;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.wa-chips button:hover:not(:disabled) {
+  background: #fdf2f6;
+  border-color: #f4bccf;
+}
+
+.wa-chips button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.wa-compose {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 16px;
+}
+
+.wa-compose input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 44px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: #f2f1f5;
+  font-size: 13.5px;
+  color: #2a2438;
+}
+
+.wa-compose input::placeholder {
+  color: #9a97a8;
+}
+
+.wa-compose input:focus {
+  outline: none;
+  border-color: #f4bccf;
+  background: #fff;
+}
+
+.wa-send {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 50%;
+  background: #f7c9d8;
+  color: #2a2438;
+  font-size: 19px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.wa-send:hover:not(:disabled) {
+  background: #f4b3c8;
+}
+
+.wa-send:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+@media (max-width: 520px) {
+  .wa-panel {
+    right: 0;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    max-width: 100%;
+    height: 82vh;
+    max-height: 82vh;
+    border-radius: 22px 22px 0 0;
+  }
+
+  .wa-launcher {
+    right: 16px;
+    bottom: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wa-panel {
+    animation: none;
+  }
+
+  .wa-launcher,
+  .wa-typing i {
+    transition: none;
+    animation: none;
+  }
+}

@@ -35,6 +35,7 @@ from backend.app.ai_tutor import config as tutor_config
 from backend.app.ai_tutor import engine as tutor_engine
 from backend.app.ai_tutor import repository as tutor_store
 from backend.app.ai_tutor.roadmap import normalize_level, normalize_pace
+from backend.app import web_assistant
 
 tutor_config.load_env()
 
@@ -807,6 +808,9 @@ class H(BaseHTTPRequestHandler):
   p=urlparse(self.path); path=p.path
   if path=='/api/health':
    return self.json({'status':'ok','service':'studyhub-api'})
+  if path=='/api/web-assistant/starters':
+   # Lời chào + 4 gợi ý nhanh cho chatbot tư vấn ở trang chủ (khách không cần đăng nhập).
+   return self.json(web_assistant.starters())
   if path=='/api/auth/oauth/status':
    return self.json({'providers':oauth_provider_status()})
   oauth_start=re.fullmatch(r'/api/auth/oauth/(google|facebook)',path)
@@ -1332,6 +1336,16 @@ class H(BaseHTTPRequestHandler):
         progress_id=c.execute(f'INSERT INTO user_progress(user_id,{target},progress_percent,last_position,completed) VALUES(?,?,?,?,?)',(u['id'],raw_id,progress,last_position,int(completed))).lastrowid
       c.commit(); row=c.execute('SELECT * FROM user_progress WHERE id=?',(progress_id,)).fetchone()
      return self.json(dict(row),200)
+  if path=='/api/web-assistant/chat':
+   # Chatbot tư vấn thông tin StudyHub cho khách vãng lai: KHÔNG cần đăng nhập, nhưng
+   # vẫn chịu giới hạn tần suất chung của API và trần số câu gọi mô hình mỗi ngày mỗi IP.
+   x=json_body(data)
+   if not isinstance(x,dict): return self.json({'error':'Dữ liệu câu hỏi không hợp lệ'},400)
+   message=str(x.get('message') or '').strip()
+   if not message: return self.json({'error':'Câu hỏi không được để trống'},400)
+   if len(message)>600: return self.json({'error':'Câu hỏi quá dài (tối đa 600 ký tự)'},400)
+   history=x.get('history') if isinstance(x.get('history'),list) else []
+   return self.json(web_assistant.ask(message,history=history,client_ip=self.client_address[0]),200)
   if path in ('/api/ai/chat','/api/chat'):
    u=require_user(self)
    if not u:return
