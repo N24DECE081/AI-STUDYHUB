@@ -161,6 +161,12 @@ class Database:
         không có bước này thì người đã chạy StudyHub từ trước sẽ lỗi "no such column".
         """
         additions = {
+            'users': {
+                'first_name': 'TEXT',
+                'last_name': 'TEXT',
+                'phone': 'VARCHAR(32)',
+                'profile_completed': 'INTEGER NOT NULL DEFAULT 0',
+            },
             'tutor_messages': {'payload': 'TEXT'},
             'subjects': {'created_by': 'INTEGER REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE'},
         }
@@ -171,6 +177,7 @@ class Database:
             for name, ddl in columns.items():
                 if name not in existing:
                     conn.execute(f'ALTER TABLE {table} ADD COLUMN {name} {ddl}')
+        conn.execute('CREATE INDEX IF NOT EXISTS ix_users_phone ON users(phone)')
 
     def _ensure_oauth_providers(self, conn: sqlite3.Connection) -> None:
         """Expand the original Google-only constraint without losing account links."""
@@ -200,6 +207,43 @@ class Database:
         conn.execute("CREATE INDEX IF NOT EXISTS ix_oauth_accounts_user ON oauth_accounts(user_id)")
         conn.execute("PRAGMA foreign_keys = ON")
 
+    def _ensure_user_scoped_subject_codes(self, conn: sqlite3.Connection) -> None:
+        """Replace the legacy global subject-code constraint without losing folders."""
+        indexes = conn.execute("PRAGMA index_list(subjects)").fetchall()
+        global_code_index = next(
+            (index for index in indexes if index[2] and [column[2] for column in conn.execute(f"PRAGMA index_info({index[1]})")] == ["code"]),
+            None,
+        )
+        if not global_code_index:
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_subjects_owner_code ON subjects(created_by, code)")
+            conn.execute("CREATE INDEX IF NOT EXISTS ix_subjects_owner_name ON subjects(created_by, name)")
+            return
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("PRAGMA legacy_alter_table = ON")
+        conn.execute("ALTER TABLE subjects RENAME TO legacy_global_subject_codes")
+        conn.execute("""CREATE TABLE subjects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT NOT NULL COLLATE NOCASE,
+            name TEXT NOT NULL,
+            description TEXT,
+            icon TEXT,
+            color TEXT,
+            created_by INTEGER,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+            CHECK(length(trim(code)) >= 2),
+            CHECK(length(trim(name)) >= 2)
+        )""")
+        conn.execute("""INSERT INTO subjects(id,code,name,description,icon,color,created_by,created_at,updated_at)
+            SELECT id,code,name,description,icon,color,created_by,created_at,updated_at
+            FROM legacy_global_subject_codes""")
+        conn.execute("DROP TABLE legacy_global_subject_codes")
+        conn.execute("CREATE UNIQUE INDEX ux_subjects_owner_code ON subjects(created_by, code)")
+        conn.execute("CREATE INDEX ix_subjects_owner_name ON subjects(created_by, name)")
+        conn.execute("PRAGMA legacy_alter_table = OFF")
+        conn.execute("PRAGMA foreign_keys = ON")
+
     def initialize(self) -> None:
         with self.connect() as conn:
             if self._needs_legacy_migration(conn):
@@ -209,6 +253,7 @@ class Database:
                 self._create_schema(conn)
             self._ensure_columns(conn)
             self._ensure_oauth_providers(conn)
+            self._ensure_user_scoped_subject_codes(conn)
             conn.commit()
 
     def execute(self, sql: str, params: Iterable = ()) -> int:

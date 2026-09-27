@@ -371,7 +371,7 @@ class ProviderWiringTests(unittest.TestCase):
     @classmethod
     def register(cls):
         payload = {'name': 'Provider Tester', 'email': f'provider_{time.time_ns()}@example.com',
-                   'password': 'StrongPass123!'}
+                   'password': 'StrongPassword123!'}
         status, headers, _ = cls._call('/api/register', 'POST', payload)
         assert status == 201, status
         return headers.get('Set-Cookie').split(';', 1)[0]

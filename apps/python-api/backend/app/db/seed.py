@@ -27,13 +27,9 @@ def seed(database: Database | None = None) -> None:
             ("RR", "Discrete Mathematics", "Logic, counting, probability and graph concepts."),
             ("LT", "Programming", "Programming fundamentals and practical software development."),
         ]
-        insert_subject = (
-            "INSERT IGNORE INTO subjects(code,name,description) VALUES(?,?,?)"
-            if getattr(database, "dialect", "sqlite") == "mysql"
-            else "INSERT INTO subjects(code,name,description) VALUES(?,?,?) ON CONFLICT(code) DO NOTHING"
-        )
         for row in subjects:
-            conn.execute(insert_subject, row)
+            if not conn.execute("SELECT id FROM subjects WHERE created_by IS NULL AND code=?", (row[0],)).fetchone():
+                conn.execute("INSERT INTO subjects(code,name,description) VALUES(?,?,?)", row)
         plans = [
             ("Free", 0, 0, "Core StudyHub learning features", 10, 100),
             ("Standard", 199000, 1990000, "AI Tutor and advanced learning tools", 100, 2048),

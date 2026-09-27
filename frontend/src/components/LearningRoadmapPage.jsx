@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { ArrowRightIcon, CheckIcon, ClockIcon, SparklesIcon } from "@heroicons/react/24/outline";
+import "./roadmap-map.css";
 
 const TRACKS = [
   {
@@ -31,7 +32,7 @@ const TRACKS = [
   },
 ];
 
-export default function LearningRoadmapPage({ documents = [], subjects = [], progress = [] }) {
+export default function LearningRoadmapPage({ documents = [], subjects = [], progress = [], onOpenDocument }) {
   const [track, setTrack] = useState("active");
   const [centralTopic, setCentralTopic] = useState("");
   const [mainBranchesInput, setMainBranchesInput] = useState("");
@@ -40,6 +41,7 @@ export default function LearningRoadmapPage({ documents = [], subjects = [], pro
   const [daysLeft, setDaysLeft] = useState("14");
   const [weakTopic, setWeakTopic] = useState("");
   const [checked, setChecked] = useState([]);
+  const [selectedNodeId, setSelectedNodeId] = useState(null);
   const activeTrack = TRACKS.find((item) => item.id === track) || TRACKS[1];
   const topicOptions = useMemo(() => [...new Set([...subjects.map((subject) => subject.name), ...documents.map((document) => document.subject_name)].filter(Boolean))], [documents, subjects]);
   const branchNames = useMemo(() => mainBranchesInput.split(",").map((value) => value.trim()).filter(Boolean).slice(0, 4), [mainBranchesInput]);
@@ -79,19 +81,21 @@ export default function LearningRoadmapPage({ documents = [], subjects = [], pro
       const previousPercent = previous ? progressByDocument.get(String(previous.id)) || 0 : 100;
       return {
         id: `document-${document.id}`,
+        documentId: document.id,
         title: document.title,
         type: index % 3 === 2 ? "PRACTICE" : "DOCUMENT",
         progress: percent,
-        status: percent >= 100 ? "completed" : previousPercent >= 60 ? "unlocked" : "locked",
+        status: previousPercent < 60 ? "locked" : percent >= 100 ? "completed" : percent > 0 ? "in-progress" : "not-started",
       };
     });
     return [
       { id: "start", title: centralTopic.trim() ? `Bắt đầu ${centralTopic.trim()}` : "Chọn môn học", type: "START", progress: 100, status: "completed" },
       ...documentNodes,
-      { id: "boss", title: `Final Boss · ${centralTopic.trim() || "Môn học"}`, type: "BOSS", progress: 0, status: documentNodes.length && documentNodes.every((node) => node.progress >= 60) ? "unlocked" : "locked" },
+      { id: "boss", title: `Tổng kết · ${centralTopic.trim() || "Môn học"}`, type: "BOSS", progress: 0, status: documentNodes.length && documentNodes.every((node) => node.progress >= 60) ? "not-started" : "locked" },
     ];
   }, [centralTopic, progressByDocument, subjectDocuments]);
-  const petState = destinyNodes.some((node) => node.status === "unlocked") ? "FOLLOW" : centralTopic ? "THINK" : "IDLE";
+  const selectedNode = destinyNodes.find((node) => node.id === selectedNodeId);
+  const petState = destinyNodes.some((node) => node.status === "in-progress" || node.status === "not-started") ? "FOLLOW" : centralTopic ? "THINK" : "IDLE";
 
   const toggleDay = (day) => setChecked((current) => current.includes(day) ? current.filter((value) => value !== day) : [...current, day]);
 
@@ -146,12 +150,13 @@ export default function LearningRoadmapPage({ documents = [], subjects = [], pro
         </div>
         <div className="destiny-node-list">
           {destinyNodes.map((node, index) => (
-            <article className={`destiny-node is-${node.status} type-${node.type.toLowerCase()}`} key={node.id}>
-              <span>{index ? String(index).padStart(2, "0") : "🏠"}</span>
-              <div><small>{node.type}</small><strong>{node.title}</strong><progress value={node.progress} max="100" /><em>{node.status === "locked" ? "Đang khóa · hoàn thành node trước ≥ 60%" : `${node.progress}% mastery`}</em></div>
-            </article>
+            <button type="button" className={`destiny-node is-${node.status} type-${node.type.toLowerCase()}${selectedNodeId === node.id ? " is-selected" : ""}`} key={node.id} onClick={() => setSelectedNodeId(node.id)} aria-pressed={selectedNodeId === node.id}>
+              <span>{index ? String(index).padStart(2, "0") : "01"}</span>
+              <div><small>{node.type}</small><strong>{node.title}</strong><progress value={node.progress} max="100" /><em>{node.status === "locked" ? "Đang khóa" : node.status === "completed" ? "Hoàn thành" : node.status === "in-progress" ? `Đang học · ${node.progress}%` : "Chưa bắt đầu"}</em></div>
+            </button>
           ))}
         </div>
+        {selectedNode && <div className="destiny-node-detail" aria-live="polite"><div><span className="eyebrow">MỐC HỌC TẬP</span><h3>{selectedNode.title}</h3><p>{selectedNode.status === "locked" ? "Hoàn thành mốc trước ít nhất 60% để mở khóa." : selectedNode.status === "completed" ? "Bạn đã hoàn thành mốc này." : selectedNode.status === "in-progress" ? `Bạn đã hoàn thành ${selectedNode.progress}% nội dung.` : "Sẵn sàng bắt đầu mốc học tập này."}</p></div>{selectedNode.documentId && onOpenDocument && <button type="button" className="btn btn-primary" disabled={selectedNode.status === "locked"} onClick={() => { const document = subjectDocuments.find((item) => item.id === selectedNode.documentId); if (document) onOpenDocument(document); }}>Mở tài liệu <ArrowRightIcon aria-hidden="true" /></button>}</div>}
         {centralTopic && !subjectDocuments.length && <p className="empty-state">Môn này chưa có tài liệu. Hãy upload tài liệu vào Vault để sinh node học tập.</p>}
       </section>
 

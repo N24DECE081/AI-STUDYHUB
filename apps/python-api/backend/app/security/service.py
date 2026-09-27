@@ -1,14 +1,16 @@
 """Authentication service: registration, login and safe user serialization."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
+import secrets
 
 from .password import hash_password, verify_password, needs_rehash, normalize_email, validate_email, validate_password
 from .session import create_session, revoke_session, get_user_id
+from ..timezone import vietnam_now
 
 
 def update_streak(conn, user_id: int) -> dict:
-    today = date.today()
+    today = vietnam_now().date()
     row = conn.execute("SELECT * FROM user_streaks WHERE user_id=?", (user_id,)).fetchone()
     if not row:
         conn.execute(
@@ -43,7 +45,11 @@ def public_user(row) -> dict:
         "id": row["id"],
         "name": row["full_name"],
         "full_name": row["full_name"],
+        "first_name": row["first_name"],
+        "last_name": row["last_name"],
         "email": row["email"],
+        "phone": row["phone"],
+        "profile_completed": bool(row["profile_completed"]),
         "role": row["role"],
         "status": row["status"],
         "avatar_url": row["avatar_url"],
@@ -69,8 +75,25 @@ def authenticate(conn, email: str, password: str):
     return (user, token, expires_at), None
 
 
-def register(conn, name: str, email: str, password: str):
+def _valid_name(value: str, label: str):
+    value = value.strip()
+    if not 1 <= len(value) <= 60:
+        return None, f"{label} phải từ 1 đến 60 ký tự"
+    return value, None
+
+
+def register(conn, name: str, email: str, password: str, first_name: str = "", last_name: str = ""):
     name = name.strip()
+    first_name = first_name.strip()
+    last_name = last_name.strip()
+    if first_name or last_name:
+        first_name, error = _valid_name(first_name, "First name")
+        if error:
+            return None, error
+        last_name, error = _valid_name(last_name, "Last name")
+        if error:
+            return None, error
+        name = f"{last_name} {first_name}"
     email = normalize_email(email)
     if len(name) < 2 or len(name) > 120:
         return None, "Họ và tên phải từ 2 đến 120 ký tự"
@@ -81,8 +104,9 @@ def register(conn, name: str, email: str, password: str):
         return None, pw_error
     try:
         cur = conn.execute(
-            "INSERT INTO users(full_name,email,password_hash,role,status) VALUES(?,?,?,?,?)",
-            (name, email, hash_password(password), "student", "active"),
+            """INSERT INTO users(full_name,first_name,last_name,email,password_hash,role,status,profile_completed)
+               VALUES(?,?,?,?,?,?,?,?)""",
+            (name, first_name or None, last_name or None, email, hash_password(password), "student", "active", 1),
         )
     except Exception as exc:
         if "UNIQUE" in str(exc).upper():
@@ -96,6 +120,111 @@ def register(conn, name: str, email: str, password: str):
     user = public_user(row)
     user["streak"] = streak
     return (user, token, expires_at), None
+
+
+def complete_profile(conn, user_id: int, first_name: str, last_name: str):
+    first_name, error = _valid_name(first_name, "First name")
+    if error:
+        return None, error
+    last_name, error = _valid_name(last_name, "Last name")
+    if error:
+        return None, error
+    conn.execute(
+        """UPDATE users
+           SET first_name=?, last_name=?, full_name=?, profile_completed=1
+           WHERE id=?""",
+        (first_name, last_name, f"{last_name} {first_name}", user_id),
+    )
+    streak = update_streak(conn, user_id)
+    conn.commit()
+    user = public_user(conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone())
+    user["streak"] = streak
+    return user, None
+
+
+def _reset_user(conn, identifier: str):
+    identifier = str(identifier or "").strip()
+    if not identifier:
+        return None
+    email = normalize_email(identifier) if "@" in identifier else ""
+    phone = "".join(char for char in identifier if char.isdigit() or char == "+")
+    return conn.execute(
+        "SELECT * FROM users WHERE email=? OR phone=? LIMIT 1",
+        (email, phone),
+    ).fetchone()
+
+
+def _local_stamp(value: datetime | None = None) -> str:
+    value = value or vietnam_now().replace(tzinfo=None)
+    return value.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _expired(value: str) -> bool:
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S") <= vietnam_now().replace(tzinfo=None)
+    except ValueError:
+        return True
+
+
+def start_password_reset(conn, identifier: str):
+    user = _reset_user(conn, identifier)
+    if not user:
+        return None
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    conn.execute("DELETE FROM password_reset_otps WHERE user_id=? AND used_at IS NULL", (user["id"],))
+    conn.execute(
+        "INSERT INTO password_reset_otps(user_id,code_hash,expires_at) VALUES(?,?,?)",
+        (user["id"], hash_password(code), _local_stamp(vietnam_now().replace(tzinfo=None) + timedelta(minutes=10))),
+    )
+    conn.commit()
+    return {"email": user["email"], "code": code}
+
+
+def verify_password_reset(conn, identifier: str, code: str):
+    user = _reset_user(conn, identifier)
+    if not user or not isinstance(code, str) or not code.isdigit() or len(code) != 6:
+        return None, "Mã OTP không hợp lệ"
+    row = conn.execute(
+        """SELECT * FROM password_reset_otps
+           WHERE user_id=? AND used_at IS NULL ORDER BY id DESC LIMIT 1""",
+        (user["id"],),
+    ).fetchone()
+    if not row or _expired(row["expires_at"]):
+        return None, "Mã OTP đã hết hạn"
+    if row["attempts"] >= 5:
+        return None, "Mã OTP đã vượt quá số lần thử"
+    if not verify_password(code, row["code_hash"]):
+        conn.execute("UPDATE password_reset_otps SET attempts=attempts+1 WHERE id=?", (row["id"],))
+        conn.commit()
+        return None, "Mã OTP không đúng"
+    token = secrets.token_urlsafe(32)
+    from .session import token_hash
+    conn.execute(
+        "UPDATE password_reset_otps SET verified_at=?, reset_token_hash=? WHERE id=?",
+        (_local_stamp(), token_hash(token), row["id"]),
+    )
+    conn.commit()
+    return token, None
+
+
+def reset_password(conn, reset_token: str, password: str):
+    from .session import token_hash
+    row = conn.execute(
+        """SELECT * FROM password_reset_otps
+           WHERE reset_token_hash=? AND verified_at IS NOT NULL AND used_at IS NULL
+           ORDER BY id DESC LIMIT 1""",
+        (token_hash(str(reset_token or "")),),
+    ).fetchone()
+    if not row or _expired(row["expires_at"]):
+        return "Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn"
+    error = validate_password(password)
+    if error:
+        return error
+    conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(password), row["user_id"]))
+    conn.execute("DELETE FROM auth_sessions WHERE user_id=?", (row["user_id"],))
+    conn.execute("UPDATE password_reset_otps SET used_at=? WHERE id=?", (_local_stamp(), row["id"]))
+    conn.commit()
+    return None
 
 
 def current_user(conn, token: str | None):

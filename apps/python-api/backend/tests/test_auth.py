@@ -6,7 +6,7 @@ from pathlib import Path
 from app.db.database import Database
 from app.db.seed import seed
 from app.security.password import hash_password, verify_password, needs_rehash, normalize_email, validate_email, validate_password
-from app.security.service import authenticate, register, current_user
+from app.security.service import authenticate, register, current_user, complete_profile, start_password_reset, verify_password_reset, reset_password
 from app.security.session import create_session, get_user_id, revoke_session
 
 
@@ -35,6 +35,8 @@ class AuthTests(unittest.TestCase):
         self.assertFalse(validate_email("not-an-email"))
         self.assertIsNotNone(validate_password("short"))
         self.assertIsNone(validate_password("LongEnough123!"))
+        self.assertIsNotNone(validate_password("Short1!"))
+        self.assertIsNone(validate_password("LongEnoughPassword123!"))
 
     def test_login_upgrades_legacy_sha256_password(self):
         import hashlib
@@ -57,17 +59,18 @@ class AuthTests(unittest.TestCase):
 
     def test_register_auto_login_and_public_user(self):
         with self.db.connect() as c:
-            result, error = register(c, "New Student", "NEW@EXAMPLE.COM", "NewPass123!")
+            result, error = register(c, "New Student", "NEW@EXAMPLE.COM", "NewPasswordPass123!")
             self.assertIsNone(error)
             user, token, _ = result
             self.assertEqual(user["email"], "new@example.com")
             self.assertNotIn("password", user)
             self.assertNotIn("password_hash", user)
+            self.assertTrue(user["profile_completed"])
             self.assertEqual(current_user(c, token)["id"], user["id"])
 
     def test_register_duplicate_and_blocked_login(self):
         with self.db.connect() as c:
-            result, error = register(c, "Duplicate", "student@studyhub.local", "NewPass123!")
+            result, error = register(c, "Duplicate", "student@studyhub.local", "NewPasswordPass123!")
             self.assertIsNone(result)
             self.assertEqual(error, "Email đã tồn tại")
             c.execute("UPDATE users SET status='blocked' WHERE email='student@studyhub.local'")
@@ -75,6 +78,22 @@ class AuthTests(unittest.TestCase):
             result, error = authenticate(c, "student@studyhub.local", "Student123!")
             self.assertIsNone(result)
             self.assertEqual(error, "Tài khoản đang bị khóa")
+
+    def test_profile_completion_and_password_reset_otp(self):
+        with self.db.connect() as c:
+            user = c.execute("SELECT * FROM users WHERE email='student@studyhub.local'").fetchone()
+            profile, error = complete_profile(c, user["id"], "Student", "Test")
+            self.assertIsNone(error)
+            self.assertEqual(profile["name"], "Test Student")
+            self.assertEqual(profile["streak"]["current_streak"], 1)
+            delivery = start_password_reset(c, "student@studyhub.local")
+            self.assertIsNotNone(delivery)
+            token, error = verify_password_reset(c, "student@studyhub.local", delivery["code"])
+            self.assertIsNone(error)
+            self.assertIsNone(reset_password(c, token, "ResetPasswordPass123!"))
+            result, error = authenticate(c, "student@studyhub.local", "ResetPasswordPass123!")
+            self.assertIsNone(error)
+            self.assertEqual(result[0]["email"], "student@studyhub.local")
 
     def test_session_is_database_backed(self):
         with self.db.connect() as c:

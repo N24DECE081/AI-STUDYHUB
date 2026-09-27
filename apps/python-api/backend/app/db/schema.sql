@@ -8,17 +8,37 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 CREATE TABLE IF NOT EXISTS users (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     full_name       TEXT NOT NULL CHECK(length(trim(full_name)) >= 2),
+    first_name      TEXT,
+    last_name       TEXT,
     email           TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    phone           VARCHAR(32),
     password_hash   TEXT NOT NULL,
     role            TEXT NOT NULL DEFAULT 'student'
                     CHECK(role IN ('student', 'teacher', 'admin')),
     status          TEXT NOT NULL DEFAULT 'active'
                     CHECK(status IN ('active', 'blocked')),
+    profile_completed INTEGER NOT NULL DEFAULT 0 CHECK(profile_completed IN (0, 1)),
     avatar_url      TEXT,
     created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_login_at   TEXT
 );
+
+CREATE TABLE IF NOT EXISTS password_reset_otps (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    code_hash       TEXT NOT NULL,
+    reset_token_hash VARCHAR(64) UNIQUE,
+    attempts        INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 5),
+    expires_at      TEXT NOT NULL,
+    verified_at     TEXT,
+    used_at         TEXT,
+    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS ix_password_reset_otps_user_expires
+    ON password_reset_otps(user_id, expires_at);
 
 CREATE TABLE IF NOT EXISTS auth_sessions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,7 +115,7 @@ CREATE TABLE IF NOT EXISTS user_streaks (
 
 CREATE TABLE IF NOT EXISTS subjects (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    code            TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    code            TEXT NOT NULL COLLATE NOCASE,
     name            TEXT NOT NULL,
     description     TEXT,
     icon             TEXT,
@@ -107,6 +127,11 @@ CREATE TABLE IF NOT EXISTS subjects (
     CHECK(length(trim(code)) >= 2),
     CHECK(length(trim(name)) >= 2)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_subjects_owner_code
+    ON subjects(created_by, code);
+CREATE INDEX IF NOT EXISTS ix_subjects_owner_name
+    ON subjects(created_by, name);
 
 CREATE TABLE IF NOT EXISTS documents (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,

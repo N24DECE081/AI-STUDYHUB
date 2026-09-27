@@ -8,7 +8,7 @@ from app.db.database import Database
 from app.db.seed import seed
 
 EXPECTED_TABLES = {
-    "schema_migrations", "auth_sessions", "study_sessions", "external_knowledge_cache",
+    "schema_migrations", "auth_sessions", "oauth_accounts", "password_reset_otps", "study_sessions", "external_knowledge_cache",
     "users", "subjects", "documents", "courses", "course_documents", "user_streaks",
     "course_enrollments", "plans", "subscriptions", "chat_sessions",
     "chat_messages", "document_chunks", "user_progress", "subscription_changes",
@@ -86,6 +86,15 @@ class DatabasePhase1Tests(unittest.TestCase):
                 c.execute("INSERT INTO subjects(code,name) VALUES(?,?)", ("X", ""))
             c.commit()
 
+    def test_subject_codes_are_unique_per_owner(self):
+        with self.database.connect() as c:
+            first = c.execute("INSERT INTO users(full_name,email,password_hash) VALUES(?,?,?)", ("First User", "first@example.com", "x")).lastrowid
+            second = c.execute("INSERT INTO users(full_name,email,password_hash) VALUES(?,?,?)", ("Second User", "second@example.com", "x")).lastrowid
+            c.execute("INSERT INTO subjects(code,name,created_by) VALUES(?,?,?)", ("MATH", "Math", first))
+            c.execute("INSERT INTO subjects(code,name,created_by) VALUES(?,?,?)", ("MATH", "Math", second))
+            with self.assertRaises(sqlite3.IntegrityError):
+                c.execute("INSERT INTO subjects(code,name,created_by) VALUES(?,?,?)", ("MATH", "Math", first))
+
     def test_cascade_and_restrict_behaviour(self):
         with self.database.connect() as c:
             uid = c.execute("INSERT INTO users(full_name,email,password_hash) VALUES(?,?,?)", ("Cascade User", "cascade@example.com", "x")).lastrowid
@@ -155,7 +164,8 @@ class DatabasePhase1Tests(unittest.TestCase):
             "ux_active_subscription_per_user", "ix_documents_subject_created",
             "ix_chat_messages_session_created", "ix_chunks_document_index",
             "ix_study_sessions_user_started", "ix_study_sessions_user_status",
-            "ix_external_cache_updated",
+            "ix_external_cache_updated", "ix_users_phone", "ix_password_reset_otps_user_expires",
+            "ux_subjects_owner_code", "ix_subjects_owner_name",
         }:
             self.assertIn(required, names)
         triggers = {

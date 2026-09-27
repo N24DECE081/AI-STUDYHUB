@@ -1,0 +1,12 @@
+.roadmap-page .destiny-node-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 46px;max-width:900px}
+.roadmap-page .destiny-node-list:before{left:50%;top:36px;bottom:36px}
+.roadmap-page .destiny-node{width:100%;box-sizing:border-box;min-width:0;text-align:left;cursor:pointer;border-radius:8px}
+.roadmap-page .destiny-node:focus-visible{outline:2px solid var(--border-color);outline-offset:3px}
+.roadmap-page .destiny-node.is-selected{border-color:var(--border-color);box-shadow:var(--shadow-subtle)}
+.roadmap-page .destiny-node:not(.type-start):not(.type-boss):nth-child(even){grid-column:1}
+.roadmap-page .destiny-node:not(.type-start):not(.type-boss):nth-child(odd){grid-column:2}
+.roadmap-page .destiny-node.type-start,.roadmap-page .destiny-node.type-boss{grid-column:1/-1;width:min(100%,360px);justify-self:center}
+.roadmap-page .destiny-node.is-not-started>span{background:var(--bg-alt)}.roadmap-page .destiny-node.is-in-progress>span{background:var(--secondary-mint)}.roadmap-page .destiny-node.is-completed>span{background:var(--bg-alt)}
+.roadmap-page .destiny-node-detail{display:flex;align-items:center;justify-content:space-between;gap:20px;max-width:900px;margin:8px auto 24px;padding:17px 20px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-alt);color:var(--text-dark)}
+.roadmap-page .destiny-node-detail h3{margin:5px 0;color:var(--text-dark);font-size:16px}.roadmap-page .destiny-node-detail p{margin:0;color:var(--mint-ink);font-size:12px}.roadmap-page .destiny-node-detail .btn{display:inline-flex;align-items:center;gap:6px;flex:none}.roadmap-page .destiny-node-detail svg{width:16px}
+@media(max-width:650px){.roadmap-page .destiny-node-list{grid-template-columns:1fr;gap:12px}.roadmap-page .destiny-node-list:before{left:25px}.roadmap-page .destiny-node:not(.type-start):not(.type-boss):nth-child(even),.roadmap-page .destiny-node:not(.type-start):not(.type-boss):nth-child(odd),.roadmap-page .destiny-node.type-start,.roadmap-page .destiny-node.type-boss{grid-column:1;width:100%}.roadmap-page .destiny-node-detail{align-items:stretch;flex-direction:column}}

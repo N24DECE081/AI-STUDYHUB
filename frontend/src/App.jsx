@@ -1,8 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import "./Logo3D.css";
+import Logo3D from "./components/Logo3D.jsx";
+import LandingExtras from "./components/LandingExtras.jsx";
+
 import {
   checkoutSubscription,
   cancelSubscription,
+  completeProfile,
   createSubject,
   getCurrentUser,
   deleteDocument,
@@ -18,7 +23,10 @@ import {
   login,
   logout as apiLogout,
   register,
+  requestPasswordOtp,
+  resetPassword,
   uploadDocument,
+  verifyPasswordOtp,
 } from "./api";
 import AITutorPage from "./components/ai-tutor/AITutorPage";
 import QuizWorkspace from "./components/QuizWorkspace";
@@ -27,9 +35,12 @@ import PaymentCheckout from "./components/PaymentCheckout";
 import ProgressDashboard from "./components/progress/ProgressDashboard";
 import { EMPTY_PROGRESS_ANALYTICS } from "./components/progress/progressDefaults";
 import StudyDeckSession from "./components/StudyDeckSession";
+import FlashcardDeckForm from "./components/flashcard/FlashcardDeckForm";
+import { DEFAULT_FLASHCARD_COLOR, rememberedCount } from "./components/flashcard/flashcardTheme";
 import { buildSubjectHashMap, findSubject, quickSortSubjects } from "./utils/subjectAlgorithms";
 import {
   ArrowRightIcon,
+  ArrowLeftIcon,
   AcademicCapIcon,
   BookOpenIcon,
   CalendarDaysIcon,
@@ -43,6 +54,8 @@ import {
   XMarkIcon,
   SparklesIcon,
   TrashIcon,
+  SunIcon,
+  MoonIcon,
 } from "@heroicons/react/24/outline";
 
 const PLANS = {
@@ -109,6 +122,13 @@ const EMPTY_STUDY_TIME = {
   active: false,
 };
 
+const VIETNAM_TIME_ZONE = "Asia/Ho_Chi_Minh";
+const vietnamDateKey = (date = new Date()) => {
+  const values = new Intl.DateTimeFormat("en", { timeZone: VIETNAM_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
+  const part = (type) => values.find((item) => item.type === type)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+};
+
 function mapDocumentProgress(result) {
   return (result.items || [])
     .filter((item) => item.document_id)
@@ -121,16 +141,22 @@ function mapDocumentProgress(result) {
     }));
 }
 
+function ThemeToggle({ theme, onToggle }) {
+  return <button type="button" className="theme-toggle" onClick={onToggle} aria-label={theme === 'light' ? 'Bật chế độ tối' : 'Bật chế độ sáng'} title={theme === 'light' ? 'Chế độ tối' : 'Chế độ sáng'} aria-pressed={theme === 'dark'}>
+    {theme === 'light' ? <MoonIcon aria-hidden="true" /> : <SunIcon aria-hidden="true" />}
+  </button>;
+}
+
 function StreakCard({ user, streak, onLogin }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = vietnamDateKey();
   const todayActive = Boolean(user && streak.last_activity_date === today);
   const days = Array.from({ length: 7 }, (_, index) => {
     const date = new Date();
-    date.setUTCDate(date.getUTCDate() - (6 - index));
+    date.setDate(date.getDate() - (6 - index));
     return {
-      date: date.toISOString().slice(0, 10),
-      label: date.toLocaleDateString("vi-VN", { weekday: "short", timeZone: "UTC" }).replace(".", ""),
-      number: date.getUTCDate(),
+      date: vietnamDateKey(date),
+      label: date.toLocaleDateString("vi-VN", { weekday: "short", timeZone: VIETNAM_TIME_ZONE }).replace(".", ""),
+      number: Number(date.toLocaleDateString("en", { day: "numeric", timeZone: VIETNAM_TIME_ZONE })),
     };
   });
   return (
@@ -223,6 +249,118 @@ function Modal({ title, children, onClose, icon, subtitle, className = "" }) {
   );
 }
 
+function StudyHubAuthScreen({ mode, user, oauthStatus, error, identifier, onBack, onMode, onOAuth, onSubmit }) {
+  const heading = {
+    login: ["Chào mừng đến StudyHub", "Đăng nhập để tiếp tục hành trình học tập."],
+    register: ["Tạo tài khoản StudyHub", "Bắt đầu xây dựng không gian học tập của bạn."],
+    profile: ["Chào mừng đến StudyHub", "Hoàn tất thông tin để cá nhân hóa hành trình học tập."],
+    forgot: ["Quên mật khẩu?", "Nhập email hoặc số điện thoại để nhận mã OTP."],
+    otp: ["Kiểm tra hộp thư", "Nhập mã OTP gồm 6 chữ số vừa được gửi."],
+    reset: ["Đặt mật khẩu mới", "Mật khẩu mới cần đáp ứng yêu cầu bảo mật."],
+  }[mode] || [];
+  const showProviders = mode === "login";
+  const identity = user?.email || user?.phone || "";
+  return (
+    <main className="studyhub-auth" aria-labelledby="studyhub-auth-title">
+      <section className="studyhub-auth__content">
+        <button type="button" className="studyhub-auth__back" onClick={onBack} aria-label="Quay lại">
+          <ArrowLeftIcon aria-hidden="true" />
+        </button>
+        <div className="studyhub-auth__brand" aria-label="StudyHub">
+          <span className="studyhub-auth__logo" aria-hidden="true"><b>S</b><i>H</i></span>
+        </div>
+        <header className="studyhub-auth__heading">
+          <h1 id="studyhub-auth-title">{heading[0]}</h1>
+          <p>{heading[1]}</p>
+        </header>
+
+        {showProviders && (
+          <>
+            <button type="button" className="studyhub-auth__provider studyhub-auth__provider--google" onClick={() => onOAuth("google")} disabled={!oauthStatus.google}>
+              <span className="studyhub-auth__google" aria-hidden="true">
+                <svg viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20H42V20H24v8h11.3C33.6 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.7 1.1 7.8 3l5.7-5.7C33.9 5.9 29.2 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.7-.4-4Z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3 0 5.7 1.1 7.8 3l5.7-5.7C33.9 5.9 29.2 4 24 4c-7.7 0-14.4 4.3-17.7 10.7Z"/><path fill="#4CAF50" d="M24 44c7.6 0 14-4.9 17.3-11.8l-7.6-6.4C31.8 32.1 28.4 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44Z"/><path fill="#1976D2" d="M43.6 20H42V20H24v8h11.3c-1 2.7-2.9 4.9-5.6 6.4l.1-.1 7.6 6.4C36.8 41.3 44 36 44 24c0-1.3-.1-2.7-.4-4Z"/></svg>
+              </span>
+              <span className="studyhub-auth__provider-label">Tiếp tục với Google</span>
+              <span aria-hidden="true" />
+            </button>
+            <button type="button" className="studyhub-auth__provider studyhub-auth__provider--facebook" onClick={() => onOAuth("facebook")} disabled={!oauthStatus.facebook}>
+              <span className="studyhub-auth__facebook" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path fill="currentColor" d="M13.8 21v-8h2.7l.4-3h-3.1V8.1c0-.9.3-1.5 1.6-1.5H17V3.9c-.3 0-1.3-.1-2.4-.1-2.4 0-4 1.5-4 4.1V10H8v3h2.6v8h3.2Z"/></svg>
+              </span>
+              <span className="studyhub-auth__provider-label">Tiếp tục với Facebook</span>
+              <span aria-hidden="true" />
+            </button>
+            <div className="studyhub-auth__divider"><span>hoặc dùng email</span></div>
+          </>
+        )}
+
+        {error && <p className="studyhub-auth__error" role="alert">{error}</p>}
+
+        {mode === "login" && (
+          <form className="studyhub-auth__form" onSubmit={onSubmit}>
+            <label>Email<input name="email" type="email" autoComplete="email" required /></label>
+            <label>Mật khẩu<input name="password" type="password" autoComplete="current-password" required /></label>
+            <button type="button" className="studyhub-auth__link studyhub-auth__forgot" onClick={() => onMode("forgot")}>Quên mật khẩu?</button>
+            <button className="studyhub-auth__submit">Đăng nhập</button>
+            <p>Chưa có tài khoản? <button type="button" className="studyhub-auth__link" onClick={() => onMode("register")}>Đăng ký</button></p>
+          </form>
+        )}
+
+        {mode === "register" && (
+          <form className="studyhub-auth__form" onSubmit={onSubmit}>
+            <div className="studyhub-auth__names">
+              <label>Last name<input name="lastName" autoComplete="family-name" required /></label>
+              <label>First name<input name="firstName" autoComplete="given-name" required /></label>
+            </div>
+            <label>Mật khẩu<input name="password" type="password" autoComplete="new-password" minLength="8" required /></label>
+            <small>Mật khẩu gồm ít nhất 8 ký tự, 1 chữ in hoa, 1 số và 1 ký tự đặc biệt.</small>
+            <label>Nhập lại mật khẩu<input name="passwordConfirm" type="password" autoComplete="new-password" minLength="8" required /></label>
+            <label>Gmail<input name="email" type="email" autoComplete="email" required /></label>
+            <button className="studyhub-auth__submit">Tạo tài khoản</button>
+            <p>Đã có tài khoản? <button type="button" className="studyhub-auth__link" onClick={() => onMode("login")}>Đăng nhập</button></p>
+          </form>
+        )}
+
+        {mode === "profile" && (
+          <form className="studyhub-auth__form" onSubmit={onSubmit}>
+            <div className="studyhub-auth__names">
+              <label>Last name<input name="lastName" defaultValue={user?.last_name || ""} autoComplete="family-name" required /></label>
+              <label>First name<input name="firstName" defaultValue={user?.first_name || ""} autoComplete="given-name" required /></label>
+            </div>
+            <label>Email hoặc số điện thoại<input value={identity} readOnly aria-readonly="true" /></label>
+            <button className="studyhub-auth__submit">Tiếp tục</button>
+          </form>
+        )}
+
+        {mode === "forgot" && (
+          <form className="studyhub-auth__form" onSubmit={onSubmit}>
+            <label>Email hoặc số điện thoại<input name="identifier" defaultValue={identifier} autoComplete="email" required /></label>
+            <button className="studyhub-auth__submit">Gửi mã OTP</button>
+            <p><button type="button" className="studyhub-auth__link" onClick={() => onMode("login")}>Quay lại đăng nhập</button></p>
+          </form>
+        )}
+
+        {mode === "otp" && (
+          <form className="studyhub-auth__form" onSubmit={onSubmit}>
+            <label>Mã OTP<input name="code" inputMode="numeric" pattern="[0-9]{6}" minLength="6" maxLength="6" autoComplete="one-time-code" required /></label>
+            <button className="studyhub-auth__submit">Xác nhận mã</button>
+            <p><button type="button" className="studyhub-auth__link" onClick={() => onMode("forgot")}>Gửi lại mã</button></p>
+          </form>
+        )}
+
+        {mode === "reset" && (
+          <form className="studyhub-auth__form" onSubmit={onSubmit}>
+            <label>Mật khẩu mới<input name="password" type="password" autoComplete="new-password" minLength="8" required /></label>
+            <small>Mật khẩu gồm ít nhất 8 ký tự, 1 chữ in hoa, 1 số và 1 ký tự đặc biệt.</small>
+            <label>Nhập lại mật khẩu<input name="passwordConfirm" type="password" autoComplete="new-password" minLength="8" required /></label>
+            <button className="studyhub-auth__submit">Lưu mật khẩu mới</button>
+          </form>
+        )}
+      </section>
+    </main>
+  );
+}
+
 function useRevealOnScroll(dependencyKey) {
   useEffect(() => {
     const elements = document.querySelectorAll(".reveal, .reveal-stagger");
@@ -284,8 +422,19 @@ export default function App() {
   });
   const [modal, setModal] = useState(null);
   const [authMode, setAuthMode] = useState("login");
+  const [authError, setAuthError] = useState("");
+  const [resetIdentifier, setResetIdentifier] = useState("");
+  const [resetToken, setResetToken] = useState("");
   const [oauthStatus, setOAuthStatus] = useState({ google: false, facebook: false });
   const [toast, setToast] = useState("");
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('studyhub-theme') === 'dark' ? 'dark' : 'light'; }
+    catch { return 'light'; }
+  });
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('studyhub-theme', theme); } catch { /* Theme still works when storage is unavailable. */ }
+  }, [theme]);
   const [selectedDocument, setSelectedDocument] = useState(null);
   const [documentPreview, setDocumentPreview] = useState(null);
   const [deleteCandidate, setDeleteCandidate] = useState(null);
@@ -293,6 +442,7 @@ export default function App() {
   const [uploadFileName, setUploadFileName] = useState("");
   const [uploadDragActive, setUploadDragActive] = useState(false);
   const documentPreviewRequest = useRef(0);
+  const userRef = useRef(user);
   const uploadInput = useRef(null);
   const [subscription, setSubscription] = useState({
     plan: "free",
@@ -331,12 +481,35 @@ export default function App() {
     setToast(message);
     window.setTimeout(() => setToast(""), 3200);
   };
-  const saveUser = (next) => {
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+  const saveUser = useCallback((next) => {
+    const current = userRef.current;
+    const currentKey = current ? String(current.id || current.email || "") : "";
+    const nextKey = next ? String(next.id || next.email || "") : "";
+    if (currentKey !== nextKey) {
+      documentPreviewRequest.current += 1;
+      setDocuments([]);
+      setSubjects([]);
+      setQuizDecks([]);
+      setActiveStudyDeck(null);
+      setProgress([]);
+      setProgressAnalytics(EMPTY_PROGRESS_ANALYTICS);
+      setStudyTime(EMPTY_STUDY_TIME);
+      setStreak({ current_streak: 0, recovery_count: 0, last_activity_date: null });
+      setSubscription({ plan: "free", status: "active" });
+      setFilter("all");
+      setSearch("");
+      setSelectedDocument(null);
+      setDocumentPreview(null);
+    }
+    userRef.current = next;
     setUser(next);
     next
       ? localStorage.setItem("studyhub-user", JSON.stringify(next))
       : localStorage.removeItem("studyhub-user");
-  };
+  }, []);
   const saveSubscription = (next) => {
     setSubscription(next);
     if (user) {
@@ -463,7 +636,14 @@ export default function App() {
     let active = true;
     getCurrentUser()
       .then((result) => {
-        if (active && result.user) saveUser(result.user);
+        if (active && result.user) {
+          saveUser(result.user);
+          getStreak().then(setStreak).catch(() => {});
+          if (!result.user.profile_completed) {
+            setAuthMode("profile");
+            setModal("auth");
+          }
+        }
         if (active && !result.user) saveUser(null);
       })
       .catch(() => {
@@ -472,7 +652,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [saveUser]);
   useEffect(() => {
     if (modal !== "auth") return undefined;
     let active = true;
@@ -496,18 +676,23 @@ export default function App() {
       getCurrentUser().then((result) => {
         if (result.user) {
           saveUser(result.user);
-          notify("Đăng nhập Google thành công.");
+          getStreak().then(setStreak).catch(() => {});
+          if (!result.user.profile_completed) {
+            setAuthMode("profile");
+            setModal("auth");
+          }
+          notify("Đăng nhập thành công.");
         }
-      }).catch(() => notify("Không thể tải phiên đăng nhập Google."));
+      }).catch(() => notify("Không thể tải phiên đăng nhập."));
       return;
     }
     const timer = window.setTimeout(() => {
       setAuthMode("login");
+      setAuthError(oauthError === "access_denied" ? "Bạn đã hủy đăng nhập." : "Đăng nhập chưa thành công.");
       setModal("auth");
-      notify(oauthError === "access_denied" ? "Bạn đã hủy đăng nhập Google." : "Đăng nhập Google chưa thành công.");
     }, 0);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [saveUser]);
   const requireLogin = () => {
     if (user) return false;
     setAuthMode("login");
@@ -560,33 +745,65 @@ export default function App() {
   const submitAuth = async (event) => {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
+    setAuthError("");
     try {
-      const result =
-        authMode === "login"
-          ? await login(data.get("email"), data.get("password"))
-          : await register(
-              data.get("name"),
-              data.get("email"),
-              data.get("password"),
-            );
-      // Clear old user's data first before saving new user
+      if (authMode === "forgot") {
+        const identifier = String(data.get("identifier") || "").trim();
+        await requestPasswordOtp(identifier);
+        setResetIdentifier(identifier);
+        setAuthMode("otp");
+        return;
+      }
+      if (authMode === "otp") {
+        const result = await verifyPasswordOtp({ identifier: resetIdentifier, code: String(data.get("code") || "") });
+        setResetToken(result.reset_token);
+        setAuthMode("reset");
+        return;
+      }
+      if (authMode === "reset") {
+        const password = String(data.get("password") || "");
+        if (password !== data.get("passwordConfirm")) throw new Error("Mật khẩu nhập lại chưa khớp");
+        await resetPassword({ resetToken, password });
+        setResetToken("");
+        setAuthMode("login");
+        notify("Đã đặt lại mật khẩu. Bạn có thể đăng nhập lại.");
+        return;
+      }
+      if (authMode === "profile") {
+        const result = await completeProfile({ firstName: String(data.get("firstName") || ""), lastName: String(data.get("lastName") || "") });
+        saveUser(result.user);
+        if (result.user.streak) setStreak(result.user.streak);
+        setModal(null);
+        notify("Hồ sơ đã sẵn sàng.");
+        return;
+      }
+      const password = String(data.get("password") || "");
+      if (authMode === "register" && password !== data.get("passwordConfirm")) throw new Error("Mật khẩu nhập lại chưa khớp");
+      const result = authMode === "login"
+        ? await login(data.get("email"), password)
+        : await register({
+            firstName: String(data.get("firstName") || ""),
+            lastName: String(data.get("lastName") || ""),
+            email: String(data.get("email") || ""),
+            password,
+          });
       setDocuments([]);
       setProgress([]);
       setProgressAnalytics(EMPTY_PROGRESS_ANALYTICS);
       setStudyTime(EMPTY_STUDY_TIME);
       setSubjects([]);
       setSubscription({ plan: "free", status: "active" });
-      // Now save the new user (this triggers effect to load their data)
-      saveUser(result.user || result);
-      if (result.user?.streak) setStreak(result.user.streak);
-      setModal(null);
-      notify(
-        authMode === "login"
-          ? "Đăng nhập thành công."
-          : "Tạo tài khoản thành công.",
-      );
+      const nextUser = result.user || result;
+      saveUser(nextUser);
+      if (nextUser.streak) setStreak(nextUser.streak);
+      if (!nextUser.profile_completed) {
+        setAuthMode("profile");
+      } else {
+        setModal(null);
+      }
+      notify(authMode === "login" ? "Đăng nhập thành công." : "Tạo tài khoản thành công.");
     } catch (error) {
-      notify(`Không thể thực hiện: ${error.message}`);
+      setAuthError(error.message || "Không thể thực hiện yêu cầu.");
     }
   };
   const submitUpload = async (event) => {
@@ -670,27 +887,20 @@ export default function App() {
       notify(`Không thể thêm môn học: ${error.message}`);
     }
   };
-  const submitQuizDeck = (event) => {
-    event.preventDefault();
+  const submitQuizDeck = (deck) => {
     if (requireLogin()) return;
-    const data = new FormData(event.currentTarget);
-    const deck = {
-      id: crypto.randomUUID(),
-      name: String(data.get("deckName") || "").trim(),
-      subject: String(data.get("deckSubject") || "").trim(),
-      description: String(data.get("deckDescription") || "").trim(),
-      cards: String(data.get("deckCards") || "")
-        .split("\n")
-        .map((line) => line.split("|").map((part) => part.trim()))
-        .filter(([front, back]) => front && back)
-        .map(([front, back]) => ({ front, back })),
-    };
     if (!deck.name) return notify("Tên bộ thẻ không được để trống.");
     const next = [...quizDecks, deck];
     setQuizDecks(next);
     localStorage.setItem(`studyhub-quiz-decks:${userKey}`, JSON.stringify(next));
     setModal(null);
     notify("Đã tạo bộ thẻ ghi nhớ mới.");
+  };
+  const updateStudyDeck = (deck) => {
+    const next = quizDecks.map((item) => item.id === deck.id ? deck : item);
+    setQuizDecks(next);
+    setActiveStudyDeck(deck);
+    localStorage.setItem(`studyhub-quiz-decks:${userKey}`, JSON.stringify(next));
   };
   const requestPlan = (plan) => {
     if (requireLogin() || plan === subscription.plan) return;
@@ -727,8 +937,32 @@ export default function App() {
       notify(`Không thể hủy gia hạn: ${error.message}`);
     }
   };
+  if (modal === "auth") {
+    return (
+      <>
+      <div className="auth-theme"><ThemeToggle theme={theme} onToggle={() => setTheme(theme === 'light' ? 'dark' : 'light')} /></div>
+      <StudyHubAuthScreen
+        mode={authMode}
+        user={user}
+        oauthStatus={oauthStatus}
+        error={authError}
+        identifier={resetIdentifier}
+        onBack={() => {
+          setAuthError("");
+          setModal(null);
+        }}
+        onMode={(next) => {
+          setAuthError("");
+          setAuthMode(next);
+        }}
+        onOAuth={chooseOAuthLogin}
+        onSubmit={submitAuth}
+      />
+      </>
+    );
+  }
   return (
-    <div className="studyhub-app">
+    <div className={`studyhub-app ${theme}`}>
       <header className="topbar">
         <button className="brand-wrap" onClick={() => go("home")} aria-label="StudyHub - Trang chủ">
           <span className="brand-mark"><AcademicCapIcon aria-hidden="true" /></span>
@@ -757,6 +991,7 @@ export default function App() {
           ))}
         </nav>
         <div className="auth-box">
+          <ThemeToggle theme={theme} onToggle={() => setTheme(theme === 'light' ? 'dark' : 'light')} />
           {user ? (
             <>
               <button
@@ -779,24 +1014,8 @@ export default function App() {
             </>
           ) : (
             <>
-              <button
-                className="btn btn-ghost"
-                onClick={() => {
-                  setAuthMode("login");
-                  setModal("auth");
-                }}
-              >
-                Đăng nhập
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={() => {
-                  setAuthMode("register");
-                  setModal("auth");
-                }}
-              >
-                Bắt đầu
-              </button>
+              <button className="btn btn-ghost" onClick={() => { setAuthError(""); setAuthMode("login"); setModal("auth"); }}>Đăng nhập</button>
+              <button className="btn btn-primary" onClick={() => { setAuthError(""); setAuthMode("register"); setModal("auth"); }}>Đăng ký</button>
             </>
           )}
         </div>
@@ -804,13 +1023,13 @@ export default function App() {
       <main className="main-shell">
         {view === "home" && (
           <>
-            <section className="hero-section">
+            <section className={`hero-section ${!user ? 'landing-hero' : ''}`}>
               <div className="hero-copy">
                 <span className="eyebrow">
                   STUDYHUB · NỀN TẢNG HỌC CÁ NHÂN CÓ ĐỊNH HƯỚNG
                 </span>
                 <h1>
-                  Học sâu hơn.
+                  {user ? 'Học sâu hơn.' : 'Học thông minh hơn.'}
                   <br />
                   <span>Tiến bộ rõ hơn.</span>
                 </h1>
@@ -821,17 +1040,17 @@ export default function App() {
                 <div className="hero-actions">
                   <button
                     className="btn btn-primary large"
-                    onClick={() => go("tutor")}
+                    onClick={() => user ? go("tutor") : (setAuthMode("register"), setModal("auth"))}
                   >
                     <SparklesIcon aria-hidden="true" className="btn-icon" />
-                    Hỏi Nova AI Tutor
+                    {user ? 'Hỏi Nova AI Tutor' : 'Bắt đầu học ngay'}
                   </button>
                   <button
                     className="btn btn-outline large"
-                    onClick={() => go("library")}
+                    onClick={() => user ? go("library") : document.getElementById('studyhub-workflow')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })}
                   >
                     <BookOpenIcon aria-hidden="true" className="btn-icon" />
-                    Mở kho học liệu
+                    {user ? 'Mở kho học liệu' : 'Khám phá StudyHub'}
                   </button>
                 </div>
                 <div className="hero-badges">
@@ -841,7 +1060,12 @@ export default function App() {
                 </div>
               </div>
               <div className="hero-visual">
-                <div className="progress-card">
+                {!user ? <>
+                  <Logo3D />
+                  <div className="hero-note hero-note--one"><BookOpenIcon aria-hidden="true" /><div><strong>Gọn một nơi</strong><small>Tài liệu & kiến thức</small></div></div>
+                  <div className="hero-note hero-note--two"><SparklesIcon aria-hidden="true" /><div><strong>Rõ từng bước</strong><small>Lộ trình của riêng bạn</small></div></div>
+                  <div className="hero-note hero-note--three"><FireIcon aria-hidden="true" /><div><strong>Mỗi ngày một chút</strong><small>Xây thói quen học</small></div></div>
+                </> : <div className="progress-card">
                   <span className="eyebrow">NHỊP HỌC TUẦN NÀY</span>
                   <div className="big-number">
                     {progress.length ? average : "—"}
@@ -868,44 +1092,72 @@ export default function App() {
                       <small>ngày streak</small>
                     </div>
                   </div>
-                </div>
+                </div>}
               </div>
             </section>
-            <StreakCard
+            <section className="content-section pain-points-section">
+              <span className="eyebrow">❤️ VẤN ĐỀ</span>
+              <h2>Bạn có đang học theo cách này?</h2>
+              <div className="pain-grid">
+                {[
+                  ["📄", "Tài liệu nằm khắp nơi", "Drive, Google, Messenger, đủ nơi không biết bắt đầu từ đâu."],
+                  ["❤️", "Học nhiều nhưng khô nhớ", "Không có phương pháp lặp lại hiệu quả."],
+                  ["💡", "Không biết học gì tiếp theo", "Không có lộ trình rõ ràng."],
+                  ["🔥", "Khó duy trì thói quen", "Học được vài ngày rồi bỏ."],
+                ].map(([icon, title, desc], i) => (
+                  <article className="pain-card" key={i}>
+                    <span className="pain-icon">{icon}</span>
+                    <h3>{title}</h3>
+                    <p>{desc}</p>
+                  </article>
+                ))}
+              </div>
+              <p className="pain-conclusion">
+                <strong>Bạn không thiếu tài liệu.</strong><br/>
+                Bạn đang thiếu một hệ thống học tập phù hợp.
+              </p>
+            </section>
+            {user && <StreakCard
               user={user}
               streak={streak}
               onLogin={() => {
                 setAuthMode("login");
                 setModal("auth");
               }}
-            />
-            <section className="content-section">
+            />}
+            <section className="content-section workflow-section" id="studyhub-workflow">
               <span className="eyebrow">WORKFLOW CÁ NHÂN</span>
-              <h2>Một nhịp học gọn gàng.</h2>
+              <h2>StudyHub gom mọi thứ bạn cần<br />vào một nhịp học.</h2>
               <div className="workflow-grid reveal-stagger">
                 {[
                   [
                     "01",
                     "Lưu học liệu",
-                    "Đưa tài liệu cần học vào một kho riêng.",
+                    "Tải bài giảng & tài liệu lên kho thông minh.",
                     "library",
                   ],
                   [
                     "02",
-                    "Ôn tập Quiz Card",
-                    "Tạo bộ thẻ ghi nhớ và Quiz từ tài liệu với AI.",
+                    "Ôn Quiz Card",
+                    "AI tự tạo thẻ Flashcard ôn tập lặp lại ngắt quãng.",
                     "quiz",
                   ],
                   [
                     "03",
-                    "Theo dõi nhịp học",
-                    "Xem lộ trình, cập nhật tiến độ từng chủ đề.",
+                    "Xây lộ trình",
+                    "Phân bổ lịch học cụ thể theo cấu trúc thi.",
                     "roadmap",
                   ],
                   [
                     "04",
+                    "Theo dõi tiến độ",
+                    "Xem tỉ lệ hoàn thành và giữ vững streak học.",
+                    "dashboard",
+                  ],
+                  [
+                    "05",
                     "Hỏi Nova AI",
-                    "Nhận giải thích, gợi ý, tóm tắt từ Nova.",
+                    "Giải đáp thắc mắc chuyên sâu tức thì 24/7.",
                     "tutor",
                   ],
                 ].map(([num, title, detail, target]) => (
@@ -924,6 +1176,62 @@ export default function App() {
                 ))}
               </div>
             </section>
+            <section className="content-section roadmap-sample-section">
+              <span className="eyebrow">■ LỘ TRÌNH HỌC MẪu</span>
+              <h2>Học từng bước, tiến bộ từng tuần.</h2>
+              <p>StudyHub giúp bạn biến một mục tiêu lớn thành những bước học nhỏ và rõ ràng.</p>
+              <div className="roadmap-cards">
+                {[
+                  { week: "TUẦN 1", title: "Làm quen", sub: "Xây nền tảng", items: ["Làm quen với kiến thức cơ bản", "Đọc tài liệu nền tảng", "Hoàn thành 2 bài học", "Ôn 10 Quiz Card"], progress: 80, active: false },
+                  { week: "TUẦN 2", title: "Xây nền", sub: "Nắm kiến thức trọng tâm", items: ["Học kiến thức chính", "Làm bài tập cơ bản", "Hoàn thành 3 bài học", "Ôn 20 Quiz Card"], progress: 60, active: true },
+                  { week: "TUẦN 3", title: "Luyện tập", sub: "Áp dụng kiến thức", items: ["Làm bài tập nâng cao", "Ôn tập bằng Quiz Card", "Hỏi Nova những phần chưa hiểu", "Hoàn thành mini test"], progress: 40, active: false },
+                  { week: "TUẦN 4", title: "Tổng ôn", sub: "Kiểm tra và củng cố", items: ["Ôn toàn bộ kiến thức", "Làm bài kiểm tra", "Xem lại phần còn yếu", "Đánh giá tiến độ"], progress: 20, active: false },
+                ].map((w, i) => (
+                  <article className={`roadmap-week-card${w.active ? ' active' : ''}`} key={i}>
+                    <div className="roadmap-week-header">
+                      <span className="week-dot" />
+                      <span className="week-label">{w.week}</span>
+                      {w.active && <span className="week-badge">ĐANG HỌC</span>}
+                    </div>
+                    <h3>{w.title}</h3>
+                    <p className="week-sub">{w.sub}</p>
+                    <ul>{w.items.map((item, j) => <li key={j}>{item}</li>)}</ul>
+                    <div className="week-progress">
+                      <span>Tiến độ</span>
+                      <strong>{w.progress}%</strong>
+                    </div>
+                    <div className="progress-bar"><span style={{ width: `${w.progress}%` }} /></div>
+                  </article>
+                ))}
+              </div>
+              <div className="roadmap-cta">
+                <p><strong>Bạn không cần tự lên kế hoạch từ đầu.</strong></p>
+                <p>StudyHub giúp chia mục tiêu lớn thành từng bước học rõ ràng.</p>
+                <button className="btn btn-primary" onClick={() => go("roadmap")}>Xem lộ trình của tôi →</button>
+              </div>
+            </section>
+            <section className="content-section streak-habit-section">
+              <span className="eyebrow">■ THÓI QUEN BỀN VỮNG</span>
+              <h2>🔥 Giữ nhịp học mỗi ngày ✨</h2>
+              <p>Sự đều đặn nhỏ bé tích lũy thành thành tựu lớn. Lên kế hoạch, giữ streak để có thói quen học tập bền bỉ và khỏe mạnh.</p>
+              <div className="streak-calendar-card">
+                <div className="streak-cal-header">
+                  <span>{user ? new Date().toLocaleDateString('vi-VN', { month: 'long', year: 'numeric', timeZone: VIETNAM_TIME_ZONE }) : 'Một tuần học · Minh họa'}</span>
+                  <span>✔ {user ? `Chuỗi hiện tại: ${streak.current_streak} ngày` : 'Mỗi ngày một bước tiến'}</span>
+                </div>
+                <div className="streak-week">
+                  {["T2", "T3", "T4", "T5", "T6", "T7", "CN"].map((day, i) => (
+                    <div className={`streak-day${i < (user ? streak.current_streak : 5) ? ' done' : ''}${i === new Date().getDay() - 1 ? ' today' : ''}`} key={i}>
+                      <span className="day-label">{day}</span>
+                      <span className="day-num">{12 + i}</span>
+                      {i < (user ? streak.current_streak : 5) && <span className="day-check">✔</span>}
+                      {user && i === new Date().getDay() - 1 && <span className="day-today">Hôm nay</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+            {!user && <LandingExtras plans={PLANS} onStart={() => { setAuthError(""); setAuthMode("register"); setModal("auth"); }} onExplore={go} />}
           </>
         )}
         {view === "library" && (
@@ -1075,10 +1383,12 @@ export default function App() {
               <div className="quiz-deck-grid reveal-stagger">
                 {quizDecks.map((deck) => (
                   <article className="quiz-deck-card" key={deck.id}>
-                    <span className="quiz-deck-icon"><RectangleStackIcon aria-hidden="true" /></span>
+                    <div className={`quiz-deck-cover is-${deck.cover || "plain"}`} style={{ "--deck-color": deck.color || DEFAULT_FLASHCARD_COLOR }} aria-hidden="true" />
                     <h2>{deck.name}</h2>
                     <p>{deck.subject || "Chưa phân loại"}</p>
                     {deck.description && <small>{deck.description}</small>}
+                    <progress value={rememberedCount(deck)} max={Math.max(1, deck.cards?.length || 0)} aria-label={`${rememberedCount(deck)} trên ${deck.cards?.length || 0} thẻ đã nhớ`} style={{ "--deck-color": deck.color || DEFAULT_FLASHCARD_COLOR }} />
+                    <small className="flashcard-deck-count">{rememberedCount(deck)}/{deck.cards?.length || 0} thẻ đã nhớ</small>
                     <button className="btn btn-primary full" type="button" onClick={() => setActiveStudyDeck(deck)}>Bắt đầu ôn tập</button>
                   </article>
                 ))}
@@ -1094,7 +1404,7 @@ export default function App() {
           </section>
         )}
         {view === "roadmap" && (
-          <LearningRoadmapPage documents={documents} subjects={subjects} progress={progress} />
+          <LearningRoadmapPage documents={documents} subjects={subjects} progress={progress} onOpenDocument={openDocumentPreview} />
         )}
         {view === "dashboard" && (
           <ProgressDashboard
@@ -1103,6 +1413,7 @@ export default function App() {
             progress={progress}
             studyTime={studyTime}
             streak={streak}
+            quizDecks={quizDecks}
             onLogin={() => { setAuthMode("login"); setModal("auth"); }}
           />
         )}
@@ -1233,64 +1544,6 @@ export default function App() {
               Hỏi Nova về tài liệu
             </button>
           </footer>
-        </Modal>
-      )}
-      {modal === "auth" && (
-        <Modal
-          title={authMode === "login" ? "Đăng nhập StudyHub" : "Tạo tài khoản"}
-          onClose={() => setModal(null)}
-        >
-          <button
-            type="button"
-            className="oauth-button oauth-google"
-            onClick={() => chooseOAuthLogin("google")}
-            aria-disabled={!oauthStatus.google}
-            title={oauthStatus.google ? "Đăng nhập bằng tài khoản Google" : "Cần cấu hình Google OAuth trên backend"}
-          >
-            <span className="oauth-google-mark" aria-hidden="true">G</span>
-            Tiếp tục với Google
-          </button>
-          <button
-            type="button"
-            className="oauth-button oauth-facebook"
-            onClick={() => chooseOAuthLogin("facebook")}
-            aria-disabled={!oauthStatus.facebook}
-            title={oauthStatus.facebook ? "Đăng nhập bằng tài khoản Facebook" : "Cần cấu hình Facebook OAuth trên backend"}
-          >
-            <span className="oauth-facebook-mark" aria-hidden="true">f</span>
-            Tiếp tục với Facebook
-          </button>
-          <div className="auth-divider"><span>hoặc dùng email</span></div>
-          <form className="auth-form" onSubmit={submitAuth}>
-            {authMode === "register" && (
-              <label>
-                Họ tên
-                <input name="name" required />
-              </label>
-            )}
-            <label>
-              Email
-              <input name="email" type="email" required />
-            </label>
-            <label>
-              Mật khẩu
-              <input name="password" type="password" minLength="6" required />
-            </label>
-            <button className="btn btn-primary full">
-              {authMode === "login" ? "Đăng nhập" : "Tạo tài khoản"}
-            </button>
-            <button
-              type="button"
-              className="text-link"
-              onClick={() =>
-                setAuthMode(authMode === "login" ? "register" : "login")
-              }
-            >
-              {authMode === "login"
-                ? "Chưa có tài khoản? Đăng ký"
-                : "Đã có tài khoản? Đăng nhập"}
-            </button>
-          </form>
         </Modal>
       )}
       {modal === "upload" && (
@@ -1428,29 +1681,7 @@ export default function App() {
       )}
       {modal === "quiz-create" && (
         <Modal title="Tạo bộ thẻ ghi nhớ mới" onClose={() => setModal(null)}>
-          <form className="auth-form quiz-create-form" onSubmit={submitQuizDeck}>
-            <label>
-              Tên bộ thẻ <span aria-hidden="true">*</span>
-              <input name="deckName" required placeholder="Ví dụ: Từ vựng IELTS Chuyên đề Môi trường" />
-            </label>
-            <label>
-              Môn học / Chuyên đề
-              <input name="deckSubject" defaultValue="Công nghệ thông tin" />
-            </label>
-            <label>
-              Mô tả ngắn
-              <textarea name="deckDescription" rows="3" placeholder="Mô tả mục tiêu của bộ thẻ..." />
-            </label>
-            <label>
-              Nội dung thẻ
-              <textarea name="deckCards" rows="5" placeholder={"Mỗi dòng một thẻ theo mẫu:\nKhái niệm | Nội dung giải thích\nReact | Thư viện xây dựng giao diện"} />
-              <small className="muted">Dùng dấu | để ngăn cách mặt trước và mặt sau. Có thể bổ sung nhiều dòng.</small>
-            </label>
-            <div className="quiz-modal-actions">
-              <button type="button" className="text-link" onClick={() => setModal(null)}>Hủy</button>
-              <button className="btn quiz-create-button" type="submit"><PlusIcon aria-hidden="true" /> Tạo bộ thẻ</button>
-            </div>
-          </form>
+          <FlashcardDeckForm onCreate={submitQuizDeck} onCancel={() => setModal(null)} />
         </Modal>
       )}
       {modal === "plan" && (
@@ -1492,8 +1723,49 @@ export default function App() {
           </button>
         </Modal>
       )}
+      <footer className="site-footer">
+        <div className="footer-inner">
+          <div className="footer-brand">
+            <button className="brand-wrap" onClick={() => go("home")}>
+              <span className="brand-mark"><AcademicCapIcon aria-hidden="true" /></span>
+              <span className="brand-text">Study<span>Hub</span></span>
+            </button>
+            <p>Nền tảng học tập thông minh đồng hành cùng sinh viên Việt Nam chinh phục mọi kỳ thi đại học.</p>
+          </div>
+          <div className="footer-col">
+            <h4>HỌC LIỆU</h4>
+            <ul>
+              <li><button onClick={() => go("library")}>Đề thi thử</button></li>
+              <li><button onClick={() => go("library")}>Bài tập lớn</button></li>
+              <li><button onClick={() => go("quiz")}>Quiz card</button></li>
+              <li><button onClick={() => go("library")}>Bài giảng tóm tắt</button></li>
+            </ul>
+          </div>
+          <div className="footer-col">
+            <h4>TÍNH NĂNG</h4>
+            <ul>
+              <li><button onClick={() => go("tutor")}>AI Tutor</button></li>
+              <li><button onClick={() => go("roadmap")}>Nhóm học tập</button></li>
+              <li><button onClick={() => go("quiz")}>Flashcard</button></li>
+              <li><button onClick={() => go("dashboard")}>Bảng xếp hạng</button></li>
+            </ul>
+          </div>
+          <div className="footer-col">
+            <h4>LIÊN HỆ</h4>
+            <p>Email: support@studyhub.vn</p>
+            <p>Hotline: 1900 1234</p>
+          </div>
+        </div>
+        <div className="footer-bottom">
+          <span>© 2026 StudyHub. Tất cả bản quyền được bảo lưu.</span>
+          <div>
+            <button>Điều khoản dịch vụ</button>
+            <button>Chính sách bảo mật</button>
+          </div>
+        </div>
+      </footer>
       {toast && <div className="toast">{toast}</div>}
-      {activeStudyDeck && <StudyDeckSession deck={activeStudyDeck} onClose={() => setActiveStudyDeck(null)} />}
+      {activeStudyDeck && <StudyDeckSession deck={activeStudyDeck} onUpdateDeck={updateStudyDeck} onClose={() => setActiveStudyDeck(null)} />}
     </div>
   );
 }

@@ -1,0 +1,15 @@
+.modal:has(.flashcard-deck-form){max-width:580px}.flashcard-deck-form{max-height:min(75vh,760px);overflow:auto;padding-right:4px}
+.flashcard-form-row{display:grid;grid-template-columns:1fr 150px;gap:14px;align-items:end}
+.flashcard-color-field,.flashcard-form-card{min-width:0;border:1px solid var(--border-color);border-radius:8px;padding:12px}
+.flashcard-color-field legend,.flashcard-form-card legend{padding:0 5px;font-size:12px;font-weight:700}
+.flashcard-swatches{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.flashcard-swatches button{width:25px;height:25px;padding:0;border:2px solid transparent;border-radius:50%;background:var(--flashcard-color);cursor:pointer}
+.flashcard-swatches button.is-selected{outline:2px solid var(--border-color);box-shadow:var(--shadow-subtle)}
+.flashcard-form-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.flashcard-form-heading button{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:var(--mint-ink);cursor:pointer}
+.flashcard-form-cards{display:grid;gap:12px}.flashcard-form-card{position:relative;display:grid;gap:11px}.flashcard-form-card label{display:grid;gap:5px}.flashcard-remove{position:absolute;right:8px;top:-2px;border:0;background:transparent;color:var(--pink-ink);cursor:pointer}.flashcard-remove:disabled{opacity:.35;cursor:not-allowed}
+.quiz-deck-cover{height:70px;margin:-5px -5px 11px;border-radius:6px;background-color:var(--deck-color);opacity:.85}.quiz-deck-cover.is-lines{background-image:var(--bg-alt)}.quiz-deck-cover.is-grid{background-image:var(--bg-alt);background-size:18px 18px}
+.quiz-deck-card progress{width:100%;height:6px;margin:14px 0 5px;accent-color:var(--deck-color)}.quiz-deck-card .flashcard-deck-count{display:block;margin-bottom:14px;color:var(--mint-ink)}
+.study-card{border-color:var(--card-color)}.study-card.is-remembered{animation:flashcardRemember .65s ease}.study-card.is-remembered:after{content:"+1 đã nhớ";position:absolute;right:16px;top:15px;color:var(--pink-ink);font-size:12px;font-weight:800}.study-card{position:relative}.study-card>.study-card__flame{position:absolute;left:15px;top:12px;color:var(--pink-ink);opacity:0}.study-card.is-remembered>.study-card__flame{opacity:1;animation:flashcardFlame .65s ease}
+@keyframes flashcardRemember{40%{transform:scale(1.03);box-shadow:var(--shadow-subtle)}}@keyframes flashcardFlame{50%{transform:translateY(-7px) scale(1.25)}}
+@media(max-width:600px){.flashcard-form-row{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){.study-card.is-remembered,.study-card.is-remembered>.study-card__flame{animation:none}}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, os, re, secrets, sqlite3, hashlib, mimetypes, html, zipfile
+import json, os, re, secrets, sqlite3, hashlib, mimetypes, html, zipfile, smtplib, ssl
 from datetime import datetime, timezone, timedelta
 from calendar import monthrange
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -9,10 +9,12 @@ import math, threading, time
 import xml.etree.ElementTree as ET
 from email.parser import BytesParser
 from email.policy import default
+from email.message import EmailMessage
 
 from backend.app.db.runtime import get_runtime_database
 from backend.app.db.seed import seed as seed_database
-from backend.app.security import authenticate, create_session, hash_password, register as register_user, current_user, public_user, revoke_session, SESSION_COOKIE
+from backend.app.timezone import VIETNAM_TZ, vietnam_now
+from backend.app.security import authenticate, create_session, hash_password, register as register_user, current_user, public_user, revoke_session, SESSION_COOKIE, complete_profile, start_password_reset, verify_password_reset, reset_password
 from backend.app.security.service import update_streak
 from backend.app.security.session import token_hash
 from backend.app.security.oauth import OAuthError, authorization_url as oauth_authorization_url, exchange_profile as oauth_exchange_profile, provider_status as oauth_provider_status
@@ -38,6 +40,8 @@ tutor_config.load_env()
 
 ROOT=os.path.dirname(os.path.abspath(__file__))
 def load_local_env(path):
+ if os.environ.get('STUDYHUB_NO_DOTENV'):
+  return
  if not os.path.isfile(path): return
  with open(path,encoding='utf-8') as env_file:
   for raw_line in env_file:
@@ -144,7 +148,26 @@ def oauth_state_cookie(value, max_age=600):
     return f'{OAUTH_STATE_COOKIE}={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax{suffix}'
 
 def oauth_frontend_url():
-    return os.environ.get('STUDYHUB_FRONTEND_URL','http://127.0.0.1:5174').strip().rstrip('/')
+ return os.environ.get('STUDYHUB_FRONTEND_URL','http://127.0.0.1:5174').strip().rstrip('/')
+
+def reset_email_ready():
+ return bool(os.environ.get('STUDYHUB_SMTP_HOST','').strip() and os.environ.get('STUDYHUB_RESET_EMAIL_FROM','').strip())
+
+def send_reset_otp(recipient, code):
+ host=os.environ.get('STUDYHUB_SMTP_HOST','').strip()
+ sender=os.environ.get('STUDYHUB_RESET_EMAIL_FROM','').strip()
+ if not host or not sender: raise RuntimeError('Chưa cấu hình SMTP để gửi mã OTP')
+ try: port=int(os.environ.get('STUDYHUB_SMTP_PORT','587'))
+ except ValueError: raise RuntimeError('STUDYHUB_SMTP_PORT không hợp lệ')
+ message=EmailMessage()
+ message['Subject']='StudyHub - Mã đặt lại mật khẩu'
+ message['From']=sender; message['To']=recipient
+ message.set_content(f'Mã OTP đặt lại mật khẩu StudyHub của bạn là: {code}\n\nMã có hiệu lực trong 10 phút. Không chia sẻ mã này với bất kỳ ai.')
+ username=os.environ.get('STUDYHUB_SMTP_USERNAME','').strip(); password=os.environ.get('STUDYHUB_SMTP_PASSWORD','')
+ with (smtplib.SMTP_SSL(host,port,context=ssl.create_default_context(),timeout=15) if port==465 else smtplib.SMTP(host,port,timeout=15)) as smtp:
+  if port!=465: smtp.starttls(context=ssl.create_default_context())
+  if username: smtp.login(username,password)
+  smtp.send_message(message)
 
 def oauth_user_session(provider, profile):
     with db() as c:
@@ -158,8 +181,8 @@ def oauth_user_session(provider, profile):
         if not row:
             full_name=profile['name'] if len(profile['name'])>=2 else 'StudyHub User'
             user_id=c.execute(
-                'INSERT INTO users(full_name,email,password_hash,role,status,avatar_url) VALUES(?,?,?,?,?,?)',
-                (full_name,profile['email'],hash_password(secrets.token_urlsafe(32)),'student','active',profile['avatar_url'] or None),
+                'INSERT INTO users(full_name,email,password_hash,role,status,profile_completed,avatar_url) VALUES(?,?,?,?,?,?,?)',
+                (full_name,profile['email'],hash_password(secrets.token_urlsafe(32)),'student','active',0,profile['avatar_url'] or None),
             ).lastrowid
             row=c.execute('SELECT * FROM users WHERE id=?',(user_id,)).fetchone()
         if row['status']!='active':
@@ -181,15 +204,15 @@ def oauth_user_session(provider, profile):
         user['streak']=streak
     return user,token,expires_at
 
-def utc_stamp():
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+def local_stamp():
+    return vietnam_now().replace(microsecond=0).isoformat()
 
 def parse_timestamp(value):
     if not value:
         return None
     try:
         parsed=datetime.fromisoformat(str(value).replace('Z','+00:00'))
-        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+        return (parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed).astimezone(VIETNAM_TZ)
     except (TypeError,ValueError):
         return None
 
@@ -201,7 +224,7 @@ def elapsed_seconds(started_at, ended_at):
 def ensure_study_session(connection, user_id, token):
     """Create/touch the study clock belonging to the authenticated login."""
     if not token:return None
-    key=token_hash(token); now=utc_stamp()
+    key=token_hash(token); now=local_stamp()
     row=connection.execute('SELECT * FROM study_sessions WHERE session_key=?',(key,)).fetchone()
     if row:
         if row['status']=='active':
@@ -217,7 +240,7 @@ def ensure_study_session(connection, user_id, token):
 
 def close_study_session(connection, token):
     if not token:return None
-    key=token_hash(token); now=utc_stamp()
+    key=token_hash(token); now=local_stamp()
     row=connection.execute(
         'SELECT * FROM study_sessions WHERE session_key=? AND status=?',(key,'active')
     ).fetchone()
@@ -231,7 +254,7 @@ def close_study_session(connection, token):
     return duration
 
 def study_time_summary(connection, user_id, token):
-    now=utc_stamp(); current_key=token_hash(token) if token else None
+    now=local_stamp(); current_key=token_hash(token) if token else None
     rows=connection.execute(
         'SELECT id,session_key,started_at,last_seen_at,ended_at,duration_seconds,status '
         'FROM study_sessions WHERE user_id=? ORDER BY started_at DESC',(user_id,)
@@ -602,7 +625,7 @@ def _parse_activity_time(value):
         parsed=datetime.fromisoformat(str(value).replace('Z','+00:00'))
     except (TypeError,ValueError):
         return None
-    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    return (parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed).astimezone(VIETNAM_TZ)
 
 def _shift_month(year, month, offset):
     index=year*12+(month-1)+offset
@@ -615,7 +638,7 @@ def quiz_progress_analytics(connection, user_id, now=None):
     accuracy (correct answers), so submitting an unfinished quiz cannot look the
     same as completing it with strong results.
     """
-    current=(now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    current=(now or vietnam_now()).astimezone(VIETNAM_TZ)
     rows=connection.execute('''SELECT m.content,m.created_at
       FROM chat_messages m JOIN chat_sessions s ON s.id=m.session_id
       WHERE s.user_id=? AND s.title LIKE 'QUIZ_CARD:%' AND m.role='user'
@@ -653,27 +676,27 @@ def quiz_progress_analytics(connection, user_id, now=None):
     day=[]
     for offset in range(-6,1):
         date=today+timedelta(days=offset)
-        start=datetime(date.year,date.month,date.day,tzinfo=timezone.utc)
+        start=datetime(date.year,date.month,date.day,tzinfo=VIETNAM_TZ)
         day.append(bucket(date.isoformat(),date.strftime('%d/%m'),start,start+timedelta(days=1)))
 
     this_monday=today-timedelta(days=today.weekday())
     week=[]
     for offset in range(-7,1):
         date=this_monday+timedelta(weeks=offset)
-        start=datetime(date.year,date.month,date.day,tzinfo=timezone.utc)
+        start=datetime(date.year,date.month,date.day,tzinfo=VIETNAM_TZ)
         week.append(bucket(date.isoformat(),date.strftime('%d/%m'),start,start+timedelta(days=7)))
 
     month=[]
     for offset in range(-5,1):
         year,month_number=_shift_month(today.year,today.month,offset)
         next_year,next_month=_shift_month(year,month_number,1)
-        start=datetime(year,month_number,1,tzinfo=timezone.utc)
-        end=datetime(next_year,next_month,1,tzinfo=timezone.utc)
+        start=datetime(year,month_number,1,tzinfo=VIETNAM_TZ)
+        end=datetime(next_year,next_month,1,tzinfo=VIETNAM_TZ)
         month.append(bucket(f'{year:04d}-{month_number:02d}',f'{month_number:02d}/{year}',start,end))
 
     summary=metrics(attempts)
     summary['xp']=summary['correct_answers']*10+summary['attempts']*5
-    today_start=datetime(today.year,today.month,today.day,tzinfo=timezone.utc)
+    today_start=datetime(today.year,today.month,today.day,tzinfo=VIETNAM_TZ)
     today_metrics=metrics([item for item in attempts if today_start<=item['at']<today_start+timedelta(days=1)])
     return {'summary':summary,'today':today_metrics,'ranges':{'day':day,'week':week,'month':month}}
 
@@ -735,7 +758,7 @@ class H(BaseHTTPRequestHandler):
   client_ip=self.client_address[0]
   allowed,retry,remaining=api_rate_limiter.consume(client_ip)
   limit=API_RATE_LIMIT
-  if self.command=='POST' and path in ('/api/login','/api/auth/login','/api/register','/api/auth/register'):
+  if self.command=='POST' and path in ('/api/login','/api/auth/login','/api/register','/api/auth/register','/api/auth/password/otp','/api/auth/password/verify','/api/auth/password/reset'):
    auth_allowed,auth_retry,auth_remaining=auth_rate_limiter.consume(client_ip)
    if not auth_allowed: allowed,retry,remaining,limit=False,auth_retry,0,AUTH_RATE_LIMIT
    elif auth_remaining<remaining: remaining,limit=auth_remaining,AUTH_RATE_LIMIT
@@ -821,7 +844,7 @@ class H(BaseHTTPRequestHandler):
     if scope=='mine':
      u=require_user(self)
      if not u:return
-     c=db(); rows=[dict(r) for r in c.execute('SELECT * FROM subjects WHERE created_by IS NULL OR created_by=? ORDER BY name',(u['id'],))]; c.close(); return self.json(rows)
+     c=db(); rows=[dict(r) for r in c.execute('SELECT * FROM subjects WHERE created_by=? ORDER BY name',(u['id'],))]; c.close(); return self.json(rows)
     c=db(); rows=[dict(r) for r in c.execute('SELECT * FROM subjects ORDER BY name')]; c.close(); return self.json(rows)
   if path=='/api/subscription':
    u=require_user(self)
@@ -1151,17 +1174,52 @@ class H(BaseHTTPRequestHandler):
     close_study_session(c,token)
     revoke_session(c, token)
    return self.json({'ok':True},200,{'Set-Cookie':session_cookie('',0)})
+  if path=='/api/auth/profile':
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   if not isinstance(x,dict): return self.json({'error':'Dữ liệu hồ sơ không hợp lệ'},400)
+   first_name=x.get('first_name',''); last_name=x.get('last_name','')
+   if not isinstance(first_name,str) or not isinstance(last_name,str): return self.json({'error':'Dữ liệu hồ sơ không hợp lệ'},400)
+   with db() as c: user,error=complete_profile(c,u['id'],first_name,last_name)
+   if error:return self.json({'error':error},400)
+   return self.json({'user':user},200)
+  if path=='/api/auth/password/otp':
+   x=json_body(data)
+   identifier=x.get('identifier','') if isinstance(x,dict) else ''
+   if not isinstance(identifier,str) or not identifier.strip(): return self.json({'error':'Vui lòng nhập email hoặc số điện thoại'},400)
+   if not reset_email_ready(): return self.json({'error':'Dịch vụ gửi email chưa được cấu hình'},503)
+   with db() as c: delivery=start_password_reset(c,identifier)
+   if not delivery:return self.json({'ok':True},202)
+   try: send_reset_otp(delivery['email'],delivery['code'])
+   except Exception as error:
+    self.log_error('Password-reset email failed: %r',error)
+    return self.json({'error':'Không thể gửi mã OTP. Vui lòng thử lại sau.'},503)
+   return self.json({'ok':True},202)
+  if path=='/api/auth/password/verify':
+   x=json_body(data)
+   identifier=x.get('identifier','') if isinstance(x,dict) else ''; code=x.get('code','') if isinstance(x,dict) else ''
+   with db() as c: reset_token,error=verify_password_reset(c,identifier,code)
+   if error:return self.json({'error':error},400)
+   return self.json({'reset_token':reset_token},200)
+  if path=='/api/auth/password/reset':
+   x=json_body(data)
+   reset_token=x.get('reset_token','') if isinstance(x,dict) else ''; password=x.get('password','') if isinstance(x,dict) else ''
+   if not isinstance(reset_token,str) or not isinstance(password,str): return self.json({'error':'Dữ liệu đặt lại mật khẩu không hợp lệ'},400)
+   with db() as c: error=reset_password(c,reset_token,password)
+   if error:return self.json({'error':error},400)
+   return self.json({'ok':True},200)
   if path in ('/api/register','/api/auth/register'):
    try:
     x=json.loads(data or '{}')
    except json.JSONDecodeError:
     return self.json({'error':'Dữ liệu đăng ký không hợp lệ'},400)
-   name=x.get('name',''); email=x.get('email',''); pw=x.get('password','')
-   if not all(isinstance(v,str) for v in (name,email,pw)):
+   name=x.get('name',''); first_name=x.get('first_name',''); last_name=x.get('last_name',''); email=x.get('email',''); pw=x.get('password','')
+   if not all(isinstance(v,str) for v in (name,first_name,last_name,email,pw)):
     return self.json({'error':'Dữ liệu đăng ký không hợp lệ'},400)
    with db() as c:
     try:
-     result, error = register_user(c, name, email, pw)
+     result, error = register_user(c, name, email, pw, first_name, last_name)
     except Exception as exc:
      if not isinstance(exc,sqlite3.IntegrityError) and getattr(exc,'errno',None)!=1062:
       raise
@@ -1185,7 +1243,7 @@ class H(BaseHTTPRequestHandler):
     code=''.join(ch for ch in unicodedata.normalize('NFKD',name).upper() if ch.isascii() and ch.isalnum())[:8] or 'SUB'
    if not 2 <= len(code) <= 12:return self.json({'error':'Mã môn học phải từ 2 đến 12 ký tự'},400)
    with db() as c:
-    if c.execute('SELECT id FROM subjects WHERE code=?',(code,)).fetchone():return self.json({'error':'Mã môn học đã tồn tại'},409)
+    if c.execute('SELECT id FROM subjects WHERE created_by=? AND code=?',(u['id'],code)).fetchone():return self.json({'error':'Mã môn học đã tồn tại'},409)
     row=c.execute('INSERT INTO subjects(code,name,description,created_by) VALUES(?,?,?,?)',(code,name,description,u['id'])).lastrowid
     c.commit(); subject=c.execute('SELECT id,code,name,description FROM subjects WHERE id=?',(row,)).fetchone()
    return self.json(dict(subject),201)
@@ -1236,7 +1294,7 @@ class H(BaseHTTPRequestHandler):
     except (TypeError,ValueError): return self.json({'error':'Môn học không hợp lệ'},400)
     if status not in ('draft','published'): return self.json({'error':'Trạng thái course không hợp lệ'},400)
     with db() as c:
-     subject=c.execute('SELECT id FROM subjects WHERE id=?',(subject_id,)).fetchone()
+     subject=c.execute('SELECT id FROM subjects WHERE id=? AND created_by=?',(subject_id,u['id'])).fetchone()
      if not subject:return self.json({'error':'Môn học không tồn tại'},400)
      cur=c.execute('INSERT INTO courses(subject_id,created_by,title,description,status) VALUES(?,?,?,?,?)',(subject_id,u['id'],title.strip(),description.strip(),status)); course_id=cur.lastrowid; c.commit()
      row=c.execute('''SELECT c.*, s.code subject_code,s.name subject_name,u.full_name AS creator FROM courses c JOIN subjects s ON s.id=c.subject_id JOIN users u ON u.id=c.created_by WHERE c.id=?''',(course_id,)).fetchone()
@@ -1538,7 +1596,7 @@ class H(BaseHTTPRequestHandler):
     return self.json({'error':'Môn học không hợp lệ'},400)
    c=db()
    try:
-    subject=c.execute('SELECT id FROM subjects WHERE id=?',(subject_id,)).fetchone()
+    subject=c.execute('SELECT id FROM subjects WHERE id=? AND created_by=?',(subject_id,u['id'])).fetchone()
    except Exception:
     c.close(); return self.json({'error':'Không thể kiểm tra môn học'},500)
    if not subject:

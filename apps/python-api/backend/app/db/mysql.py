@@ -124,6 +124,7 @@ class MySQLDatabase:
         # MySQL cannot index LONGTEXT or use CURRENT_TIMESTAMP defaults on it.
         indexed_varchars = {
             "email": "VARCHAR(320)", "code": "VARCHAR(32)", "name": "VARCHAR(100)",
+            "phone": "VARCHAR(32)", "reset_token_hash": "VARCHAR(64)",
             "storage_filename": "VARCHAR(255)", "token_hash": "VARCHAR(64)",
             "original_filename": "VARCHAR(255)", "file_type": "VARCHAR(32)",
             "mime_type": "VARCHAR(127)", "role": "VARCHAR(20)", "status": "VARCHAR(20)",
@@ -190,6 +191,25 @@ class MySQLDatabase:
                 except Exception as exc:
                     # CREATE INDEX is not portable across MySQL versions when
                     # IF NOT EXISTS is used; duplicate indexes are harmless.
+                    if "1061" not in str(exc) and "duplicate key name" not in str(exc).lower():
+                        raise
+            try:
+                connection.execute("CREATE INDEX ix_users_phone ON users(phone)")
+            except Exception as exc:
+                if "1061" not in str(exc) and "duplicate key name" not in str(exc).lower():
+                    raise
+            try:
+                connection.execute("ALTER TABLE subjects DROP INDEX code")
+            except Exception as exc:
+                if "1091" not in str(exc) and "check that column/key exists" not in str(exc).lower():
+                    raise
+            for statement in (
+                "CREATE UNIQUE INDEX ux_subjects_owner_code ON subjects(created_by, code)",
+                "CREATE INDEX ix_subjects_owner_name ON subjects(created_by, name)",
+            ):
+                try:
+                    connection.execute(statement)
+                except Exception as exc:
                     if "1061" not in str(exc) and "duplicate key name" not in str(exc).lower():
                         raise
             connection.commit()

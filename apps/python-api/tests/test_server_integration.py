@@ -68,6 +68,13 @@ class ServerIntegrationTest(unittest.TestCase):
         status,headers,result=self.request('/api/auth/login','POST',{'email':email,'password':password})
         self.assertEqual(status,200,result)
         return headers['Set-Cookie'].split(';',1)[0]
+    def create_subject(self,cookie,prefix='IT'):
+        code=f'{prefix}{time.time_ns() % 1000000000}'
+        status,_,subject=self.request('/api/subjects','POST',{
+            'code':code,'name':f'{prefix} subject'
+        },{'Cookie':cookie})
+        self.assertEqual(status,201,subject)
+        return subject
     def test_real_http_assets_and_api(self):
         status,ctype,body=self.get('/api/subjects')
         self.assertEqual(status,200); self.assertEqual(ctype,'application/json'); self.assertIn(b'ATTT',body)
@@ -105,7 +112,7 @@ class ServerIntegrationTest(unittest.TestCase):
     def test_register_logout_and_session_persistence(self):
         import json
         email=f'integration_student_{time.time_ns()}@example.com'
-        payload=json.dumps({'name':'Integration Student','email':email,'password':'StrongPass123!'}).encode()
+        payload=json.dumps({'name':'Integration Student','email':email,'password':'StrongPassword123!'}).encode()
         req=urllib.request.Request(f'http://127.0.0.1:{self.port}/api/register', data=payload, headers={'Content-Type':'application/json'}, method='POST')
         with urllib.request.urlopen(req, timeout=2) as r:
             body=json.loads(r.read()); cookie=r.headers.get('Set-Cookie')
@@ -137,9 +144,15 @@ class ServerIntegrationTest(unittest.TestCase):
         status,_,student_subjects=self.request('/api/subjects?scope=mine',headers={'Cookie':student})
         self.assertEqual(status,200,student_subjects)
         self.assertIn(created['id'],[subject['id'] for subject in student_subjects])
+        self.assertTrue(all(subject['created_by'] is not None for subject in student_subjects))
+        status,_,teacher_created=self.request('/api/subjects','POST',{
+            'name':'Teacher library subject','code':code,'description':'Teacher only'
+        },{'Cookie':teacher})
+        self.assertEqual(status,201,teacher_created)
         status,_,teacher_subjects=self.request('/api/subjects?scope=mine',headers={'Cookie':teacher})
         self.assertEqual(status,200,teacher_subjects)
         self.assertNotIn(created['id'],[subject['id'] for subject in teacher_subjects])
+        self.assertIn(teacher_created['id'],[subject['id'] for subject in teacher_subjects])
         status,_,unauthorized=self.request('/api/subjects?scope=mine')
         self.assertEqual(status,401,unauthorized)
 
@@ -155,7 +168,7 @@ class ServerIntegrationTest(unittest.TestCase):
     def test_real_time_study_session_and_document_progress(self):
         email=f'progress_clock_{time.time_ns()}@example.com'
         status,headers,body=self.request('/api/auth/register','POST',{
-            'name':'Progress Clock','email':email,'password':'StrongPass123!'
+            'name':'Progress Clock','email':email,'password':'StrongPassword123!'
         })
         self.assertEqual(status,201,body)
         cookie=headers['Set-Cookie'].split(';',1)[0]
@@ -210,7 +223,7 @@ class ServerIntegrationTest(unittest.TestCase):
     def test_progress_analytics_uses_quiz_completion_and_correct_answers(self):
         email=f'progress_analytics_{time.time_ns()}@example.com'
         status,headers,body=self.request('/api/auth/register','POST',{
-            'name':'Progress Analytics','email':email,'password':'StrongPass123!'
+            'name':'Progress Analytics','email':email,'password':'StrongPassword123!'
         })
         self.assertEqual(status,201,body)
         cookie=headers['Set-Cookie'].split(';',1)[0]
@@ -241,15 +254,16 @@ class ServerIntegrationTest(unittest.TestCase):
 
     def test_course_creation_and_progress_round_trip(self):
         student_cookie=self.login_cookie('student@studyhub.local','Student123!')
-        subjects=json.loads(self.get('/api/subjects')[2]); subject_id=subjects[0]['id']
+        student_subject=self.create_subject(student_cookie,'STU')
         forbidden_status,_,forbidden=self.request('/api/courses','POST',{
-            'title':'Student must not create courses','description':'forbidden','subject_id':subject_id
+            'title':'Student must not create courses','description':'forbidden','subject_id':student_subject['id']
         },{'Cookie':student_cookie})
         self.assertEqual(forbidden_status,403,forbidden)
         payload=json.dumps({'email':'teacher@studyhub.local','password':'Teacher123!'}).encode()
         req=urllib.request.Request(f'http://127.0.0.1:{self.port}/api/login', data=payload, headers={'Content-Type':'application/json'}, method='POST')
         with urllib.request.urlopen(req, timeout=2) as r:
             cookie=r.headers['Set-Cookie'].split(';',1)[0]
+        subject_id=self.create_subject(cookie,'TCH')['id']
         payload=json.dumps({'title':'Integration Course','description':'Course created over HTTP','subject_id':subject_id}).encode()
         req=urllib.request.Request(f'http://127.0.0.1:{self.port}/api/courses', data=payload, headers={'Content-Type':'application/json','Cookie':cookie}, method='POST')
         with urllib.request.urlopen(req, timeout=2) as r:
@@ -271,7 +285,7 @@ class ServerIntegrationTest(unittest.TestCase):
         req=urllib.request.Request(f'http://127.0.0.1:{self.port}/api/login', data=payload, headers={'Content-Type':'application/json'}, method='POST')
         with urllib.request.urlopen(req, timeout=2) as r:
             cookie=r.headers['Set-Cookie'].split(';',1)[0]
-        subject_id=json.loads(self.get('/api/subjects')[2])[0]['id']
+        subject_id=self.create_subject(cookie,'UPL')['id']
         boundary='----StudyHubUploadTest'
         fields=[
             (f'--{boundary}\r\nContent-Disposition: form-data; name="title"\r\n\r\nStudent upload\r\n').encode(),
@@ -457,11 +471,11 @@ class ServerIntegrationTest(unittest.TestCase):
     def test_quiz_hides_solutions_until_submit_and_is_user_scoped(self):
         student=self.login_cookie('student@studyhub.local','Student123!')
         teacher=self.login_cookie('teacher@studyhub.local','Teacher123!')
-        subjects=json.loads(self.get('/api/subjects')[2])
+        subject_id=self.create_subject(student,'QIZ')['id']
         boundary='----QuizSourceUpload'
         upload=(
             f'--{boundary}\r\nContent-Disposition: form-data; name="title"\r\n\r\nQuiz test source\r\n'
-            f'--{boundary}\r\nContent-Disposition: form-data; name="subject_id"\r\n\r\n{subjects[0]["id"]}\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="subject_id"\r\n\r\n{subject_id}\r\n'
             f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="quiz-source.txt"\r\nContent-Type: text/plain\r\n\r\n'
             'Database indexes improve query performance. Foreign keys keep related records consistent.\r\n'
             f'--{boundary}--\r\n'
@@ -518,8 +532,7 @@ class ServerIntegrationTest(unittest.TestCase):
 
     def test_upload_limit_below_at_and_above_with_json_and_cleanup(self):
         cookie=self.login_cookie('student@studyhub.local','Student123!')
-        subjects=json.loads(self.get('/api/subjects')[2])
-        subject_id=subjects[0]['id']
+        subject_id=self.create_subject(cookie,'LIM')['id']
         limit=20*1024*1024
         created_paths=[]
         for size in (limit-1,limit,limit+1):

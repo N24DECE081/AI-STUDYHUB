@@ -34,6 +34,12 @@ def validate_password(password: str) -> Optional[str]:
         return "Mật khẩu phải có ít nhất 8 ký tự"
     if len(password) > 128:
         return "Mật khẩu không được vượt quá 128 ký tự"
+    if not re.search(r"[A-Z]", password):
+        return "Mật khẩu cần có ít nhất 1 chữ in hoa"
+    if not re.search(r"\d", password):
+        return "Mật khẩu cần có ít nhất 1 chữ số"
+    if not re.search(r"[^A-Za-z0-9]", password):
+        return "Mật khẩu cần có ít nhất 1 ký tự đặc biệt"
     return None
 
 

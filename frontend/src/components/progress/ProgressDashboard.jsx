@@ -10,6 +10,7 @@ import {
 } from "@heroicons/react/24/outline";
 import "./progress-dashboard.css";
 import { EMPTY_PROGRESS_ANALYTICS } from "./progressDefaults";
+import { rememberedCount } from "../flashcard/flashcardTheme";
 
 const RANGE_OPTIONS = [
   { id: "day", label: "7 ngày" },
@@ -65,13 +66,18 @@ function ProgressChart({ points, range }) {
   );
 }
 
-export default function ProgressDashboard({ user, analytics, progress, studyTime, streak, onLogin }) {
+export default function ProgressDashboard({ user, analytics, progress, studyTime, streak, quizDecks = [], onLogin }) {
   const [range, setRange] = useState("day");
   const data = analytics || EMPTY_PROGRESS_ANALYTICS;
   const summary = data.summary || EMPTY_PROGRESS_ANALYTICS.summary;
   const today = data.today || EMPTY_PROGRESS_ANALYTICS.today;
   const points = data.ranges?.[range] || [];
   const journey = Math.min(100, Math.max(0, summary.learning_percent || 0));
+  const learnedCards = quizDecks.reduce((total, deck) => total + rememberedCount(deck), 0);
+  const localDay = (date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+  const todayKey = localDay(new Date());
+  const cardsToday = quizDecks.reduce((total, deck) => total + (deck.cards || []).filter((card) => card.remembered && card.rememberedAt && localDay(new Date(card.rememberedAt)) === todayKey).length, 0);
+  const xp = (summary.xp || 0) + learnedCards * 5;
   const topDocuments = useMemo(
     () => [...progress].sort((left, right) => right.percent - left.percent).slice(0, 4),
     [progress],
@@ -85,18 +91,18 @@ export default function ProgressDashboard({ user, analytics, progress, studyTime
           <h1 id="progress-command-title">{user ? `${user.name}, tiếp tục chuỗi chiến thắng.` : "Biến mỗi quiz thành một bước tiến."}</h1>
           <p>Tiến độ được tính cân bằng từ tỷ lệ hoàn thành câu hỏi và tỷ lệ trả lời đúng — không dùng số liệu mô phỏng.</p>
         </div>
-        <div className="progress-level" aria-label={`${summary.xp || 0} điểm kinh nghiệm`}>
-          <span>LEVEL {Math.floor((summary.xp || 0) / 250) + 1}</span>
-          <strong>{(summary.xp || 0).toLocaleString("vi-VN")} XP</strong>
-          <i><b style={{ width: `${((summary.xp || 0) % 250) / 2.5}%` }} /></i>
-          <small>{250 - ((summary.xp || 0) % 250)} XP tới cấp tiếp theo</small>
+        <div className="progress-level" aria-label={`${xp} điểm kinh nghiệm`}>
+          <span>LEVEL {Math.floor(xp / 250) + 1}</span>
+          <strong>{xp.toLocaleString("vi-VN")} XP</strong>
+          <i><b style={{ width: `${(xp % 250) / 2.5}%` }} /></i>
+          <small>{250 - (xp % 250)} XP tới cấp tiếp theo</small>
         </div>
       </header>
 
       <div className="progress-metrics">
         <MetricCard icon={FireIcon} label="Chuỗi học" value={`${user ? streak.current_streak : 0} ngày`} note="Duy trì nhịp mỗi ngày" tone="flame" />
-        <MetricCard icon={BoltIcon} label="Điểm kinh nghiệm" value={`${summary.xp || 0} XP`} note={`${summary.attempts || 0} lượt quiz đã nộp`} tone="xp" />
-        <MetricCard icon={CheckCircleIcon} label="Đã trả lời" value={summary.questions_answered || 0} note={`${summary.completion_percent || 0}% hoàn thành`} tone="answer" />
+        <MetricCard icon={BoltIcon} label="Điểm kinh nghiệm" value={`${xp} XP`} note="Quiz và thẻ đã nhớ" tone="xp" />
+        <MetricCard icon={CheckCircleIcon} label="Thẻ đã nhớ" value={learnedCards} note={`${quizDecks.length} bộ thẻ`} tone="answer" />
         <MetricCard icon={TrophyIcon} label="Độ chính xác" value={`${summary.accuracy_percent || 0}%`} note={`${summary.correct_answers || 0} câu trả lời đúng`} tone="accuracy" />
       </div>
 
@@ -117,9 +123,9 @@ export default function ProgressDashboard({ user, analytics, progress, studyTime
           <span className="progress-section-label">NHIỆM VỤ HÔM NAY</span>
           <h2 id="progress-today-title">Giữ lửa học tập</h2>
           <ul>
-            <li><CheckCircleIcon aria-hidden="true" /><span><strong>{today.questions_answered || 0}</strong> câu đã trả lời</span></li>
-            <li><TrophyIcon aria-hidden="true" /><span><strong>{today.correct_answers || 0}</strong> câu chính xác</span></li>
-            <li><ClockIcon aria-hidden="true" /><span><strong>{Math.floor((studyTime.total_seconds || 0) / 60)}</strong> phút tập trung</span></li>
+            <li><CheckCircleIcon aria-hidden="true" /><span><strong>{cardsToday}</strong> thẻ đã nhớ</span></li>
+            <li><TrophyIcon aria-hidden="true" /><span><strong>{today.questions_answered || 0}</strong> câu Quiz đã trả lời</span></li>
+            <li><ClockIcon aria-hidden="true" /><span><strong>{Math.floor((studyTime.current_session_seconds || 0) / 60)}</strong> phút phiên hiện tại</span></li>
           </ul>
           {!user && <button type="button" className="progress-login" onClick={onLogin}>Đăng nhập để bắt đầu <ArrowRightIcon aria-hidden="true" /></button>}
         </aside>

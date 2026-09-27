@@ -1,11 +1,11 @@
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import re
 import os
 from unittest.mock import patch
 
 from app.db.mysql import MySQLCursor, MySQLDatabase, SCHEMA_PATH
-from server import H, subscription_effective_at
+from server import H, local_stamp, subscription_effective_at
 
 
 class MySQLSchemaCompatibilityTests(unittest.TestCase):
@@ -57,6 +57,9 @@ class MySQLSchemaCompatibilityTests(unittest.TestCase):
 
 
 class SubscriptionDateTests(unittest.TestCase):
+    def test_user_facing_clock_uses_gmt7(self):
+        self.assertEqual(datetime.fromisoformat(local_stamp()).utcoffset(), timedelta(hours=7))
+
     def test_effective_date_uses_calendar_month_and_clamps_month_end(self):
         start = datetime(2024, 1, 31, 23, 45, 0, tzinfo=timezone.utc)
         self.assertEqual(subscription_effective_at("month", start), "2024-02-29 23:45:00")

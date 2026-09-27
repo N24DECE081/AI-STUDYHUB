@@ -93,7 +93,7 @@ class AITutorJourneyTests(unittest.TestCase):
     def register(cls):
         payload = json.dumps({'name': 'AI Tutor Tester',
                               'email': f'ai_tutor_{time.time_ns()}@example.com',
-                              'password': 'StrongPass123!'}).encode()
+                              'password': 'StrongPassword123!'}).encode()
         status, headers, body = cls.raw('/api/register', 'POST', payload, {'Content-Type': 'application/json'})
         assert status == 201, body
         return headers.get('Set-Cookie').split(';', 1)[0]
@@ -171,7 +171,7 @@ class AITutorJourneyTests(unittest.TestCase):
         self.assertIn('client-conversation-1', mine)
         payload = json.dumps({'name': 'Nova Stranger',
                               'email': f'nova_stranger_{time.time_ns()}@example.com',
-                              'password': 'StrongPass123!'}).encode()
+                              'password': 'StrongPassword123!'}).encode()
         status, headers, body = self.raw('/api/register', 'POST', payload, {'Content-Type': 'application/json'})
         self.assertEqual(status, 201, body)
         cookie = headers.get('Set-Cookie').split(';', 1)[0]

@@ -43,16 +43,20 @@ export const login = (email, password) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
-export const register = (name, email, password) =>
+export const register = ({ firstName, lastName, email, password }) =>
   request("/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, email, password }),
+    body: JSON.stringify({ first_name: firstName, last_name: lastName, email, password }),
   });
 export const logout = () => request("/auth/logout", { method: "POST" });
 export const getCurrentUser = () => request("/me");
 export const getOAuthStatus = () => request("/auth/oauth/status");
 export const getOAuthLoginUrl = (provider) => `${apiBase}/auth/oauth/${encodeURIComponent(provider)}`;
+export const completeProfile = ({ firstName, lastName }) => postJson("/auth/profile", { first_name: firstName, last_name: lastName });
+export const requestPasswordOtp = (identifier) => postJson("/auth/password/otp", { identifier });
+export const verifyPasswordOtp = ({ identifier, code }) => postJson("/auth/password/verify", { identifier, code });
+export const resetPassword = ({ resetToken, password }) => postJson("/auth/password/reset", { reset_token: resetToken, password });
 export const getSubjects = () => request("/subjects?scope=mine");
 export const createSubject = ({ name, code, description }) =>
   request("/subjects", {
