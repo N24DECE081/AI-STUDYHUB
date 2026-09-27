@@ -165,3 +165,8 @@ export const submitTutorExercise = (exerciseId, { answer, answerType = "text" })
   });
 export const getTutorSubmissions = () => request("/ai-tutor/submissions");
 
+// --- Chatbot tư vấn thông tin StudyHub (widget nhỏ ở trang chủ, khách không cần đăng nhập) ---
+export const getWebAssistantStarters = () => request("/web-assistant/starters");
+export const askWebAssistant = ({ message, history = [] }) =>
+  postJson("/web-assistant/chat", { message, history });
+
