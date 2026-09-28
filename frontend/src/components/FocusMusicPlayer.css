@@ -1,7 +1,10 @@
-.focus-player { position: fixed; z-index: 80; width: min(350px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--border-color); border-radius: 18px; background: var(--bg-main); color: var(--text-dark); box-shadow: var(--shadow-card); padding: 12px; font: 13px/1.5 var(--font-family); }
+.focus-player { position: fixed; z-index: 80; width: min(350px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--border-color); border-radius: 18px; background: var(--bg-main); color: var(--text-dark); box-shadow: var(--shadow-card); padding: 12px; font: 13px/1.5 var(--font-family); transition: opacity .2s ease, transform .2s ease; }
 .focus-player.is-video { width: min(470px, calc(100vw - 16px)); }
 .focus-player.is-dragging { box-shadow: var(--shadow-hover); user-select: none; }
+.focus-player.is-hidden { opacity: 0; pointer-events: none; visibility: hidden; transform: translateY(-9999px) !important; }
 .focus-player button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 40px; min-height: 40px; padding: 8px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-alt); color: var(--text-dark); }
+.focus-player button.is-muted { border-color: #ef4444; color: #ef4444; background: color-mix(in srgb, #ef4444 14%, var(--bg-alt)); }
+.focus-player button.is-muted:hover { border-color: #dc2626; color: #dc2626; }
 .focus-player button:hover:not(:disabled) { background: var(--secondary-mint); color: var(--button-ink); }
 .focus-player button:disabled { opacity: .5; }
 .focus-player svg { width: 18px; height: 18px; }

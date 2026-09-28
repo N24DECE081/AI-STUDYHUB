@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Search, ListMusic, Minimize2, Maximize2, GripHorizontal, Tv, Headphones, Plus, Trash2, RotateCcw, Upload } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Search, ListMusic, Minimize2, Maximize2, GripHorizontal, Tv, Headphones, Plus, Trash2, RotateCcw, Upload, X } from 'lucide-react';
 import { loadYouTubeAPI, searchTracks } from './focusMusicSearch.js';
 import { emptyPlayer, playerReducer, clampPosition } from './focusPlayerState.js';
 import { formatTime } from './focusMusic.js';
@@ -10,10 +10,19 @@ function saved(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
 }
 
-export default function FocusMusicPlayer({ initialTrack, initialVolume = 62, initialMuted = false }) {
+export default function FocusMusicPlayer({
+  initialTrack,
+  initialVolume = 62,
+  initialMuted = false,
+  isOpen = true,
+  onClose,
+  isMuted: controlledMuted,
+  onToggleMute,
+}) {
   const [state, dispatch] = useReducer(playerReducer, { ...emptyPlayer, track: initialTrack, status: initialTrack ? 'loading' : 'idle' });
   const [volume, setVolume] = useState(() => Math.max(0, Math.min(100, Number(saved('studyhub-player-volume', initialVolume)))));
-  const [muted, setMuted] = useState(initialMuted);
+  const [internalMuted, setInternalMuted] = useState(initialMuted);
+  const muted = typeof controlledMuted === 'boolean' ? controlledMuted : internalMuted;
   const [mode, setMode] = useState(() => saved('studyhub-player-mode', 'audio') === 'video' ? 'video' : 'audio');
   const [collapsed, setCollapsed] = useState(false);
   const [panel, setPanel] = useState('search');
@@ -53,6 +62,21 @@ export default function FocusMusicPlayer({ initialTrack, initialVolume = 62, ini
     try { localStorage.setItem('studyhub-player-mode', JSON.stringify(mode)); } catch { /* Storage is optional. */ }
   }, [mode]);
   useEffect(() => () => { request.current?.abort(); uploads.current.forEach(URL.revokeObjectURL); }, []);
+
+  useEffect(() => {
+    if (initialTrack && initialTrack.id !== state.track?.id) {
+      dispatch({ type: 'select', track: initialTrack });
+    }
+  }, [initialTrack, state.track?.id]);
+
+  const toggleMute = () => {
+    const nextMuted = !muted;
+    if (typeof controlledMuted !== 'boolean') {
+      setInternalMuted(nextMuted);
+    }
+    if (!nextMuted && !volume) setVolume(lastVolume.current || 62);
+    onToggleMute?.(nextMuted);
+  };
 
   useEffect(() => {
     if (!state.track) return;
@@ -176,11 +200,13 @@ export default function FocusMusicPlayer({ initialTrack, initialVolume = 62, ini
   };
   const VolumeIcon = muted || volume === 0 ? VolumeX : Volume2;
 
-  return createPortal(<section ref={shell} className={`focus-player ${dragging ? 'is-dragging' : ''} ${mode === 'video' ? 'is-video' : ''}`} style={{ left: position.x, top: position.y }} aria-label="Trình phát nhạc tập trung">
+  return createPortal(<section ref={shell} className={`focus-player ${dragging ? 'is-dragging' : ''} ${mode === 'video' ? 'is-video' : ''} ${!isOpen ? 'is-hidden' : ''}`} style={{ left: position.x, top: position.y }} aria-label="Trình phát nhạc tập trung" aria-hidden={!isOpen}>
     <header className="focus-player__header" onPointerDown={dragStart} onPointerMove={dragMove} onPointerUp={dragEnd} onPointerCancel={dragEnd} onLostPointerCapture={() => { drag.current = null; setDragging(false); }}>
       <span><GripHorizontal aria-hidden="true" /> Nhạc tập trung</span>
-      <button onClick={resetPosition} aria-label="Đặt lại vị trí" title="Đặt lại vị trí"><RotateCcw /></button>
-      <button onClick={() => setCollapsed(!collapsed)} aria-label={collapsed ? 'Mở rộng player' : 'Thu nhỏ player'} aria-expanded={!collapsed}>{collapsed ? <Maximize2 /> : <Minimize2 />}</button>
+      <button type="button" onClick={toggleMute} aria-label={muted ? 'Bật nhạc' : 'Tắt nhạc'} title={muted ? 'Bật nhạc' : 'Tắt nhạc'} className={muted ? 'is-muted' : ''}><VolumeIcon /></button>
+      <button type="button" onClick={resetPosition} aria-label="Đặt lại vị trí" title="Đặt lại vị trí"><RotateCcw /></button>
+      <button type="button" onClick={() => setCollapsed(!collapsed)} aria-label={collapsed ? 'Mở rộng player' : 'Thu nhỏ player'} aria-expanded={!collapsed}>{collapsed ? <Maximize2 /> : <Minimize2 />}</button>
+      {onClose && <button type="button" onClick={onClose} aria-label="Đóng pop-up nhạc" title="Đóng pop-up (nhạc vẫn tiếp tục phát)"><X /></button>}
     </header>
     <div className="focus-player__track"><strong>{state.track?.title || 'Góc nhạc của bạn'}</strong><small>{state.track?.artist || 'Tìm một bài hát hoặc tải nhạc từ thiết bị.'}</small></div>
     {/* Keep a single media instance mounted when collapsing or changing display mode. */}
@@ -193,8 +219,8 @@ export default function FocusMusicPlayer({ initialTrack, initialVolume = 62, ini
     </>}
     {state.status === 'ended' && <p role="status">Đã phát xong. Nhấn Phát lại để nghe tiếp.</p>}
     {!collapsed && <>
-      {!spotify && <div className="focus-player__volume"><button onClick={() => { if (muted || !volume) { setVolume(volume || lastVolume.current); setMuted(false); } else setMuted(true); }} aria-label={muted || !volume ? 'Bật âm thanh' : 'Tắt âm thanh'}><VolumeIcon /></button><input type="range" min="0" max="100" value={muted ? 0 : volume} aria-label="Âm lượng nhạc" aria-valuetext={`${muted ? 0 : volume}%`} onChange={(e) => { setVolume(Number(e.target.value)); setMuted(false); }} /><span>{muted ? 0 : volume}%</span></div>}
-      <div className="focus-player__toolbar"><button disabled={!youtube} onClick={() => setMode(mode === 'audio' ? 'video' : 'audio')} aria-pressed={mode === 'video'}>{mode === 'audio' ? <Headphones /> : <Tv />}{youtube ? mode === 'audio' ? 'Video gọn' : 'Video lớn' : 'Âm thanh'}</button><button onClick={() => setPanel(panel === 'search' ? '' : 'search')} aria-expanded={panel === 'search'}><Search />Tìm</button><button onClick={() => setPanel(panel === 'queue' ? '' : 'queue')} aria-expanded={panel === 'queue'}><ListMusic />{state.queue.length}</button></div>
+      {!spotify && <div className="focus-player__volume"><button type="button" onClick={toggleMute} aria-label={muted || !volume ? 'Bật âm thanh' : 'Tắt âm thanh'} title={muted ? 'Bật nhạc' : 'Tắt nhạc'}><VolumeIcon /></button><input type="range" min="0" max="100" value={muted ? 0 : volume} aria-label="Âm lượng nhạc" aria-valuetext={`${muted ? 0 : volume}%`} onChange={(e) => { setVolume(Number(e.target.value)); if (typeof controlledMuted !== 'boolean') setInternalMuted(false); onToggleMute?.(false); }} /><span>{muted ? 0 : volume}%</span></div>}
+      <div className="focus-player__toolbar"><button disabled={!youtube} onClick={() => setMode(mode === 'audio' ? 'video' : 'audio')} aria-pressed={mode === 'video'}>{mode === 'audio' ? <Headphones /> : <Tv />}{youtube ? mode === 'audio' ? 'Video gọn' : 'Video lớn' : 'Âm thanh'}</button><button type="button" onClick={toggleMute} className={muted ? 'is-muted' : ''} title={muted ? 'Bật nhạc' : 'Tắt nhạc'}><VolumeIcon /> {muted ? 'Bật nhạc' : 'Tắt nhạc'}</button><button onClick={() => setPanel(panel === 'search' ? '' : 'search')} aria-expanded={panel === 'search'}><Search />Tìm</button><button onClick={() => setPanel(panel === 'queue' ? '' : 'queue')} aria-expanded={panel === 'queue'}><ListMusic />{state.queue.length}</button></div>
       {youtube && <small className="focus-player__note">YouTube cần giữ video hiển thị. Tệp nhạc hỗ trợ chỉ âm thanh.</small>}
       {panel === 'search' && <div className="focus-player__panel"><form onSubmit={search}><input value={query} maxLength={200} onChange={(e) => setQuery(e.target.value)} placeholder="Tên bài, nghệ sĩ hoặc link YouTube" aria-label="Tìm nhạc YouTube" /><button disabled={!query.trim() || searching} aria-label="Tìm kiếm nhạc"><Search /></button></form><button onClick={() => fileInput.current.click()}><Upload />Tải tệp nhạc</button><input ref={fileInput} hidden type="file" accept="audio/*" multiple onChange={upload} />{searching && <p role="status">Đang tìm trên YouTube…</p>}{results?.length === 0 && <p>Không tìm thấy bài hát.</p>}<div className="focus-player__list">{results?.map((track) => <div key={track.id}><span><strong>{track.title}</strong><small>{track.artist}</small></span><button onClick={() => select(track)} aria-label={`Phát ${track.title}`}><Play /></button><button onClick={() => add(track)} aria-label={`Thêm ${track.title} vào hàng đợi`}><Plus /></button></div>)}</div></div>}
       {panel === 'queue' && <div className="focus-player__panel"><div className="focus-player__queue-heading"><strong>Hàng đợi · {state.queue.length}</strong><button disabled={!state.queue.length} onClick={() => dispatch({ type: 'clear' })}>Xóa hết</button></div>{!state.track && state.queue.length > 0 && <button onClick={next}><Play />Phát hàng đợi</button>}<div className="focus-player__list">{state.queue.map((track, index) => <div key={`${track.id}-${index}`}><span><strong>{track.title}</strong><small>{track.artist}</small></span><button aria-label={`Xóa ${track.title}`} onClick={() => dispatch({ type: 'remove', index })}><Trash2 /></button></div>)}</div>{!state.queue.length && <p>Chưa có bài tiếp theo.</p>}</div>}
