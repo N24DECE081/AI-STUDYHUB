@@ -22,7 +22,14 @@ jobs:
       run:
         working-directory: apps/python-api
     env:
+      STUDYHUB_ENV: "test"
       STUDYHUB_NO_DOTENV: "1"
+      STUDYHUB_DB_MODE: "sqlite"
+      STUDYHUB_AI_PROVIDER: "local"
+      STUDYHUB_API_RATE_LIMIT_PER_MINUTE: "120"
+      STUDYHUB_API_BURST: "30"
+      STUDYHUB_AUTH_RATE_LIMIT_PER_MINUTE: "10"
+      STUDYHUB_AUTH_BURST: "5"
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -37,8 +44,17 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
+      - name: Show safe test configuration
+        run: |
+          echo "Environment: ${STUDYHUB_ENV}"
+          echo "Database: ${STUDYHUB_DB_MODE} (configured)"
+          echo "Rate limit: enabled (api=${STUDYHUB_API_RATE_LIMIT_PER_MINUTE}/minute, burst=${STUDYHUB_API_BURST})"
+          echo "AI provider mode: ${STUDYHUB_AI_PROVIDER}"
+
       - name: Run backend tests
-        run: python -m unittest discover -s tests -p "test_*.py" -v
+        run: |
+          python -m unittest discover -s tests -p "test_*.py" -v
+          PYTHONPATH=.:backend python -m unittest discover -s backend/tests -p "test_*.py" -v
 
   frontend-checks:
     name: Frontend lint and build

@@ -11,7 +11,7 @@ from email.parser import BytesParser
 from email.policy import default
 from email.message import EmailMessage
 
-from backend.app.db.runtime import get_runtime_database
+from backend.app.db.runtime import get_runtime_database, mysql_requested
 from backend.app.db.seed import seed as seed_database
 from backend.app.timezone import VIETNAM_TZ, vietnam_now
 from backend.app.security import authenticate, create_session, hash_password, register as register_user, current_user, public_user, revoke_session, SESSION_COOKIE, complete_profile, start_password_reset, verify_password_reset, reset_password
@@ -1678,6 +1678,12 @@ def main():
     port=int(os.environ.get('PORT') or os.environ.get('STUDYHUB_PORT','5000'))
     host=os.environ.get('STUDYHUB_HOST') or ('0.0.0.0' if os.environ.get('PORT') else '127.0.0.1')
     status=tutor_config.engine_status()
+    environment=os.environ.get('STUDYHUB_ENV','development')
+    database_mode='mysql' if mysql_requested() else 'sqlite'
+    print(f'Environment: {environment}')
+    print(f'Database: {database_mode} (configured)')
+    print(f'Rate limit: enabled (api={API_RATE_LIMIT}/minute, burst={API_BURST}; auth={AUTH_RATE_LIMIT}/minute, burst={AUTH_BURST})')
+    print(f'AI provider mode: {status["engine"]}')
     detail=f" ({status['provider']} / {status['model']})" if status['engine']=='provider' else ' - provider key not configured'
     print(f'AI Tutor engine: {status["engine"]}{detail}')
     print(f'StudyHub running at http://{host}:{port}')
