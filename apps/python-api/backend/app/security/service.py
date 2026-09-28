@@ -11,6 +11,11 @@ from ..timezone import vietnam_now
 
 def update_streak(conn, user_id: int) -> dict:
     today = vietnam_now().date()
+    insert_day = ("INSERT IGNORE" if getattr(conn, "dialect", "sqlite") == "mysql" else "INSERT OR IGNORE") + " INTO user_activity_days(user_id,activity_date) VALUES(?,?)"
+    conn.execute(
+        insert_day,
+        (user_id, today.isoformat()),
+    )
     row = conn.execute("SELECT * FROM user_streaks WHERE user_id=?", (user_id,)).fetchone()
     if not row:
         conn.execute(
@@ -18,11 +23,16 @@ def update_streak(conn, user_id: int) -> dict:
             (user_id, 1, today.isoformat()),
         )
     else:
-        last_date = date.fromisoformat(row["last_activity_date"]) if row["last_activity_date"] else None
+        last_date = date.fromisoformat(str(row["last_activity_date"])) if row["last_activity_date"] else None
+        if last_date:
+            conn.execute(
+                insert_day,
+                (user_id, last_date.isoformat()),
+            )
         gap = (today - last_date).days if last_date else 1
         streak = row["current_streak"]
         recoveries = row["recovery_count"]
-        if gap == 0:
+        if gap <= 0:
             pass
         elif gap == 1:
             streak += 1
@@ -30,14 +40,20 @@ def update_streak(conn, user_id: int) -> dict:
             streak += 1
             recoveries += 1
         else:
-            streak = 0
-            recoveries += 1
+            streak = 1
         conn.execute(
             "UPDATE user_streaks SET current_streak=?,last_activity_date=?,recovery_count=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
             (streak, today.isoformat(), recoveries, user_id),
         )
     current = conn.execute("SELECT * FROM user_streaks WHERE user_id=?", (user_id,)).fetchone()
-    return dict(current)
+    result = dict(current)
+    result["today"] = today.isoformat()
+    result["timezone"] = "GMT+7"
+    result["activity_dates"] = [str(day["activity_date"]) for day in conn.execute(
+        "SELECT activity_date FROM user_activity_days WHERE user_id=? AND activity_date>=? ORDER BY activity_date",
+        (user_id, (today - timedelta(days=6)).isoformat()),
+    ).fetchall()]
+    return result
 
 
 def public_user(row) -> dict:

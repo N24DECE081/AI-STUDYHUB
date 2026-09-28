@@ -33,7 +33,6 @@ import {
   verifyPasswordOtp,
 } from "./api";
 import AITutorPage from "./components/ai-tutor/AITutorPage";
-import WebAssistant from "./components/web-assistant/WebAssistant";
 import QuizWorkspace from "./components/QuizWorkspace";
 import LearningRoadmapPage from "./components/LearningRoadmapPage";
 import PaymentCheckout from "./components/PaymentCheckout";
@@ -185,11 +184,10 @@ function ThemeToggle({ theme, onToggle }) {
 }
 
 function StreakCard({ user, streak, onLogin }) {
-  const today = vietnamDateKey();
+  const today = streak.today || vietnamDateKey();
   const todayActive = Boolean(user && streak.last_activity_date === today);
   const days = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (6 - index));
+    const date = new Date(new Date(`${today}T12:00:00+07:00`).getTime() - (6 - index) * 86400000);
     return {
       date: vietnamDateKey(date),
       label: date.toLocaleDateString("vi-VN", { weekday: "short", timeZone: VIETNAM_TIME_ZONE }).replace(".", ""),
@@ -218,7 +216,7 @@ function StreakCard({ user, streak, onLogin }) {
       </p>
       <div className="streak-week" aria-label="Hoạt động học tập 7 ngày gần nhất">
         {days.map((day) => {
-          const active = user && day.date === streak.last_activity_date;
+          const active = user && (streak.activity_dates || [streak.last_activity_date]).includes(day.date);
           return (
             <div className={`streak-day ${active ? "is-active" : ""}`} key={day.date}>
               <span>{day.label}</span>
@@ -230,7 +228,8 @@ function StreakCard({ user, streak, onLogin }) {
       </div>
       <footer className="streak-card-footer">
         <span><CalendarDaysIcon aria-hidden="true" /> Hôm nay: {todayActive ? "đã ghi nhận" : "chưa ghi nhận"}</span>
-        <span>Khôi phục: {user ? `${Math.min(streak.recovery_count, 3)}/3` : "—"}</span>
+        <span>Khôi phục tự động: {user ? `${Math.min(streak.recovery_count, 3)}/3 lượt đã dùng` : "—"}</span>
+        <span>GMT+7</span>
         {!user && <button className="text-link" onClick={onLogin}>Đăng nhập <ArrowRightIcon aria-hidden="true" className="link-icon" /></button>}
       </footer>
     </section>
@@ -589,6 +588,26 @@ export default function App() {
     }
   };
   const userKey = user ? String(user.id || user.email || "") : "";
+  useEffect(() => {
+    if (!authReady || !userKey) return undefined;
+    let active = true;
+    const refreshStreak = async () => {
+      if (document.visibilityState === "hidden") return;
+      try {
+        const result = await getStreak();
+        if (active) setStreak(result);
+      } catch { /* Retry on the next tick or when returning to the tab. */ }
+    };
+    const timer = window.setInterval(refreshStreak, 15000);
+    window.addEventListener("focus", refreshStreak);
+    document.addEventListener("visibilitychange", refreshStreak);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshStreak);
+      document.removeEventListener("visibilitychange", refreshStreak);
+    };
+  }, [authReady, userKey]);
   useEffect(() => {
     if (!authReady) return undefined;
     let active = true;
@@ -1095,9 +1114,10 @@ export default function App() {
       </>
     );
   }
-  if (view === "focusSpace") return <FocusSpacePage user={user} onBack={() => go("home")} />;
   return (
-    <div className={`studyhub-app ${theme}`}>
+    <>
+    <FocusSpacePage key={userKey || 'guest'} active={view === 'focusSpace'} user={user} onBack={() => go("home")} theme={theme} onToggleTheme={() => setTheme(theme === 'light' ? 'dark' : 'light')} />
+    <div className={`studyhub-app ${theme}`} hidden={view === 'focusSpace'}>
       <header className="topbar">
         <button className="brand-wrap" onClick={() => go("home")} aria-label="StudyHub - Trang chủ">
           <span className="brand-mark"><BookOpenIcon aria-hidden="true" /></span>
@@ -1323,7 +1343,7 @@ export default function App() {
               <span className="eyebrow">■ THÓI QUEN BỀN VỮNG</span>
               <h2>🔥 Giữ nhịp học mỗi ngày ✨</h2>
               <p>Sự đều đặn nhỏ bé tích lũy thành thành tựu lớn. Lên kế hoạch, giữ streak để có thói quen học tập bền bỉ và khỏe mạnh.</p>
-              <div className="streak-calendar-card">
+              {user ? <StreakCard user={user} streak={streak} onLogin={() => openAuth("login")} /> : <div className="streak-calendar-card">
                 <div className="streak-cal-header">
                   <span>{user ? new Date().toLocaleDateString('vi-VN', { month: 'long', year: 'numeric', timeZone: VIETNAM_TIME_ZONE }) : 'Một tuần học · Minh họa'}</span>
                   <span>✔ {user ? `Chuỗi hiện tại: ${streak.current_streak} ngày` : 'Mỗi ngày một bước tiến'}</span>
@@ -1338,7 +1358,7 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-              </div>
+              </div>}
             </section>
             {!user && <LandingExtras plans={PLANS} onStart={() => openAuth("register")} onExplore={go} />}
           </>
@@ -1627,7 +1647,7 @@ export default function App() {
         )}
       </main>
       {view === "home" && <FocusSpaceLogo onOpen={() => go("focusSpace")} />}
-      <BeeChatWidget visible={view === "home"} key={String(user?.id || user?.email || "guest")} user={user} onRequireLogin={() => requireLogin()} onNavigate={go} />
+      <BeeChatWidget visible={view === "home"} key={String(user?.id || user?.email || "guest")} user={user} onNavigate={go} />
       {modal === "document-preview" && documentPreview && (
         <Modal
           title={documentPreview.document.title || "Nội dung tài liệu"}
@@ -1890,9 +1910,8 @@ export default function App() {
         </div>
       </footer>
       {toast && <div className="toast">{toast}</div>}
-      {/* Chatbot tư vấn thông tin StudyHub: khung nhỏ nổi ở góc phải, chỉ hiện ở trang chủ. */}
-      {view === "home" && <WebAssistant />}
       {activeStudyDeck && <StudyDeckSession deck={activeStudyDeck} onUpdateDeck={updateStudyDeck} onClose={() => setActiveStudyDeck(null)} />}
     </div>
+    </>
   );
 }

@@ -4,6 +4,7 @@ import { buildSubjectHashMap, findSubject } from "./utils/subjectAlgorithms";
 // falls back to another port. Set an explicit API URL only for separate hosting.
 const configuredApiBase = String(import.meta.env.VITE_API_BASE_URL || "").trim();
 const apiBase = (configuredApiBase || "/api").replace(/\/+$/, "");
+export const searchFocusMusic = (query, signal) => request(`/music/search?q=${encodeURIComponent(query)}`, { signal });
 const publicAuthPaths = new Set([
   "/auth/login",
   "/auth/register",

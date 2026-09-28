@@ -2559,7 +2559,6 @@ a {
 /* Solid pastel controls keep dark ink in both themes. */
 .streak-pill,
 .streak-pill :is(strong,span,svg),
-.streak-symbol,
 .roadmap-pill,
 .step-tag,
 .study-again,
@@ -2574,8 +2573,31 @@ a {
 .delete-confirm-button,
 .payment-qr-panel > p { color: var(--button-ink); }
 
+.streak-symbol { background: var(--primary-pink); color: var(--button-ink); }
+
 .library-hero h1,
 .roadmap-hero h1 { line-height: 1.2; }
 .streak-pill,
 .roadmap-pill,
 .step-tag { min-height: 30px; line-height: 1.4; white-space: normal; }
+
+.eyebrow {
+  color: var(--button-ink) !important;
+  font-variant: normal !important;
+  max-width: 100%;
+  height: auto;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.stat-box.red,
+.pricing-card-plus .full,
+.document-delete-button,
+.delete-document-confirm p,
+.destiny-node.type-boss > span,
+.oauth-facebook { color: var(--button-ink); }
+
+@media (max-width: 620px) {
+  .hero-copy .eyebrow { font-size: 10px; padding: 8px 10px; }
+}

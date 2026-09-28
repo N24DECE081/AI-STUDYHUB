@@ -9,7 +9,7 @@ from app.db.seed import seed
 
 EXPECTED_TABLES = {
     "schema_migrations", "auth_sessions", "oauth_accounts", "password_reset_otps", "study_sessions", "external_knowledge_cache",
-    "users", "subjects", "documents", "courses", "course_documents", "user_streaks",
+    "users", "subjects", "documents", "courses", "course_documents", "user_streaks", "user_activity_days",
     "course_enrollments", "plans", "subscriptions", "chat_sessions",
     "chat_messages", "document_chunks", "user_progress", "subscription_changes",
     # AI Tutor: hội thoại, đánh giá năng lực, lộ trình, bài tập và bài nộp

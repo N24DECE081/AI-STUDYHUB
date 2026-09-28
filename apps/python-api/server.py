@@ -16,6 +16,7 @@ from backend.app.db.seed import seed as seed_database
 from backend.app.timezone import VIETNAM_TZ, vietnam_now
 from backend.app.security import authenticate, create_session, hash_password, register as register_user, current_user, public_user, revoke_session, SESSION_COOKIE, complete_profile, start_password_reset, verify_password_reset, reset_password
 from backend.app.security.service import update_streak
+from backend.app.music import search_music
 from backend.app.security.session import token_hash
 from backend.app.security.oauth import OAuthError, authorization_url as oauth_authorization_url, exchange_profile as oauth_exchange_profile, provider_status as oauth_provider_status
 from backend.app.ai_tutor import (
@@ -808,6 +809,10 @@ class H(BaseHTTPRequestHandler):
   p=urlparse(self.path); path=p.path
   if path=='/api/health':
    return self.json({'status':'ok','service':'studyhub-api'})
+  if path=='/api/music/search':
+   try: return self.json(search_music(parse_qs(p.query).get('q',[''])[0]))
+   except ValueError as exc: return self.json({'error':str(exc)},400)
+   except Exception: return self.json({'error':'Không tải được kết quả YouTube. Hãy thử lại hoặc dùng tệp nhạc.'},502)
   if path=='/api/web-assistant/starters':
    # Lời chào + 4 gợi ý nhanh cho chatbot tư vấn ở trang chủ (khách không cần đăng nhập).
    return self.json(web_assistant.starters())
@@ -902,8 +907,9 @@ class H(BaseHTTPRequestHandler):
     u=require_user(self)
     if not u:return
     with db() as c:
-     row=c.execute('SELECT current_streak,last_activity_date,recovery_count FROM user_streaks WHERE user_id=?',(u['id'],)).fetchone()
-    return self.json(dict(row) if row else {'current_streak':0,'last_activity_date':None,'recovery_count':0})
+     streak=update_streak(c,u['id'])
+     c.commit()
+    return self.json(streak)
   if path=='/api/quizzes/history':
    u=require_user(self)
    if not u:return

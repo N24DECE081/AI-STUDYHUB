@@ -1,0 +1,202 @@
+.flip-clock {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  position: relative;
+  padding-bottom: 24px; /* Space for labels */
+  --flip-bg: var(--focus-bg, #1a1b26);
+  --flip-fg: var(--focus-fg, #c0caf5);
+  --flip-divider: rgba(0, 0, 0, 0.4);
+  --flip-shadow: rgba(0, 0, 0, 0.3);
+  --flip-label: var(--focus-fg-muted, #565f89);
+}
+
+.flip-clock__group {
+  display: flex;
+  gap: 4px;
+  position: relative;
+}
+
+.flip-clock__label {
+  position: absolute;
+  bottom: -24px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--flip-label);
+  letter-spacing: 1px;
+}
+
+.flip-clock__sep {
+  font-size: clamp(40px, 6.5vw, 68px);
+  font-weight: 800;
+  color: var(--flip-fg);
+  line-height: clamp(64px, 10vw, 100px);
+  margin: 0 4px;
+}
+
+.flip-clock__phase {
+  position: absolute;
+  bottom: -48px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--flip-label);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.flip-digit {
+  position: relative;
+  width: clamp(44px, 7vw, 72px);
+  height: clamp(64px, 10vw, 100px);
+  perspective: 300px;
+  box-shadow: 0 4px 12px var(--flip-shadow);
+  border-radius: 8px;
+  background-color: var(--flip-bg);
+}
+
+.flip-digit__top,
+.flip-digit__bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 50%;
+  overflow: hidden;
+  background: var(--flip-bg);
+}
+
+.flip-digit__top {
+  top: 0;
+  border-radius: 8px 8px 0 0;
+  border-bottom: 1px solid var(--flip-divider);
+}
+
+.flip-digit__top span {
+  position: absolute;
+  width: 100%;
+  height: 200%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(40px, 6.5vw, 68px);
+  font-weight: 800;
+  color: var(--flip-fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.flip-digit__bottom {
+  bottom: 0;
+  border-radius: 0 0 8px 8px;
+}
+
+.flip-digit__bottom span {
+  position: absolute;
+  width: 100%;
+  height: 200%;
+  top: -100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(40px, 6.5vw, 68px);
+  font-weight: 800;
+  color: var(--flip-fg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Flap front (old number, top half, flips down) */
+.flip-digit__flap-front,
+.flip-digit__flap-back {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 50%;
+  overflow: hidden;
+  backface-visibility: hidden;
+  transform-origin: bottom;
+  background: var(--flip-bg);
+}
+
+.flip-digit__flap-front {
+  top: 0;
+  border-radius: 8px 8px 0 0;
+  z-index: 2;
+  transform: rotateX(0);
+}
+
+.flip-digit__flap-front span {
+  position: absolute;
+  width: 100%;
+  height: 200%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(40px, 6.5vw, 68px);
+  font-weight: 800;
+  color: var(--flip-fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.flip-digit__flap-back {
+  top: 0;
+  border-radius: 8px 8px 0 0;
+  z-index: 1;
+  transform: rotateX(180deg);
+  transform-origin: bottom;
+}
+
+.flip-digit__flap-back span {
+  position: absolute;
+  width: 100%;
+  height: 200%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(40px, 6.5vw, 68px);
+  font-weight: 800;
+  color: var(--flip-fg);
+  font-variant-numeric: tabular-nums;
+  transform: rotateX(180deg);
+}
+
+/* When flipping */
+.flip-digit.is-flipping .flip-digit__flap-front {
+  animation: flip-down 0.6s ease-in-out forwards;
+}
+.flip-digit.is-flipping .flip-digit__flap-back {
+  animation: flip-up 0.6s ease-in-out forwards;
+}
+
+@keyframes flip-down {
+  0% { transform: rotateX(0); }
+  100% { transform: rotateX(-180deg); }
+}
+
+@keyframes flip-up {
+  0% { transform: rotateX(180deg); }
+  100% { transform: rotateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flip-digit.is-flipping .flip-digit__flap-front,
+  .flip-digit.is-flipping .flip-digit__flap-back {
+    animation: none;
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}

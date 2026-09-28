@@ -104,6 +104,12 @@ CREATE TABLE IF NOT EXISTS external_knowledge_cache (
 CREATE INDEX IF NOT EXISTS ix_external_cache_updated
     ON external_knowledge_cache(updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS user_activity_days (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    activity_date DATE NOT NULL,
+    PRIMARY KEY (user_id, activity_date)
+);
+
 CREATE TABLE IF NOT EXISTS user_streaks (
     user_id             INTEGER PRIMARY KEY,
     current_streak      INTEGER NOT NULL DEFAULT 0 CHECK(current_streak >= 0),
