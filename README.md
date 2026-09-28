@@ -34,16 +34,14 @@ cp .env.example .env
 
 Terminal 1:
 
-cd apps\python-api
-python -m pip install -r requirements.txt
+\apps\python-api
 python run.py
 
 Terminal 2:
 
 ```cmd
-cd frontend
-npm install
-npm run dev
+\frontend
+npm.cmd run dev
 
 Mở URL Vite hiển thị, thường là `http://localhost:5173`. Vite tự proxy `/api` sang Python API ở `http://127.0.0.1:5000`.
 
