@@ -46,6 +46,35 @@
   font-weight: 700;
   white-space: nowrap;
 }
+.focus-space-presence button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--focus-border-light);
+  border-radius: 50%;
+  background: var(--focus-card);
+  color: var(--focus-fg);
+  cursor: pointer;
+  transition: transform .2s, border-color .2s, color .2s, background .2s;
+}
+.focus-space-presence button:hover {
+  transform: scale(1.08);
+}
+.focus-space-presence button.is-active {
+  border-color: var(--focus-accent);
+  color: var(--focus-accent);
+}
+.focus-space-presence button.is-muted {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+.focus-space-presence button svg {
+  width: 16px;
+  height: 16px;
+}
 .focus-space-presence i { width: 9px; height: 9px; border-radius: 50%; background: var(--focus-presence-dot); }
 .focus-space-presence span { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--focus-icon); color: white; }
 
@@ -164,16 +193,75 @@
 .focus-session__back { padding: 0 24px; }
 .focus-session__back svg { width: 19px; }
 .focus-session__tools { display: flex; gap: 12px; }
-.focus-session__tools button { width: 58px; padding: 0; }
+.focus-session__tools button { width: 58px; padding: 0; transition: transform .2s, border-color .2s, color .2s, background .2s; }
 .focus-session__tools button svg { width: 22px; height: 22px; }
-.focus-session__tools button[aria-pressed="true"] { border-color: var(--focus-accent); color: var(--focus-accent); }
+.focus-session__tools button:hover { transform: translateY(-2px); }
+.focus-session__tools button[aria-pressed="true"],
+.focus-session__tools button.is-active { border-color: var(--focus-accent); color: var(--focus-accent); background: color-mix(in srgb, var(--focus-accent) 18%, var(--focus-session-btn-bg)); }
+.focus-session__tools button.is-muted { border-color: #ef4444; color: #ef4444; background: color-mix(in srgb, #ef4444 14%, var(--focus-session-btn-bg)); }
+.focus-session__tools .focus-session__tool-btn--unlock {
+  width: auto;
+  padding: 0 18px;
+  gap: 8px;
+  border-color: #f59e0b;
+  color: #fbbf24;
+  background: color-mix(in srgb, #f59e0b 20%, var(--focus-session-btn-bg));
+}
+.focus-session__tools .focus-session__tool-btn--unlock:hover {
+  background: #f59e0b;
+  color: #0f172a;
+}
+.focus-space-music-options .focus-space-popup-trigger { border-color: var(--focus-border); }
+.focus-space-music-options .focus-space-popup-trigger.is-selected { border-color: var(--focus-accent); box-shadow: 0 3px 0 var(--focus-accent); }
 .focus-session__center { position: relative; z-index: 1; display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 24px; width: 100%; padding: 20px 18px 30px; }
+.focus-session__lock-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 22px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #0f172a 85%, transparent);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fef3c7;
+  font-size: 13px;
+  font-weight: 700;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+.focus-session__lock-banner svg {
+  width: 16px;
+  height: 16px;
+  color: #fbbf24;
+}
+.focus-session__lock-banner-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(251, 191, 36, 0.6);
+  background: rgba(245, 158, 11, 0.22);
+  color: #fef3c7;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all .2s;
+}
+.focus-session__lock-banner-btn:hover {
+  background: #f59e0b;
+  color: #0f172a;
+}
 .focus-session__clock { display: grid; justify-items: center; gap: 3px; text-align: center; text-shadow: 0 2px 12px var(--focus-session-clock-shadow), 0 0 26px var(--focus-session-clock-shadow); }
 .focus-session__clock strong { font-size: 88px; line-height: 1.1; font-weight: 800; font-variant-numeric: tabular-nums; }
 .focus-session__clock > div { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .focus-session__clock span { color: var(--focus-session-clock-label); font-size: 12px; font-weight: 900; letter-spacing: 2px; }
 .focus-session__clock button { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--focus-session-clock-btn-border); border-radius: 50%; background: var(--focus-session-clock-btn-bg); color: var(--focus-session-fg); }
 .focus-session__clock button:hover { background: color-mix(in srgb, var(--focus-session-clock-btn-bg) 90%, transparent); }
+.focus-session__clock button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
 .focus-session__clock button svg { width: 15px; height: 15px; }
 .focus-session__stream { width: min(380px, 100%); min-width: 200px; text-align: right; }
 .focus-session__stream iframe { display: block; width: 100%; height: max(200px, 21vw); max-height: 214px; border: 1px solid var(--focus-session-stream-border); border-radius: 8px; background: var(--focus-session-stream-bg); }
@@ -214,6 +302,7 @@
   .focus-session__back { height: 45px; padding: 0 10px; font-size: 12px; }
   .focus-session__tools { gap: 5px; }
   .focus-session__tools button { width: 42px; height: 45px; }
+  .focus-session__tools .focus-session__tool-btn--unlock { width: auto; padding: 0 12px; font-size: 13px; }
   .focus-session__tools button svg { width: 18px; }
   .focus-session__center { gap: 16px; padding: 15px 16px 24px; }
   .focus-session__clock strong { font-size: 64px; }
