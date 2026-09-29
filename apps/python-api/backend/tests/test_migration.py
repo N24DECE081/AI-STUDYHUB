@@ -7,6 +7,41 @@ from app.db.database import Database
 
 
 class LegacyMigrationTests(unittest.TestCase):
+    def test_existing_subjects_table_gets_created_by_before_schema_indexes(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "existing.db"
+            conn = sqlite3.connect(path)
+            conn.executescript("""
+                CREATE TABLE users(
+                    id INTEGER PRIMARY KEY,
+                    full_name TEXT NOT NULL,
+                    email TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'student',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE subjects(
+                    id INTEGER PRIMARY KEY,
+                    code TEXT UNIQUE NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    icon TEXT,
+                    color TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO users VALUES(1,'Existing User','existing@example.com','hash','teacher','2026-01-01 00:00:00');
+                INSERT INTO subjects(id,code,name,description) VALUES(1,'DB','Database','Existing subject');
+            """)
+            conn.commit()
+            conn.close()
+
+            db = Database(path)
+            db.initialize()
+
+            subject = db.fetch_one("SELECT code,name,created_by FROM subjects WHERE id=1")
+            self.assertEqual(tuple(subject), ('DB', 'Database', None))
+
     def test_original_mvp_database_is_migrated_without_data_loss(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "legacy.db"
