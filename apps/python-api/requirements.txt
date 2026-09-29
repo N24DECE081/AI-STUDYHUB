@@ -3,3 +3,4 @@
 mysql-connector-python>=8.0,<10
 pypdf>=5,<7
 markitdown[pdf]>=0.1.1
+PyYAML>=6,<7
