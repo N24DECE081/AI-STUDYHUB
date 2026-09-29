@@ -8,11 +8,16 @@ variables by hand.
 from __future__ import annotations
 
 import os
+import json
+import yaml
 from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parents[3]
 REPO_ROOT = APP_ROOT.parent.parent
 ENV_FILES = (APP_ROOT / '.env', REPO_ROOT / '.env')
+SETTINGS_ROOT = APP_ROOT / 'data' / 'settings'
+MODEL_CATALOG_PATH = SETTINGS_ROOT / 'model_catalog.json'
+SKILL_ROOT = APP_ROOT / 'skills'
 
 PROVIDER_DEFAULTS = {
     'openai': {'base_url': 'https://api.openai.com/v1', 'model': 'gpt-4o-mini', 'keys': ('OPENAI_API_KEY',)},
@@ -86,7 +91,57 @@ def explicit_settings(environ=None) -> dict:
     api_key = (environ.get('STUDYHUB_AI_API_KEY') or '').strip()
     base_url = (environ.get('STUDYHUB_AI_BASE_URL') or '').strip()
     model = (environ.get('STUDYHUB_AI_MODEL') or '').strip()
-    return {'provider': provider, 'api_key': api_key, 'base_url': base_url, 'model': model}
+    task_model = (environ.get('STUDYHUB_AI_TASK_MODEL') or '').strip()
+    return {'provider': provider, 'api_key': api_key, 'base_url': base_url,
+            'model': model, 'task_model': task_model}
+
+
+def model_catalog(path: Path = MODEL_CATALOG_PATH) -> dict:
+    """Load the versioned model-routing catalog, failing closed on bad input."""
+    try:
+        payload = json.loads(Path(path).read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def yaml_settings(name: str) -> dict:
+    """Load one allow-listed YAML settings document."""
+    if name not in {'knowledge', 'memory', 'agents'}:
+        return {}
+    try:
+        payload = yaml.safe_load((SETTINGS_ROOT / f'{name}.yaml').read_text(encoding='utf-8'))
+    except (OSError, yaml.YAMLError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def catalog_models(path: Path = MODEL_CATALOG_PATH) -> tuple[str, str, str]:
+    """Return provider, reasoning model and task model from the catalog."""
+    catalog = model_catalog(path)
+    active = catalog.get('active_selections') or {}
+    models = catalog.get('models') or {}
+    main = models.get(active.get('llm')) or {}
+    task = models.get(active.get('task_model')) or {}
+    return (str(main.get('provider') or '').strip().lower(),
+            str(main.get('model') or '').strip(),
+            str(task.get('model') or '').strip())
+
+
+def skill_prompt(name: str = 'professional_tutor') -> str:
+    """Load a named Markdown skill while preventing path traversal."""
+    safe = ''.join(char for char in str(name) if char.isalnum() or char in ('-', '_'))
+    if not safe:
+        return ''
+    try:
+        text = (SKILL_ROOT / f'{safe}.md').read_text(encoding='utf-8')
+    except OSError:
+        return ''
+    if text.startswith('---'):
+        parts = text.split('---', 2)
+        if len(parts) == 3:
+            text = parts[2]
+    return text.strip()[:12000]
 
 
 def _first_key(spec: dict, environ) -> str:
@@ -123,12 +178,16 @@ def provider_settings(environ=None) -> dict | None:
         return None
     spec = dict(PROVIDER_DEFAULTS.get(name, {}))
     base_url = explicit['base_url'] or spec.get('base_url') or ''
-    model = explicit['model'] or spec.get('model') or 'gpt-4o-mini'
+    catalog_provider, catalog_model, catalog_task_model = catalog_models()
+    catalog_matches = not catalog_provider or catalog_provider == name
+    model = explicit['model'] or (catalog_model if catalog_matches else '') or spec.get('model') or 'gpt-4o-mini'
+    task_model = explicit['task_model'] or (catalog_task_model if catalog_matches else '') or model
     if not base_url:
         return None
     if not api_key and not spec.get('keyless'):
         return None
-    return {'provider': name, 'api_key': api_key, 'base_url': base_url, 'model': model}
+    return {'provider': name, 'api_key': api_key, 'base_url': base_url,
+            'model': model, 'task_model': task_model}
 
 
 def engine_status(environ=None) -> dict:
@@ -139,5 +198,6 @@ def engine_status(environ=None) -> dict:
                 'label': 'Nova offline (bám theo tài liệu của bạn)',
                 'hint': 'Đặt API key vào apps/python-api/.env rồi chạy lại backend để Nova dùng mô hình AI.'}
     return {'engine': 'provider', 'provider': settings['provider'], 'model': settings['model'],
+            'task_model': settings['task_model'],
             'label': f"Nova AI · {settings['provider']} · {settings['model']}",
             'hint': ''}

@@ -112,3 +112,11 @@ Workflow `.github/workflows/ci-cd.yml` tự động:
 - Có thể chạy thủ công từ tab **Actions** bằng `workflow_dispatch`.
 
 Thiết lập một lần trên GitHub: vào **Settings → Pages → Build and deployment → Source**, chọn **GitHub Actions**. Nếu backend đã được deploy ở một domain riêng, tạo Repository Variable `VITE_API_BASE_URL` trong **Settings → Secrets and variables → Actions → Variables** (ví dụ `https://api.example.com/api`). Không lưu API key vào biến frontend này.
+
+### Public deployment status and production data
+
+- Frontend: GitHub Pages deploys from `main` after CI passes. Enable **Settings → Pages → GitHub Actions**.
+- API: `render.yaml` defines the `ai-studyhub-api` web service. Create it from the Render Blueprint and provide `STUDYHUB_AI_API_KEY` as a secret if Nova should use OpenAI. Production mode skips the documented local demo accounts.
+- Set the GitHub Actions variable `VITE_API_BASE_URL` to the deployed API's `/api` URL if it differs from the Render default.
+- Render's free service filesystem is temporary. Before storing real user accounts, uploaded files, or chat history, configure durable storage: set `STUDYHUB_DB_PATH` and `STUDYHUB_UPLOAD_DIR` to paths on a persistent disk, or configure a supported durable database plus persistent/object storage for uploads. A public URL alone does not make user data durable.
+- OAuth sign-in needs provider credentials and the exact public callback URLs configured in both Render and Google/Facebook. It remains optional; email/password registration works without OAuth.

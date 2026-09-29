@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "active_selections": {
+    "llm": "main-brain",
+    "task_model": "fast-helper",
+    "embedding": "text-embedding-3-large"
+  },
+  "models": {
+    "main-brain": {
+      "provider": "openai",
+      "model": "gpt-4o",
+      "purpose": ["reasoning", "planning", "problem_solving"]
+    },
+    "fast-helper": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "purpose": ["summarization", "session_naming", "classification"]
+    }
+  },
+  "runtime_compatibility": {
+    "currently_consumed_by_python_api": true,
+    "current_runtime_model_variable": "STUDYHUB_AI_MODEL",
+    "note": "The Python API routes chat to llm and structured tasks to task_model."
+  }
+}

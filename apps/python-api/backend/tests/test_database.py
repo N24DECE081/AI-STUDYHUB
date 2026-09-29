@@ -9,6 +9,7 @@ from app.db.seed import seed
 
 EXPECTED_TABLES = {
     "schema_migrations", "auth_sessions", "oauth_accounts", "password_reset_otps", "study_sessions", "external_knowledge_cache",
+    "learner_memories", "learner_profiles",
     "users", "subjects", "documents", "courses", "course_documents", "user_streaks", "user_activity_days",
     "course_enrollments", "plans", "subscriptions", "chat_sessions",
     "chat_messages", "document_chunks", "user_progress", "subscription_changes",

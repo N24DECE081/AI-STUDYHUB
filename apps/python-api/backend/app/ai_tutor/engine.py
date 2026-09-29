@@ -1062,14 +1062,17 @@ class ProviderEngine:
     name = 'provider'
     uses_model = True
 
-    def __init__(self, *, base_url: str, api_key: str, model: str, timeout: int = 45):
+    def __init__(self, *, base_url: str, api_key: str, model: str,
+                 task_model: str | None = None, timeout: int = 45):
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.model = model
+        self.task_model = task_model or model
         self.timeout = timeout
 
-    def _chat(self, messages: list[dict], *, json_mode: bool = False) -> str:
-        body = {'model': self.model, 'messages': messages, 'temperature': 0.2}
+    def _chat(self, messages: list[dict], *, json_mode: bool = False,
+              model: str | None = None) -> str:
+        body = {'model': model or self.model, 'messages': messages, 'temperature': 0.2}
         if json_mode:
             body['response_format'] = {'type': 'json_object'}
         headers = {'Content-Type': 'application/json'}
@@ -1099,11 +1102,20 @@ class ProviderEngine:
         return (choices[0].get('message') or {}).get('content') or ''
 
     def answer(self, *, mode: str, question: str, context: str, history: list | None = None) -> str:
+        skill = config.skill_prompt()
+        agent_settings = ((config.yaml_settings('agents').get('capabilities') or {}).get('chat') or {})
+        effort = str(agent_settings.get('reasoning_effort') or 'medium').lower()
+        if effort not in {'low', 'medium', 'high'}:
+            effort = 'medium'
+        reasoning = (f'Dành mức suy xét {effort} để kiểm tra tính đúng, độ phù hợp với tài liệu và các bước giải. '
+                     'Không trình bày chuỗi suy luận nội bộ; chỉ nêu lời giải thích ngắn gọn, có thể kiểm chứng. ')
         system = ('Bạn là Nova, gia sư AI của StudyHub. Trả lời bằng tiếng Việt, dùng Markdown gọn gàng. '
-                  f'{MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["explain"])} '
-                  'Ưu tiên ngữ cảnh tài liệu được cung cấp; nếu ngữ cảnh không có '
-                  'thông tin cho câu hỏi, nói rõ là tài liệu chưa có phần đó rồi trả lời bằng kiến thức chung '
-                  'và ghi chú rõ đó là kiến thức chung. Không bịa số liệu hay trích dẫn không có trong ngữ cảnh.')
+                  + reasoning
+                  + f'{MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["explain"])} '
+                  + 'Ưu tiên ngữ cảnh tài liệu được cung cấp; nếu ngữ cảnh không có '
+                  + 'thông tin cho câu hỏi, nói rõ là tài liệu chưa có phần đó rồi trả lời bằng kiến thức chung '
+                  + 'và ghi chú rõ đó là kiến thức chung. Không bịa số liệu hay trích dẫn không có trong ngữ cảnh.'
+                  + (f'\n\nQuy trình chuyên gia:\n{skill}' if skill else ''))
         messages = [{'role': 'system', 'content': system}]
         for item in (history or [])[-6:]:
             role = 'assistant' if item.get('role') == 'assistant' else 'user'
@@ -1136,7 +1148,7 @@ class ProviderEngine:
         text = self._chat([
             {'role': 'system', 'content': instructions.get(task, 'Trả về JSON hợp lệ.')},
             {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)[:8000]},
-        ], json_mode=True)
+        ], json_mode=True, model=self.task_model)
         try:
             result = json.loads(text)
         except json.JSONDecodeError as error:
@@ -1227,5 +1239,6 @@ def get_engine():
             base_url=settings['base_url'],
             api_key=settings['api_key'],
             model=settings['model'],
+            task_model=settings.get('task_model'),
         )
     )

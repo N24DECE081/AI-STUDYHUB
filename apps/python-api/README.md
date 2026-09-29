@@ -87,6 +87,9 @@ Lần khởi động đầu tiên sẽ tự tạo các bảng, index và dữ li
 
 ## Demo account
 
+These accounts are for local development only. In `STUDYHUB_ENV=production`,
+the backend seeds the public catalog and plans without creating these accounts.
+
 ```text
 Student
 student@studyhub.local
