@@ -35,6 +35,8 @@ from backend.app.ai_tutor import (
 from backend.app.ai_tutor import config as tutor_config
 from backend.app.ai_tutor import engine as tutor_engine
 from backend.app.ai_tutor import repository as tutor_store
+from backend.app.ai_tutor import memory as tutor_memory
+from backend.app.ai_tutor import agent as tutor_agent
 from backend.app.ai_tutor.roadmap import normalize_level, normalize_pace
 from backend.app import web_assistant
 
@@ -51,6 +53,9 @@ def load_local_env(path):
    if not line or line.startswith('#'): continue
    key,separator,value=line.partition('=')
    if not separator or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',key.strip()): continue
+   # Accept the misspelled key used by the initial OAuth template, while the
+   # corrected name remains the only one consumed by the OAuth provider.
+   if key.strip()=='SSTUDYHUB_FACEBOOK_CLIENT_ID': key='STUDYHUB_FACEBOOK_CLIENT_ID'
    value=value.strip()
    if len(value)>=2 and value[0]==value[-1] and value[0] in ('"',"'"):
     value=value[1:-1]
@@ -109,7 +114,10 @@ def init_db():
  with database.connect() as connection:
   has_users=connection.execute('SELECT 1 FROM users LIMIT 1').fetchone()
  if not has_users:
-  seed_database(database)
+  production=os.environ.get('STUDYHUB_ENV','development').strip().lower() in ('production','prod')
+  # Public deployments must never receive the well-known demo passwords.
+  # Keep the public catalog/plans seed while omitting demo accounts.
+  seed_database(database,include_demo_users=not production)
 
 def cookie_value(handler, name):
     raw = handler.headers.get('Cookie', '')
@@ -289,42 +297,74 @@ def document_text(row, connection=None):
     fp=path if os.path.isabs(path) else os.path.join(ROOT,path)
     return extract_document_text(fp)
 
-def split_document_text(text, chunk_size=1024 * 1024):
+def split_document_text(text, chunk_size=12000):
     """Normalize extracted text into database-sized chunks without losing content."""
     clean=str(text or '').replace('\x00','').replace('\r\n','\n').replace('\r','\n').strip()
     if not clean:
         return []
-    chunks=[]
-    while clean:
-        if len(clean)<=chunk_size:
-            chunks.append(clean)
-            break
-        split_at=max(clean.rfind('\n',0,chunk_size),clean.rfind(' ',0,chunk_size))
-        if split_at<chunk_size//2:
-            split_at=chunk_size
-        chunks.append(clean[:split_at].strip())
-        clean=clean[split_at:].strip()
+    page_parts=re.split(r'(?=\[PAGE:\d+\])',clean)
+    if len(page_parts)>1:
+        chunks=[]
+        for page in page_parts:
+            page=page.strip()
+            if not page:
+                continue
+            marker_match=re.match(r'(\[PAGE:\d+\])\s*',page)
+            marker=marker_match.group(1) if marker_match else ''
+            body=page[marker_match.end():] if marker_match else page
+            for piece in split_document_text(body,chunk_size):
+                chunks.append(f'{marker}\n{piece}'.strip())
+        return chunks
+    chunks=[]; start=0; length=len(clean)
+    while start<length:
+        end=min(length,start+chunk_size)
+        if end<length:
+            split_at=max(clean.rfind('\n',start,end),clean.rfind(' ',start,end))
+            if split_at<start+chunk_size//2:
+                split_at=end
+        else:
+            split_at=length
+        piece=clean[start:split_at].strip()
+        if piece:
+            chunks.append(piece)
+        start=split_at
+        while start<length and clean[start].isspace():
+            start+=1
     return [chunk for chunk in chunks if chunk]
 
 def store_document_chunks(connection, document_id, text):
     chunks=split_document_text(text)
     for index, content in enumerate(chunks):
+        page_match=re.search(r'\[PAGE:(\d+)\]',content)
+        page_number=int(page_match.group(1)) if page_match else None
+        content=re.sub(r'\[PAGE:\d+\]\s*','',content).strip()
+        if not content:
+            continue
         connection.execute(
-            'INSERT INTO document_chunks(document_id,chunk_index,content,token_count) VALUES(?,?,?,?)',
-            (document_id,index,content,len(re.findall(r'\w+',content))),
+            'INSERT INTO document_chunks(document_id,chunk_index,content,page_number,token_count) VALUES(?,?,?,?,?)',
+            (document_id,index,content,page_number,len(re.findall(r'\w+',content))),
         )
     return len(chunks)
 
 class DocumentTextError(ValueError):
     pass
 
-def tutor_context(user_id, file_ids, question, limit=3, fallback=False):
+def tutor_context(user_id, file_ids, question, limit=None, fallback=False):
     """Retrieve the document context server-side; the client never sends answers.
 
     `fallback` is for requests about the library itself (summarize / quiz with no
     topic words): there the newest documents are the intended material, not an
     unrelated guess, so no fake context is created.
     """
+    knowledge=tutor_config.yaml_settings('knowledge')
+    kb=((knowledge.get('knowledge_bases') or {}).get('chuyen_gia_ai') or {})
+    retrieval=kb.get('retrieval') or {}
+    if limit is None:
+        limit=max(1,min(10,int(retrieval.get('top_k') or 3)))
+    try:
+        minimum_sources=max(1,min(4,int(retrieval.get('minimum_sources') or 1)))
+    except (TypeError,ValueError):
+        minimum_sources=1
     query_keywords=tutor_engine.keywords(question,10)
     with db() as c:
         ids=[]
@@ -347,27 +387,50 @@ def tutor_context(user_id, file_ids, question, limit=3, fallback=False):
             ).fetchall()
         scored=[]
         for row in rows:
-            text=document_text(row,c)
-            haystack=(row['title']+' '+(row['description'] or '')+' '+text).lower()
-            matched_terms=[token for token in query_keywords if token in haystack]
-            score=sum(min(3,haystack.count(token)) for token in matched_terms)
-            scored.append((score,len(matched_terms),row,text))
+            chunks=c.execute(
+                'SELECT content,page_number,chunk_index FROM document_chunks WHERE document_id=? ORDER BY chunk_index',
+                (row['id'],),
+            ).fetchall()
+            if not chunks:
+                chunks=[{'content':document_text(row,c),'page_number':None,'chunk_index':0}]
+            for chunk in chunks:
+                text=str(chunk['content'] or '')
+                haystack=(row['title']+' '+(row['description'] or '')+' '+text).lower()
+                matched_terms=[token for token in query_keywords if token in haystack]
+                lexical=sum(min(3,haystack.count(token)) for token in matched_terms)
+                # Graph expansion: terms that co-occur in a chunk form lightweight
+                # knowledge-graph edges. Multi-term matches receive an edge bonus.
+                edge_bonus=max(0,len(matched_terms)-1)*2
+                scored.append((lexical+edge_bonus,len(matched_terms),row,text,
+                               chunk['page_number'],chunk['chunk_index']))
     scored.sort(key=lambda item:item[0],reverse=True)
     matched=[item for item in scored if item[0]>0][:limit]
     if matched:
-        picked=matched
+        # Prefer independent documents first when enough relevant sources exist;
+        # if there are fewer, use the available matches without fabricating citations.
+        picked=[]; picked_documents=set()
+        for item in matched:
+            document_id=item[2]['id']
+            if document_id not in picked_documents:
+                picked.append(item); picked_documents.add(document_id)
+                if len(picked_documents)>=minimum_sources:
+                    break
+        picked.extend(item for item in matched if item not in picked)
+        picked=picked[:limit]
     elif fallback or (ids and set(query_keywords).issubset({'tài','liệu','nội','dung','giải','thích'})):
         picked=scored[:limit]
     else:
         picked=[]
     parts=[]; sources=[]
-    for _,_,row,text in picked:
+    for _,_,row,text,page_number,chunk_index in picked:
         source=text or row['description'] or row['title']
         # One titled block per document: paragraphs stay inside it (blank lines
         # separate documents, not paragraphs), so every quote keeps its source.
         body=re.sub(r'\n\s*\n+','\n',source[:1200].strip())
-        parts.append(f"{row['title']}: {body}")
-        sources.append({'id':row['id'],'title':row['title'],'type':'document'})
+        page_label=f", trang {page_number}" if page_number else ''
+        parts.append(f"{row['title']}{page_label}: {body}")
+        sources.append({'id':row['id'],'title':row['title'],'type':'document',
+                        'page':page_number,'chunk':chunk_index})
     return '\n\n'.join(parts), sources, query_keywords
 
 def external_cache_key(question, query_keywords=None):
@@ -686,15 +749,10 @@ def extract_document_text(path):
             return markitdown_text
         try:
             from pypdf import PdfReader
-            pages = []
-            for page in PdfReader(path).pages:
-                text = page.extract_text() or ''
-                if text:
-                    pages.append(text)
-            extracted = '\n\n'.join(pages)
-            normalized = normalize_extracted_text(extracted)
-            if normalized:
-                return normalized
+            return '\n\n'.join(
+                f'[PAGE:{number}]\n{normalize_extracted_text(page.extract_text() or "")}'
+                for number,page in enumerate(PdfReader(path).pages,start=1)
+            )
         except Exception:
             pass
         try:
@@ -1162,6 +1220,13 @@ class H(BaseHTTPRequestHandler):
     row=tutor_store.latest_assessment(c,u['id'])
    plan=start_assessment({})
    return self.json({'questions':plan['questions'],'assessment':tutor_store.to_public_assessment(row)},200)
+  if path=='/api/ai-tutor/memory':
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    result=tutor_memory.profile(c,u['id'])
+    c.commit()
+   return self.json(result,200)
   if path=='/api/ai-tutor/roadmap':
    u=require_user(self)
    if not u:return
@@ -1578,6 +1643,8 @@ class H(BaseHTTPRequestHandler):
     context,sources,query_keywords=tutor_context(u['id'],file_ids,message,fallback=mode in ('summarize','generate_quiz'))
    except LookupError:
     return self.json({'error':'Tài liệu không tồn tại hoặc không thuộc tài khoản này'},404)
+   context,tool_sources,agent_trace=tutor_agent.run(message,context)
+   sources.extend(tool_sources)
    engine=get_engine()
    retrieval_tier='documents' if context else 'miss'
    cached_knowledge=None
@@ -1591,6 +1658,10 @@ class H(BaseHTTPRequestHandler):
     conversation=tutor_store.conversation_for(c,u['id'],conversation_key,mode=mode,title=message[:60])
     conversation_id=int(conversation['id']); conversation_title=str(conversation['title'] or '')
     history=tutor_store.history(c,conversation_id,8)
+    memory_profile=tutor_memory.profile(c,u['id'])
+    profile_summary=str(memory_profile.get('summary') or '')
+    if profile_summary and 'Chưa đủ dữ liệu' not in profile_summary:
+     context=f'{context}\n\nHồ sơ học tập riêng của người dùng hiện tại:\n{profile_summary}'.strip()
    quiz=None; quiz_topic=''
    if mode=='generate_quiz':
     quiz,quiz_topic=chat_quiz(engine,message,context)
@@ -1620,6 +1691,8 @@ class H(BaseHTTPRequestHandler):
    with db() as c:
     tutor_store.add_message(c,conversation_id,'user',message,mode)
     message_id=tutor_store.add_message(c,conversation_id,'assistant',answer,mode,payload=quiz)
+    tutor_memory.observe_question(c,u['id'],message)
+    tutor_memory.consolidate(c,u['id'])
     for source in sources:
      if source.get('type')=='document':
       advance_document_progress(c,u['id'],source.get('id'),60)
@@ -1629,6 +1702,7 @@ class H(BaseHTTPRequestHandler):
    return self.json({'conversation_id':conversation_key,'message_id':str(message_id),'role':'assistant','content':answer,'sources':sources,'mode':mode,
      'quiz':quiz,
      'retrieval':{'tier':retrieval_tier,'keywords':query_keywords},
+     'agent_trace':agent_trace,
      'engine_degraded':degraded,'engine_degraded_reason':health.get('reason','') if degraded else ''},200)
   if path=='/api/ai-tutor/assessment/start':
    u=require_user(self)

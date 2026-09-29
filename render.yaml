@@ -15,5 +15,17 @@ services:
         value: "1"
       - key: STUDYHUB_SECURE_COOKIES
         value: "1"
+      - key: STUDYHUB_ENV
+        value: production
       - key: STUDYHUB_CORS_ORIGINS
         value: https://n24dece081.github.io
+      - key: STUDYHUB_FRONTEND_URL
+        value: https://n24dece081.github.io/AI-STUDYHUB
+      - key: STUDYHUB_AI_PROVIDER
+        value: openai
+      - key: STUDYHUB_AI_MODEL
+        value: gpt-4o
+      - key: STUDYHUB_AI_TASK_MODEL
+        value: gpt-4o-mini
+      - key: STUDYHUB_AI_API_KEY
+        sync: false
