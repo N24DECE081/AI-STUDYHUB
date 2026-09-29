@@ -1,0 +1,26 @@
+schema_version: 1
+defaults:
+  skill: professional_tutor
+
+capabilities:
+  chat:
+    reasoning_effort: high
+    max_tool_calls: 10
+    tools:
+      exec:
+        enabled: true
+        max_retries: 3
+      web_search:
+        enabled: true
+        max_retries: 3
+      rag:
+        enabled: true
+        knowledge_base: chuyen_gia_ai
+
+safety:
+  require_user_confirmation_for_destructive_actions: true
+  restrict_retrieval_to_authorized_documents: true
+
+runtime_compatibility:
+  currently_consumed_by_python_api: true
+  note: The runtime exposes bounded rag, arithmetic exec and explicit-request web search tools with traces.

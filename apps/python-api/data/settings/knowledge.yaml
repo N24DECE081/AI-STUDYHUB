@@ -1,0 +1,19 @@
+schema_version: 1
+knowledge_bases:
+  chuyen_gia_ai:
+    display_name: Chuyen_Gia_AI
+    source_directory: ../knowledge_base
+    parsing_engine: pypdf
+    retrieval_engine: lightweight_graph_enhanced_lexical
+    citation:
+      enabled: true
+      require_page_number: true
+    retrieval:
+      minimum_sources: 2
+      top_k: 8
+    status: active
+
+runtime_compatibility:
+  currently_consumed_by_python_api: true
+  current_runtime: page-aware graph-enhanced local document chunks
+  note: The runtime uses a lightweight graph-RAG implementation with term co-occurrence edges.

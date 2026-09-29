@@ -478,6 +478,28 @@ CREATE TABLE IF NOT EXISTS tutor_submissions (
     CHECK(score <= max_score)
 );
 
+CREATE TABLE IF NOT EXISTS learner_memories (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    memory_key      TEXT NOT NULL,
+    memory_type     TEXT NOT NULL CHECK(memory_type IN ('fact', 'strength', 'weakness', 'preference', 'goal')),
+    content         TEXT NOT NULL,
+    confidence      REAL NOT NULL DEFAULT 0.5 CHECK(confidence BETWEEN 0 AND 1),
+    evidence_count  INTEGER NOT NULL DEFAULT 1 CHECK(evidence_count > 0),
+    last_seen_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, memory_key),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS learner_profiles (
+    user_id         INTEGER PRIMARY KEY,
+    summary         TEXT NOT NULL,
+    payload         TEXT NOT NULL,
+    updated_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS ix_tutor_conversations_user_updated
     ON tutor_conversations(user_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS ix_tutor_conversations_client
@@ -492,6 +514,8 @@ CREATE INDEX IF NOT EXISTS ix_tutor_exercises_roadmap
     ON tutor_exercises(roadmap_id, id);
 CREATE INDEX IF NOT EXISTS ix_tutor_submissions_exercise
     ON tutor_submissions(exercise_id, user_id);
+CREATE INDEX IF NOT EXISTS ix_learner_memories_user_type
+    ON learner_memories(user_id, memory_type, confidence DESC);
 
 INSERT OR IGNORE INTO schema_migrations(version,description)
 VALUES(1,'StudyHub Phase 1 relational database foundation');
@@ -507,3 +531,5 @@ INSERT OR IGNORE INTO schema_migrations(version,description)
 VALUES(8,'User-owned learning-library subjects');
 INSERT OR IGNORE INTO schema_migrations(version,description)
 VALUES(9,'Google and Facebook OAuth account links');
+INSERT OR IGNORE INTO schema_migrations(version,description)
+VALUES(10,'Per-user L2 learning facts and L3 learner profiles');
