@@ -66,6 +66,12 @@ class Database:
         return "users" in tables and "password" in self._columns(conn, "users")
 
     def _create_schema(self, conn: sqlite3.Connection) -> None:
+        subject_columns = self._columns(conn, "subjects")
+        if subject_columns and "created_by" not in subject_columns:
+            conn.execute(
+                "ALTER TABLE subjects ADD COLUMN created_by "
+                "INTEGER REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE"
+            )
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
 
     def _repair_legacy_foreign_keys(self, conn: sqlite3.Connection) -> None:

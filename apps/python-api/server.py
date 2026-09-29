@@ -90,7 +90,7 @@ AUTH_RATE_LIMIT=positive_int_env('STUDYHUB_AUTH_RATE_LIMIT_PER_MINUTE',10)
 AUTH_BURST=positive_int_env('STUDYHUB_AUTH_BURST',5)
 api_rate_limiter=TokenBucketRateLimiter(API_RATE_LIMIT,API_BURST)
 auth_rate_limiter=TokenBucketRateLimiter(AUTH_RATE_LIMIT,AUTH_BURST)
-ALLOWED_UPLOAD_EXTENSIONS={'.pdf','.txt','.md','.csv','.doc','.docx','.ppt','.pptx'}
+ALLOWED_UPLOAD_EXTENSIONS={'.pdf','.txt','.md','.csv','.doc','.docx','.ppt','.pptx','.xlsx'}
 DEFAULT_CORS_ORIGINS={
  'http://localhost:5173','http://127.0.0.1:5173',
  'http://localhost:5174','http://127.0.0.1:5174',
@@ -531,37 +531,182 @@ def public_submission(row):
         'created_at': row.get('created_at'),
     }
 
+def normalize_extracted_text(text):
+    """Normalize extracted document content while preserving reading structure."""
+    if text is None:
+        return ''
+    text = str(text).replace('\x00', '').replace('\r\n', '\n').replace('\r', '\n')
+    lines = [line.rstrip() for line in text.split('\n')]
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if cleaned and cleaned[-1] != '':
+                cleaned.append('')
+            continue
+        if re.fullmatch(r'(?:Page\s+\d+\s*(?:of\s*\d+)?)|(?:-+\s*\d+\s*-+)', stripped, flags=re.I):
+            continue
+        cleaned.append(stripped)
+    normalized = '\n'.join(cleaned)
+    normalized = re.sub(r'\n{3,}', '\n\n', normalized)
+    normalized = re.sub(r'(?<!\n)\n(?=[A-Za-zÀ-ỹ0-9][^\n]*:)', '\n', normalized)
+    normalized = re.sub(r'\n{2,}', '\n\n', normalized).strip()
+    return normalized
+
+
+def _extract_markitdown(path):
+    """Use MarkItDown when available and avoid hard dependency failures."""
+    try:
+        from markitdown import MarkItDown
+    except Exception:
+        return ''
+    try:
+        result = MarkItDown().convert(path)
+    except Exception:
+        return ''
+    for candidate in (
+        getattr(result, 'text_content', None),
+        getattr(result, 'markdown', None),
+        getattr(result, 'content', None),
+        getattr(result, 'text', None),
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            return normalize_extracted_text(candidate)
+    if isinstance(result, str) and result.strip():
+        return normalize_extracted_text(result)
+    return ''
+
+
+def _docx_text_for_markdown(path):
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = sorted(name for name in archive.namelist() if name == 'word/document.xml')
+            if not names:
+                return ''
+            root = ET.fromstring(archive.read(names[0]))
+            ns = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+            paragraphs = []
+            for para in root.findall('.//w:p', ns):
+                style_name = None
+                for style in para.findall('./w:pPr/w:pStyle', ns):
+                    style_name = style.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val')
+                    break
+                texts = []
+                for node in para.iterfind('.//w:t', ns):
+                    value = (node.text or '').replace('\u00a0', ' ')
+                    if value:
+                        texts.append(value)
+                if not texts:
+                    continue
+                text = ' '.join(texts).strip()
+                if not text:
+                    continue
+                if style_name and style_name.lower().startswith('heading'):
+                    paragraphs.append(f"# {text}")
+                elif style_name and style_name.lower().startswith('list'):
+                    paragraphs.append(f"- {text}")
+                else:
+                    paragraphs.append(text)
+            return normalize_extracted_text('\n\n'.join(paragraphs))
+    except (OSError, zipfile.BadZipFile, ET.ParseError):
+        return ''
+
+
+def _pptx_text_for_markdown(path):
+    try:
+        with zipfile.ZipFile(path) as archive:
+            slide_names = sorted(name for name in archive.namelist() if name.startswith('ppt/slides/slide') and name.endswith('.xml'))
+            chunks = []
+            for name in slide_names:
+                root = ET.fromstring(archive.read(name))
+                texts = []
+                for node in root.iter():
+                    if node.tag.rsplit('}', 1)[-1] == 't' and (node.text or '').strip():
+                        texts.append(node.text.strip())
+                if texts:
+                    chunks.append('\n'.join(f'- {text}' if i else text for i, text in enumerate(texts)))
+            return normalize_extracted_text('\n\n'.join(chunks))
+    except (OSError, zipfile.BadZipFile, ET.ParseError):
+        return ''
+
+
+def _xlsx_text_for_markdown(path):
+    try:
+        with zipfile.ZipFile(path) as archive:
+            workbook = archive.read('xl/workbook.xml')
+            root = ET.fromstring(workbook)
+            texts = []
+            for sheet in root.findall('.//{*}sheet'):
+                sheet_name = sheet.get('name')
+                if not sheet_name:
+                    continue
+                texts.append(f'## {sheet_name}')
+                rels = ET.fromstring(archive.read('xl/_rels/workbook.xml.rels'))
+                for rel in rels.findall('{*}Relationship'):
+                    if rel.get('Type', '').endswith('/worksheet'):
+                        target = rel.get('Target')
+                        if target:
+                            sheet_xml = ET.fromstring(archive.read('xl/' + target))
+                            rows = []
+                            for row in sheet_xml.findall('.//{*}sheetData/{*}row'):
+                                cells = []
+                                for cell in row.findall('{*}c'):
+                                    value = cell.get('v')
+                                    if value is not None:
+                                        cells.append(value)
+                                if cells:
+                                    rows.append(' | '.join(cells))
+                            if rows:
+                                texts.append('\n'.join(f'- {row}' for row in rows))
+            return normalize_extracted_text('\n\n'.join(texts))
+    except (OSError, zipfile.BadZipFile, ET.ParseError):
+        return ''
+
+
 def extract_document_text(path):
-    """Read the common study formats without requiring an external AI service."""
-    ext=os.path.splitext(path)[1].lower()
+    """Read the common study formats while preserving document structure and falling back safely."""
+    ext = os.path.splitext(path)[1].lower()
     if not os.path.exists(path):
         return ''
-    if ext in ('.txt','.md','.csv','.log'):
-        return open(path,'r',encoding='utf-8',errors='replace').read()
-    if ext in ('.docx','.pptx'):
-        try:
-            with zipfile.ZipFile(path) as archive:
-                names=[name for name in archive.namelist() if (ext=='.docx' and name=='word/document.xml') or (ext=='.pptx' and name.startswith('ppt/slides/slide') and name.endswith('.xml'))]
-                chunks=[]
-                for name in sorted(names):
-                    root=ET.fromstring(archive.read(name))
-                    chunks.append(' '.join(node.text or '' for node in root.iter() if node.tag.rsplit('}',1)[-1]=='t'))
-                return '\n'.join(chunks)
-        except (OSError, zipfile.BadZipFile, ET.ParseError):
-            return ''
-    if ext=='.pdf':
+    if ext in ('.txt', '.md', '.csv', '.log'):
+        return normalize_extracted_text(open(path, 'r', encoding='utf-8', errors='replace').read())
+    if ext in ('.docx', '.pptx', '.xlsx'):
+        if ext == '.docx':
+            extractors = (_docx_text_for_markdown, _extract_markitdown)
+        else:
+            extractors = (_extract_markitdown, _pptx_text_for_markdown if ext == '.pptx' else _xlsx_text_for_markdown)
+        for extractor in extractors:
+            text = extractor(path)
+            if text:
+                return text
+        return ''
+    if ext == '.pdf':
+        markitdown_text = _extract_markitdown(path)
+        if markitdown_text and len(markitdown_text) >= 80:
+            return markitdown_text
         try:
             from pypdf import PdfReader
-            return '\n'.join(page.extract_text() or '' for page in PdfReader(path).pages)
+            pages = []
+            for page in PdfReader(path).pages:
+                text = page.extract_text() or ''
+                if text:
+                    pages.append(text)
+            extracted = '\n\n'.join(pages)
+            normalized = normalize_extracted_text(extracted)
+            if normalized:
+                return normalized
         except Exception:
-            # Keep the demo useful when the optional PDF parser is unavailable.
-            # Most text-only PDFs expose readable Tj/TJ operators in their streams.
-            try:
-                raw=open(path,'rb').read().decode('latin-1',errors='ignore')
-                chunks=re.findall(r'\(([^()]*)\)\s*Tj',raw,re.S)
-                return '\n'.join(chunk.replace('\\n','\n').replace('\\(', '(').replace('\\)', ')') for chunk in chunks)
-            except OSError:
-                return ''
+            pass
+        try:
+            raw = open(path, 'rb').read().decode('latin-1', errors='ignore')
+            chunks = re.findall(r'\(([^()]*)\)\s*Tj', raw, re.S)
+            extracted = '\n'.join(chunk.replace('\\n', '\n').replace('\\(', '(').replace('\\)', ')') for chunk in chunks)
+            normalized = normalize_extracted_text(extracted)
+            if normalized:
+                return normalized
+        except OSError:
+            pass
+        return markitdown_text or ''
     return ''
 
 def quiz_candidates(text):
@@ -1624,7 +1769,7 @@ class H(BaseHTTPRequestHandler):
    safe=re.sub(r'[^A-Za-z0-9._-]','_',filename); stored=f'{secrets.token_hex(8)}_{safe}'
    target=os.path.join(UP,stored)
    ext=extension.lstrip('.')
-   mime={'.pdf':'application/pdf','.txt':'text/plain','.md':'text/markdown','.csv':'text/csv','.doc':'application/msword','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.ppt':'application/vnd.ms-powerpoint','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation'}.get(extension,'application/octet-stream')
+   mime={'.pdf':'application/pdf','.txt':'text/plain','.md':'text/markdown','.csv':'text/csv','.doc':'application/msword','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.ppt':'application/vnd.ms-powerpoint','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}.get(extension,'application/octet-stream')
    try:
     with open(target,'wb') as fh: fh.write(content)
     extracted_text=extract_document_text(target)

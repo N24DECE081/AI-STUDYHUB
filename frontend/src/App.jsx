@@ -479,7 +479,11 @@ export default function App() {
   const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [uploadPhase, setUploadPhase] = useState("idle");
   const [uploadError, setUploadError] = useState("");
+  const [uploadFile, setUploadFile] = useState(null);
   const [uploadFileName, setUploadFileName] = useState("");
+  const [uploadTitle, setUploadTitle] = useState("");
+  const [uploadDescription, setUploadDescription] = useState("");
+  const [uploadSubject, setUploadSubject] = useState("");
   const [uploadDragActive, setUploadDragActive] = useState(false);
   const documentPreviewRequest = useRef(0);
   const userRef = useRef(user);
@@ -950,13 +954,13 @@ export default function App() {
       setUploadError(message);
       notify(message);
     };
-    const data = new FormData(event.currentTarget);
-    const file = data.get("file");
+    const file = uploadFile;
     if (!file?.name) return fail("Hãy chọn tài liệu trước.");
-    const title = String(data.get("title") || "").trim();
+    const title = uploadTitle.trim();
     const extension = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
     if (!title) return fail("Tiêu đề tài liệu không được để trống.");
-    if (!data.get("subject")) return fail("Hãy chọn hoặc thêm môn học trước.");
+    const subjectCode = uploadSubject || subjectOptions[0]?.code || "";
+    if (!subjectCode) return fail("Hãy chọn hoặc thêm môn học trước.");
     if (file.size === 0) return fail("File không được rỗng.");
     if (file.size > 10 * 1024 * 1024) return fail("File tối đa 10MB.");
     if (![".pdf", ".txt", ".md", ".csv", ".doc", ".docx", ".ppt", ".pptx"].includes(extension)) {
@@ -968,14 +972,22 @@ export default function App() {
       await uploadDocument({
         file,
         title,
-        description: data.get("description"),
-        subjectCode: data.get("subject"),
+        description: uploadDescription,
+        subjectCode,
       });
       setUploadPhase("processing");
       await loadDocumentsAndProgress();
       setUploadPhase("success");
       notify("Đã tải tài liệu vào kho học liệu.");
-      window.setTimeout(() => { setModal(null); setUploadPhase("idle"); setUploadFileName(""); }, 1000);
+      window.setTimeout(() => {
+        setModal(null);
+        setUploadPhase("idle");
+        setUploadFile(null);
+        setUploadFileName("");
+        setUploadTitle("");
+        setUploadDescription("");
+        setUploadSubject("");
+      }, 1000);
     } catch (error) {
       fail(`Upload thất bại: ${error.message || "Vui lòng thử lại."}`);
     } finally {
@@ -994,6 +1006,7 @@ export default function App() {
     const transfer = new DataTransfer();
     transfer.items.add(file);
     uploadInput.current.files = transfer.files;
+    setUploadFile(file);
     setUploadFileName(file.name);
     setUploadPhase("idle");
     setUploadError("");
@@ -1020,12 +1033,13 @@ export default function App() {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     try {
-      await createSubject({
+      const createdSubject = await createSubject({
         name: data.get("name"),
         code: data.get("code"),
         description: data.get("description"),
       });
       await loadSubjects();
+      setUploadSubject(createdSubject.code);
       setUploadPhase("idle");
       setUploadError("");
       setModal("upload");
@@ -1377,7 +1391,11 @@ export default function App() {
                   if (requireLogin()) return;
                   setUploadPhase("idle");
                   setUploadError("");
+                  setUploadFile(null);
                   setUploadFileName("");
+                  setUploadTitle("");
+                  setUploadDescription("");
+                  setUploadSubject("");
                   setModal("upload");
                 }}
               >
@@ -1709,6 +1727,8 @@ export default function App() {
                 id="upload-title"
                 name="title"
                 maxLength="200"
+                value={uploadTitle}
+                onChange={(event) => setUploadTitle(event.target.value)}
                 placeholder="Ví dụ: Chương 1 - Đạo hàm và ứng dụng"
               />
               <label htmlFor="upload-description">
@@ -1719,6 +1739,8 @@ export default function App() {
                 name="description"
                 rows="3"
                 maxLength="2000"
+                value={uploadDescription}
+                onChange={(event) => setUploadDescription(event.target.value)}
                 placeholder="Ghi chú ngắn gọn về nội dung tài liệu…"
               />
             </fieldset>
@@ -1745,7 +1767,13 @@ export default function App() {
                   name="file"
                   type="file"
                   accept=".pdf,.txt,.md,.csv,.doc,.docx,.ppt,.pptx"
-                  onChange={(event) => { setUploadFileName(event.target.files?.[0]?.name || ""); setUploadPhase("idle"); setUploadError(""); }}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] || null;
+                    setUploadFile(file);
+                    setUploadFileName(file?.name || "");
+                    setUploadPhase("idle");
+                    setUploadError("");
+                  }}
                 />
               </div>
               {uploadPhase !== "idle" && (
@@ -1757,7 +1785,12 @@ export default function App() {
               <label htmlFor="upload-subject">
                 Môn học <span className="required-mark">*</span>
               </label>
-              <select id="upload-subject" name="subject">
+              <select
+                id="upload-subject"
+                name="subject"
+                value={uploadSubject || subjectOptions[0]?.code || ""}
+                onChange={(event) => setUploadSubject(event.target.value)}
+              >
                 {!subjectOptions.length && <option value="">Hãy thêm môn học trước</option>}
                 {subjectOptions.map((subject) => (
                   <option value={subject.code} key={subject.id}>
