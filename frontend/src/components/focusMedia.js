@@ -1,17 +1,24 @@
 export function parseFocusMediaUrl(value) {
   try {
-    const url = new URL(value);
-    if (url.protocol !== "https:") return null;
+    let raw = String(value || "").trim();
+    if (!raw) return null;
+    if (!/^https?:\/\//i.test(raw)) {
+      raw = `https://${raw}`;
+    }
+    const url = new URL(raw);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
 
     const host = url.hostname.toLowerCase();
     let videoId;
     if (["youtube.com", "www.youtube.com", "music.youtube.com", "m.youtube.com"].includes(host)) {
-      videoId = url.pathname === "/watch" ? url.searchParams.get("v") : url.pathname.match(/^\/(?:shorts|live|embed)\/([\w-]{11})$/)?.[1];
+      const path = url.pathname.replace(/\/+$/, "");
+      videoId = path === "/watch" ? url.searchParams.get("v") : path.match(/^\/(?:shorts|live|embed)\/([\w-]{11})$/)?.[1];
     } else if (host === "youtu.be" || host === "www.youtu.be") {
-      videoId = url.pathname.match(/^\/([\w-]{11})$/)?.[1];
+      const path = url.pathname.replace(/\/+$/, "");
+      videoId = path.match(/^\/([\w-]{11})$/)?.[1];
     }
     if (videoId && /^[\w-]{11}$/.test(videoId)) {
-      return { provider: "YouTube", src: `https://www.youtube.com/embed/${videoId}?playsinline=1` };
+      return { provider: "YouTube", src: `https://www.youtube.com/embed/${videoId}?playsinline=1`, videoId };
     }
 
     if (host === "open.spotify.com" || host === "www.open.spotify.com") {

@@ -789,6 +789,7 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const oauthResult = params.get("oauth");
     const oauthError = params.get("oauth_error");
+    const oauthProvider = params.get("oauth_provider");
     if (!oauthResult && !oauthError) return;
     window.history.replaceState({}, "", window.location.pathname);
     if (oauthResult === "success") {
@@ -807,7 +808,13 @@ export default function App() {
     }
     const timer = window.setTimeout(() => {
       setAuthMode("login");
-      setAuthError(oauthError === "access_denied" ? "Bạn đã hủy đăng nhập." : "Đăng nhập chưa thành công.");
+      setAuthError(
+        oauthError === "access_denied"
+          ? "Bạn đã hủy đăng nhập."
+          : oauthError === "provider_failed" && oauthProvider === "facebook"
+            ? "Facebook từ chối đăng nhập. Kiểm tra Valid OAuth Redirect URI và quyền tài khoản trong Facebook Developer."
+            : "Đăng nhập chưa thành công.",
+      );
       setModal("auth");
     }, 0);
     return () => window.clearTimeout(timer);

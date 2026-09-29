@@ -837,8 +837,9 @@ class H(BaseHTTPRequestHandler):
    try:
     profile=oauth_exchange_profile(provider,code); user,token,_=oauth_user_session(provider,profile)
     with db() as c:ensure_study_session(c,user['id'],token)
-   except OAuthError:
-    return self.redirect(f'{oauth_frontend_url()}/?oauth_error=provider_failed',[clear_state])
+   except OAuthError as error:
+    self.log_error('OAuth %s failed: %s',provider,error)
+    return self.redirect(f'{oauth_frontend_url()}/?oauth_error=provider_failed&oauth_provider={provider}',[clear_state])
    except Exception as error:
     self.log_error('OAuth callback failed: %r',error)
     return self.redirect(f'{oauth_frontend_url()}/?oauth_error=server_failed',[clear_state])

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import {
   ArrowLeft, ArrowRight, Check, Headphones, Link2, Music2, Pause, Play, Plus,
   Settings2, Sparkles, X, RotateCcw, Sun, Moon, Volume2, VolumeX,
-  Lock, Unlock, Expand, Shrink, ExternalLink,
+  Lock, Unlock, Expand, Shrink, ExternalLink, Search,
 } from "lucide-react";
 import FocusMusicPlayer from "./FocusMusicPlayer.jsx";
 import { MUSIC, formatTime } from "./focusMusic.js";
@@ -266,7 +266,7 @@ export default function FocusSpacePage({ user, onBack, active = true, theme, onT
       const track = music === 'custom' && customMusic
         ? { id: customMusic.url, url: customMusic.url, title: customMusic.name, artist: 'Tệp trên thiết bị' }
         : music === 'stream' && mediaEmbed?.provider === 'YouTube'
-          ? { id: musicUrl, videoId: mediaEmbed.src.match(/embed\/([^?]+)/)?.[1], title: 'YouTube', artist: 'Video đã chọn' }
+          ? { id: musicUrl, videoId: mediaEmbed.videoId || mediaEmbed.src.match(/embed\/([^?]+)/)?.[1], title: 'YouTube', artist: 'Video đã chọn' }
           : music === 'stream' && mediaEmbed?.provider === 'Spotify'
             ? { id: musicUrl, spotify: mediaEmbed.src, title: 'Spotify', artist: 'Điều khiển bằng trình phát Spotify' } : null;
       setPlayerSession({ id: Date.now(), track });
@@ -305,7 +305,7 @@ export default function FocusSpacePage({ user, onBack, active = true, theme, onT
     const track = music === 'custom' && customMusic
       ? { id: customMusic.url, url: customMusic.url, title: customMusic.name, artist: 'Tệp trên thiết bị' }
       : music === 'stream' && mediaEmbed?.provider === 'YouTube'
-        ? { id: musicUrl, videoId: mediaEmbed.src.match(/embed\/([^?]+)/)?.[1], title: 'YouTube', artist: 'Video đã chọn' }
+        ? { id: musicUrl, videoId: mediaEmbed.videoId || mediaEmbed.src.match(/embed\/([^?]+)/)?.[1], title: 'YouTube', artist: 'Video đã chọn' }
         : music === 'stream' && mediaEmbed?.provider === 'Spotify'
           ? { id: musicUrl, spotify: mediaEmbed.src, title: 'Spotify', artist: 'Điều khiển bằng trình phát Spotify' } : null;
     if (!playerSession || track) {
@@ -565,7 +565,20 @@ export default function FocusSpacePage({ user, onBack, active = true, theme, onT
               <button type="button" className={`focus-space-popup-trigger ${playerOpen ? "is-selected" : ""}`} onClick={togglePlayerPopup} title="Mở trình phát nhạc pop-up"><span className="focus-space-music-icon"><Music2 aria-hidden="true" /></span><small>Pop-up nhạc</small></button>
             </div>
             <input ref={musicInputRef} className="focus-space-file-input" type="file" accept="audio/*" onChange={uploadMusic} aria-label="Chọn tệp nhạc" />
-            {music === "stream" && <label className="focus-space-music-url">Music URL<input type="url" value={musicUrl} onChange={(event) => { setMusicUrl(event.target.value); setSoundError(""); }} placeholder="https://www.youtube.com/watch?v=..." aria-label="URL YouTube hoặc Spotify" /></label>}
+            {music === "stream" && (
+              <div className="focus-space-stream-box" style={{ marginTop: '10px' }}>
+                <label className="focus-space-music-url">Link bài hát (YouTube hoặc Spotify)<input type="url" value={musicUrl} onChange={(event) => { setMusicUrl(event.target.value); setSoundError(""); }} placeholder="Dán link: https://youtube.com/watch?v=... hoặc youtube.com/..." aria-label="URL YouTube hoặc Spotify" /></label>
+                <div style={{ marginTop: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={togglePlayerPopup}
+                    style={{ background: 'none', border: 'none', color: '#10b981', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '0', fontSize: '12px', fontWeight: '700' }}
+                  >
+                    <Search style={{ width: '13px', height: '13px' }} /> Hoặc mở Pop-up để tìm kiếm bài hát theo tên (Stay, Lofi...)
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
 
           <section className="focus-space-step" aria-labelledby="background-title"><h2 id="background-title"><span>04</span> Study background</h2>

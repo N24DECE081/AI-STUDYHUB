@@ -100,9 +100,16 @@ class AITutorJourneyTests(unittest.TestCase):
 
     @classmethod
     def upload_owned_document(cls):
-        status, _, raw_subjects = cls.raw('/api/subjects')
-        assert status == 200, raw_subjects
-        subject_id = json.loads(raw_subjects)[0]['id']
+        status, _, raw_sub = cls.raw('/api/subjects', 'POST', json.dumps({
+            'name': 'Lập trình hướng đối tượng',
+            'code': 'OOP101',
+            'description': 'Môn học kiểm thử',
+        }).encode(), {
+            'Cookie': cls.cookie,
+            'Content-Type': 'application/json',
+        })
+        assert status == 201, raw_sub
+        subject_id = json.loads(raw_sub)['id']
         boundary = '----NovaJourneyDocument'
         content = (
             'Object-oriented programming uses classes and objects. '
