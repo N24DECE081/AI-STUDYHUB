@@ -5,7 +5,7 @@ from .database import APP_ROOT, Database, DEFAULT_DB_PATH
 from ..security.password import hash_password
 
 
-def seed(database: Database | None = None) -> None:
+def seed(database: Database | None = None, *, include_demo_users: bool = True) -> None:
     database = database or Database(DEFAULT_DB_PATH)
     database.initialize()
     with database.connect() as conn:
@@ -18,7 +18,7 @@ def seed(database: Database | None = None) -> None:
             ("StudyHub Admin", "admin@studyhub.local", hash_password("Admin123!"), "admin"),
             ("Nguyen Thanh Mai", "teacher@studyhub.local", hash_password("Teacher123!"), "teacher"),
             ("StudyHub Student", "student@studyhub.local", hash_password("Student123!"), "student"),
-        ]
+        ] if include_demo_users else []
         for row in users:
             conn.execute(insert_user, row)
         subjects = [

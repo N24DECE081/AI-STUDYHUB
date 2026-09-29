@@ -1,0 +1,24 @@
+schema_version: 1
+memory:
+  enabled: true
+  automatic_consolidation:
+    l1_to_l2: true
+    l2_to_l3: true
+    budget: high
+  layers:
+    l1:
+      content: recent_conversation
+    l2:
+      content: extracted_learning_facts
+    l3:
+      content: learner_profile
+  privacy:
+    scope: per_user
+    allow_cross_user_access: false
+    retain_secrets: false
+  status: active
+
+runtime_compatibility:
+  currently_consumed_by_python_api: true
+  current_runtime: per-user L1 conversations, L2 facts and L3 profile synthesis
+  note: Profiles are consolidated after tutor interactions and assessments.
