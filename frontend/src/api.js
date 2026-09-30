@@ -133,7 +133,7 @@ export const askTutor = ({ documentId, question }) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ document_id: documentId, question }),
   });
-export const askAiTutor = ({ conversationId, message, mode, fileIds = [] }) =>
+export const askAiTutor = ({ conversationId, message, mode, depth = "auto", model = "auto", fileIds = [] }) =>
   request("/ai-tutor/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -141,6 +141,8 @@ export const askAiTutor = ({ conversationId, message, mode, fileIds = [] }) =>
       conversation_id: conversationId,
       message,
       mode,
+      depth,
+      model,
       file_ids: fileIds,
     }),
   });
@@ -161,6 +163,10 @@ export const cancelSubscription = () =>
 export const getMe = () => request("/auth/me");
 export const getTutorEngine = () => request("/ai-tutor/engine");
 export const getTutorConversations = () => request("/ai-tutor/conversations");
+export const deleteTutorConversation = (conversationId) =>
+  request(`/ai-tutor/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
+export const deleteAllTutorConversations = () =>
+  request("/ai-tutor/conversations", { method: "DELETE" });
 export const getTutorAssessment = () => request("/ai-tutor/assessment");
 export const startTutorAssessment = (payload) =>
   postJson("/ai-tutor/assessment/start", payload);

@@ -34,6 +34,10 @@ export default function AITutorExercise({ onNeedJourney }) {
         setProgress(exerciseData?.progress || null);
         setHistory(items);
         setResults(latest);
+        if (exerciseData?.roadmap_id) {
+          try { setDrafts(JSON.parse(localStorage.getItem(`studyhub-tutor-drafts-${exerciseData.roadmap_id}`) || '{}')); }
+          catch { setDrafts({}); }
+        }
       } catch (loadError) {
         if (alive) setError(loadError.message);
       } finally {
@@ -42,6 +46,11 @@ export default function AITutorExercise({ onNeedJourney }) {
     })();
     return () => { alive = false; };
   }, []);
+
+  useEffect(() => {
+    if (loading || !roadmap?.roadmap_id) return;
+    localStorage.setItem(`studyhub-tutor-drafts-${roadmap.roadmap_id}`, JSON.stringify(drafts));
+  }, [drafts, loading, roadmap?.roadmap_id]);
 
   const groups = useMemo(() => {
     const lessons = [];
@@ -83,6 +92,15 @@ export default function AITutorExercise({ onNeedJourney }) {
     const index = flat.findIndex((item) => String(item.id) === String(exercise.id));
     const next = flat[index + 1];
     if (next) { setFilter('all'); setOpenId(String(next.id)); } else { setOpenId(null); }
+  };
+
+  const restart = (exercise) => {
+    const key = String(exercise.id);
+    setDrafts((current) => ({ ...current, [key]: '' }));
+    setResults((current) => { const next = { ...current }; delete next[key]; return next; });
+    setError('');
+    setOpenId(key);
+    setFilter('all');
   };
 
   if (loading) return <div className="tutor-panel"><p className="tutor-hint">Đang tải bài tập…</p></div>;
@@ -131,7 +149,7 @@ export default function AITutorExercise({ onNeedJourney }) {
                 <button type="button" className="tutor-primary" onClick={() => submit(exercise)} disabled={busy !== ''}>{busy === String(exercise.id) ? 'Đang chấm…' : result ? 'Nộp lại' : 'Nộp bài'}</button>
                 <span className="tutor-hint">Chấm ở backend: trắc nghiệm và bài tính đối chiếu đáp án, bài viết do Nova chấm theo rubric.</span>
               </div>
-              <AITutorGrading result={result} busy={busy !== ''} onRetry={() => submit(exercise)} onNext={() => goNext(exercise)} />
+              <AITutorGrading result={result} busy={busy !== ''} onRetry={() => restart(exercise)} onNext={() => goNext(exercise)} />
             </div> : null}
           </article>;
         })}

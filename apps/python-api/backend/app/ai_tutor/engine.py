@@ -24,6 +24,13 @@ except ImportError:  # Development remains usable before optional dependencies a
     certifi = None
 
 MODES = ('explain', 'solve', 'hint', 'guided', 'review', 'summarize', 'generate_quiz')
+DEPTHS = ('auto', 'basic', 'standard', 'deep')
+DEPTH_INSTRUCTIONS = {
+    'auto': 'Tự chọn độ sâu phù hợp với câu hỏi và nền tảng người học.',
+    'basic': 'Giải thích cơ bản, câu ngắn, ít thuật ngữ và một ví dụ trực quan.',
+    'standard': 'Giải thích cân bằng giữa bản chất, ví dụ và bước áp dụng.',
+    'deep': 'Giải thích chuyên sâu: nêu điều kiện tiên quyết, ngoại lệ, đánh đổi và cách kiểm chứng.',
+}
 # Chỉ dẫn hành vi cho từng chế độ. Khi Nova dùng model thật, chỉ gửi mỗi tên chế độ
 # ("chế độ hiện tại: hint") là không đủ — model vẫn đưa đáp án, nên mỗi chế độ nói rõ
 # nó muốn gì. Bản offline đã tự định tuyến sang compose_* riêng nên không cần phần này.
@@ -943,7 +950,7 @@ class LocalEngine:
 
     # ---------------------------------------------------------------- chat ---
     def answer(self, *, mode: str, question: str, context: str, history: list | None = None,
-               learner_profile: str = '') -> str:
+               learner_profile: str = '', depth: str = 'auto', model: str | None = None) -> str:
         mode = mode if mode in MODES else 'explain'
         if is_gibberish(question):
             return ('## Mình chưa rõ câu hỏi\n\n'
@@ -1127,6 +1134,8 @@ class ProviderEngine:
         self.fallback_models = self._unique_models(fallback_models)
         self.task_fallback_models = self._unique_models(task_fallback_models)
         self.timeout = timeout
+        self.last_model = None
+        self.last_failovers = []
 
     @staticmethod
     def _unique_models(models) -> list[str]:
@@ -1184,17 +1193,21 @@ class ProviderEngine:
         fallbacks = self.task_fallback_models if json_mode else self.fallback_models
         candidates = self._unique_models([primary, *fallbacks])
         last_error: EngineError | None = None
+        self.last_failovers = []
         for index, candidate in enumerate(candidates):
             try:
-                return self._chat_once(messages, json_mode=json_mode, model=candidate)
+                result = self._chat_once(messages, json_mode=json_mode, model=candidate)
+                self.last_model = candidate
+                return result
             except EngineError as error:
                 last_error = error
+                self.last_failovers.append({'model': candidate, 'reason': provider_failure_reason(error)})
                 if index == len(candidates) - 1 or not self._can_try_another_model(error):
                     raise
         raise last_error or EngineError('AI provider returned no usable model')
 
     def answer(self, *, mode: str, question: str, context: str, history: list | None = None,
-               learner_profile: str = '') -> str:
+               learner_profile: str = '', depth: str = 'auto', model: str | None = None) -> str:
         skill = config.skill_prompt()
         agent_settings = ((config.yaml_settings('agents').get('capabilities') or {}).get('chat') or {})
         effort = str(agent_settings.get('reasoning_effort') or 'medium').lower()
@@ -1205,6 +1218,7 @@ class ProviderEngine:
         system = ('Bạn là Nova, gia sư AI của StudyHub. Trả lời bằng tiếng Việt, dùng Markdown gọn gàng. '
                   + reasoning
                   + f'{MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["explain"])} '
+                  + f'Mức độ giải thích: {DEPTH_INSTRUCTIONS.get(depth, DEPTH_INSTRUCTIONS["auto"])} '
                   + 'Ưu tiên ngữ cảnh tài liệu được cung cấp; nếu ngữ cảnh không có '
                   + 'thông tin cho câu hỏi, nói rõ là tài liệu chưa có phần đó rồi trả lời bằng kiến thức chung '
                   + 'và ghi chú rõ đó là kiến thức chung. Không bịa số liệu hay trích dẫn không có trong ngữ cảnh.'
@@ -1219,7 +1233,7 @@ class ProviderEngine:
                              'không dùng làm bằng chứng kiến thức hoặc citation):\n'
                              + learner_profile.strip()[:1800])
         messages.append({'role': 'user', 'content': f'{user_content}\n\nCâu hỏi: {question}'})
-        text = self._chat(messages)
+        text = self._chat(messages, model=model)
         if not text.strip():
             raise EngineError('AI provider returned an empty message')
         return text
@@ -1323,14 +1337,14 @@ class ResilientEngine:
                 'Câu trả lời dưới đây do Nova dựng từ tài liệu của bạn.\n\n')
 
     def answer(self, *, mode: str, question: str, context: str, history: list | None = None,
-               learner_profile: str = '') -> str:
+               learner_profile: str = '', depth: str = 'auto', model: str | None = None) -> str:
         try:
             text = self.primary.answer(mode=mode, question=question, context=context, history=history,
-                                       learner_profile=learner_profile)
+                                       learner_profile=learner_profile, depth=depth, model=model)
         except EngineError as error:
             reason = self._degrade(error)
             offline = self.fallback.answer(mode=mode, question=question, context=context, history=history,
-                                           learner_profile=learner_profile)
+                                           learner_profile=learner_profile, depth=depth, model=model)
             return self._notice(reason) + offline
         PROVIDER_HEALTH.update({'ok': True, 'reason': '', 'code': None})
         return text

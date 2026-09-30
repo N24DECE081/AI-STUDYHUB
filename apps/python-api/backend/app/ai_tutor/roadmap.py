@@ -73,52 +73,55 @@ def assessment_topics(payload: dict) -> list[str]:
 
 def build_assessment_questions(payload: dict) -> list[dict]:
     """Deterministic diagnostic for any subject: self-placement, recall and a warm-up."""
-    topics = assessment_topics(payload)
-    subject = str(payload.get('subject') or '').strip() or topics[0]
-    first, second, third = WARMUP_EXPRESSION
+    subject = str(payload.get('subject') or '').strip() or 'Kiến thức nền'
+    joined = ' '.join(tokenize(subject))
+    if any(term in joined for term in ('java', 'lap trinh', 'programming')):
+        specs = [
+            ('scale', 'Bạn dùng biến, điều kiện và vòng lặp trong Java ở mức nào?', 'Java cơ bản'),
+            ('scale', 'Bạn làm việc với mảng, hàm và xử lý lỗi trong Java ở mức nào?', 'Cấu trúc chương trình Java'),
+            ('scale', 'Bạn hiểu lớp, đối tượng, kế thừa và interface ở mức nào?', 'OOP Java'),
+            ('reflection', 'Bạn đang dùng IDE/JDK nào và muốn hoàn thành bài tập hoặc dự án Java gì?', 'Công cụ và dự án Java'),
+        ]
+    elif any(term in joined for term in ('giai tich', 'giải tích', 'calculus', 'dao ham', 'đạo hàm', 'tich phan', 'tích phân')):
+        specs = [
+            ('scale', 'Nền tảng đại số, hàm số và lượng giác của bạn hiện ở mức nào?', 'Toán nền tảng'),
+            ('scale', 'Bạn hiểu giới hạn và tính liên tục ở mức nào?', 'Giới hạn'),
+            ('scale', 'Bạn giải bài đạo hàm và tích phân ở mức nào?', 'Đạo hàm và tích phân'),
+            ('reflection', 'Bạn cần học chương nào, dạng bài thi nào và thường vướng ở bước nào?', 'Phạm vi Giải tích'),
+        ]
+    elif any(term in joined for term in ('tieng anh', 'tiếng anh', 'english', 'ielts', 'toeic')):
+        specs = [
+            ('scale', 'Khả năng nghe và phản xạ giao tiếp tiếng Anh của bạn ở mức nào?', 'Nghe nói'),
+            ('scale', 'Khả năng đọc, từ vựng và ngữ pháp của bạn ở mức nào?', 'Đọc và ngữ pháp'),
+            ('scale', 'Khả năng viết câu hoặc bài theo mục tiêu của bạn ở mức nào?', 'Viết'),
+            ('reflection', 'Bạn ưu tiên giao tiếp hay chứng chỉ nào, và kỹ năng nào cần cải thiện nhất?', 'Mục tiêu tiếng Anh'),
+        ]
+    else:
+        topics = assessment_topics(payload)
+        specs = [('scale', f'Bạn đang ở mức nào với “{topic}”?', topic) for topic in topics[:3]]
+        specs.append(('reflection', f'Hãy mô tả một bài tập hoặc tình huống thực tế bạn đã làm với {subject} và phần khó nhất.', subject))
+    explicit_topics = [str(item).strip() for item in (payload.get('topics') or []) if str(item).strip()]
+    for topic in reversed(explicit_topics[:2]):
+        if not any(topic in prompt for _, prompt, _ in specs):
+            specs.insert(0, ('scale', f'Bạn đang ở mức nào với “{topic}”?', topic))
+    if not any(subject in prompt for _, prompt, _ in specs):
+        specs.append(('reflection', f'Với {subject}, bạn đã làm bài tập hoặc dự án nào và vướng nhất ở đâu?', subject))
+    math_text = f'{subject} {" ".join(explicit_topics)}'.lower()
+    if any(marker in math_text for marker in ('toán', 'toã', 'đạo hàm', 'ä‘áº¡o hã', 'giải tích')):
+        first, second, third = WARMUP_EXPRESSION
+        specs = specs[:4] + [('math', f'Khởi động cho {subject}: {first} + {second} × {third} bằng bao nhiêu?', 'Kỹ năng tính toán')]
+    elif len(specs) < 5:
+        specs.append(('reflection', f'Kiến thức nền nào của {subject} bạn muốn Nova kiểm tra kỹ hơn?', 'Điều kiện tiên quyết'))
     questions = []
-    for topic in topics:
-        questions.append({
-            'key': f'q{len(questions) + 1}',
-            'type': 'scale',
-            'prompt': f'Hiện tại bạn đang ở mức nào với “{topic}”?',
-            'options': list(FAMILIARITY_OPTIONS),
-            'points': list(FAMILIARITY_POINTS),
-            'max_score': 3,
-            'topic': topic,
-        })
-    questions.append({
-        'key': f'q{len(questions) + 1}',
-        'type': 'reflection',
-        'prompt': f'Viết 2–3 câu giải thích “{topics[0]}” bằng lời của bạn '
-                  '(chưa cần đúng hoàn toàn — Nova dùng để đo mức nền).',
-        'max_score': 3,
-        'topic': topics[0],
-    })
-    questions.append({
-        'key': f'q{len(questions) + 1}',
-        'type': 'math',
-        'prompt': f'Khởi động tính toán: {first} + {second} × {third} bằng bao nhiêu?',
-        'expected': str(first + second * third),
-        'max_score': 2,
-        'topic': 'Kỹ năng tính toán',
-    })
-    questions.append({
-        'key': f'q{len(questions) + 1}',
-        'type': 'reflection',
-        'prompt': f'Bạn đã từng làm bài tập hoặc dự án nào với {subject}? '
-                  'Mô tả ngắn 2–3 câu và phần bạn thấy khó nhất.',
-        'max_score': 3,
-        'topic': subject,
-    })
-    questions.append({
-        'key': f'q{len(questions) + 1}',
-        'type': 'reflection',
-        'prompt': 'Mục tiêu cụ thể của bạn trong 4 tuần tới là gì? Viết 2–3 câu, càng cụ thể càng tốt '
-                  '(Nova dùng để chia nhỏ lộ trình).',
-        'max_score': 3,
-        'topic': 'Mục tiêu',
-    })
+    for kind, prompt, topic in specs[:5]:
+        question = {'key': f'q{len(questions) + 1}', 'type': kind, 'prompt': prompt,
+                    'max_score': 3, 'topic': topic}
+        if kind == 'scale':
+            question.update({'options': list(FAMILIARITY_OPTIONS), 'points': list(FAMILIARITY_POINTS)})
+        elif kind == 'math':
+            first, second, third = WARMUP_EXPRESSION
+            question.update({'expected': str(first + second * third), 'max_score': 2})
+        questions.append(question)
     return questions
 
 
@@ -329,6 +332,9 @@ def _roadmap_from_engine(payload: dict, *, engine) -> dict:
             'target_level': target,
             'pace': pace,
             'study_time': payload.get('study_time') or PACE_MINUTES[pace],
+            'learner_type': payload.get('learner_type') or 'Tự học',
+            'deadline_weeks': payload.get('deadline_weeks') or 4,
+            'constraints': payload.get('constraints') or '',
             'strengths': strengths,
             'weaknesses': weaknesses,
             'topics': topics,

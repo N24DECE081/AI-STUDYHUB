@@ -16,7 +16,7 @@ export default function AITutorJourney({ onPractice }) {
   const [assessment, setAssessment] = useState(null);
   const [roadmap, setRoadmap] = useState(null);
   const [answers, setAnswers] = useState({});
-  const [form, setForm] = useState({ subject: '', goal: '', target_level: 'intermediate', pace: 'steady', study_time: 240, topics: '' });
+  const [form, setForm] = useState({ subject: '', goal: '', learner_type: 'Tự học', deadline_weeks: 4, constraints: '', target_level: 'intermediate', pace: 'steady', study_time: 240, topics: '' });
 
   useEffect(() => {
     let alive = true;
@@ -43,7 +43,7 @@ export default function AITutorJourney({ onPractice }) {
     return () => { alive = false; };
   }, []);
 
-  const payloadBase = () => ({ subject: form.subject.trim(), goal: form.goal.trim(), target_level: form.target_level, pace: form.pace, study_time: numberField(form.study_time), topics: form.topics.split(',').map((item) => item.trim()).filter(Boolean) });
+  const payloadBase = () => ({ subject: form.subject.trim(), goal: form.goal.trim(), learner_type: form.learner_type.trim(), deadline_weeks: numberField(form.deadline_weeks), constraints: form.constraints.trim(), target_level: form.target_level, pace: form.pace, study_time: numberField(form.study_time), topics: form.topics.split(',').map((item) => item.trim()).filter(Boolean) });
 
   const beginQuiz = async () => {
     if (!form.subject.trim() || !form.goal.trim()) { setError('Hãy nhập môn học và mục tiêu học tập trước khi đánh giá.'); return; }
@@ -93,6 +93,9 @@ export default function AITutorJourney({ onPractice }) {
       <h3>Mục tiêu học tập</h3>
       <p className="tutor-hint">Cho Nova biết bạn đang học gì và muốn đạt được điều gì. Nova sẽ đánh giá trình độ rồi dựng lộ trình riêng cho bạn.</p>
       <div className="tutor-form-grid">
+        <label>Nhóm người học<input value={form.learner_type} onChange={(event) => setForm({ ...form, learner_type: event.target.value })} placeholder="Tự học, sinh viên, người đi làm…" /></label>
+        <label>Thời hạn (tuần)<input value={form.deadline_weeks} onChange={(event) => setForm({ ...form, deadline_weeks: event.target.value })} inputMode="numeric" placeholder="4" /></label>
+        <label>Ràng buộc / tài liệu (không bắt buộc)<input value={form.constraints} onChange={(event) => setForm({ ...form, constraints: event.target.value })} placeholder="Giáo trình, lịch thi, công cụ đang dùng…" /></label>
         <label>Môn học / chủ đề<input value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} placeholder="Ví dụ: Java OOP" /></label>
         <label>Mục tiêu<input value={form.goal} onChange={(event) => setForm({ ...form, goal: event.target.value })} placeholder="Ví dụ: làm chủ kế thừa và đa hình" /></label>
         <label>Trình độ mong muốn<select value={form.target_level} onChange={(event) => setForm({ ...form, target_level: event.target.value })}>{LEVELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
