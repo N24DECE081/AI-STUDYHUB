@@ -13,7 +13,8 @@ def _key(kind: str, content: str) -> str:
     return f'{kind}:{hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]}'
 
 
-def remember(conn, user_id: int, kind: str, content: str, confidence: float = 0.65) -> None:
+def remember(conn, user_id: int, kind: str, content: str, confidence: float = 0.65,
+             *, reinforce: bool = True) -> None:
     """Upsert one L2 fact. All reads and writes are scoped to one user."""
     settings = config.yaml_settings('memory').get('memory') or {}
     if not settings.get('enabled', False):
@@ -27,6 +28,8 @@ def remember(conn, user_id: int, kind: str, content: str, confidence: float = 0.
         (user_id, memory_key),
     ).fetchone()
     if existing:
+        if not reinforce:
+            return
         count = int(existing['evidence_count'] or 1) + 1
         score = min(0.98, max(float(existing['confidence'] or 0), confidence) + 0.05)
         conn.execute(
@@ -48,14 +51,21 @@ def consolidate(conn, user_id: int) -> dict:
         'WHERE user_id=? AND status=? ORDER BY id DESC LIMIT 1', (user_id, 'completed'),
     ).fetchone()
     if assessment:
-        remember(conn, user_id, 'goal', f"Mục tiêu: {assessment['goal']} ({assessment['subject']})", 0.9)
+        remember(conn, user_id, 'goal', f"Mục tiêu: {assessment['goal']} ({assessment['subject']})", 0.9,
+                 reinforce=False)
+        remember(conn, user_id, 'fact',
+                 f"Mức hiện tại theo lần tự đánh giá gần nhất: {assessment['current_level']}", 0.85,
+                 reinforce=False)
+        remember(conn, user_id, 'fact',
+                 f"Mức mục tiêu theo lần tự đánh giá gần nhất: {assessment['target_level']}", 0.85,
+                 reinforce=False)
         for kind, column in (('strength', 'strengths'), ('weakness', 'weaknesses')):
             try:
                 values = json.loads(assessment[column] or '[]')
             except (TypeError, json.JSONDecodeError):
                 values = []
             for value in values[:8]:
-                remember(conn, user_id, kind, str(value), 0.85)
+                remember(conn, user_id, kind, str(value), 0.85, reinforce=False)
     rows = conn.execute(
         'SELECT memory_type,content,confidence,evidence_count FROM learner_memories '
         'WHERE user_id=? ORDER BY confidence DESC,evidence_count DESC,last_seen_at DESC LIMIT 30',

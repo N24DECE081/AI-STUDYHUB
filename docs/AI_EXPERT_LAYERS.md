@@ -12,15 +12,19 @@ Trạng thái bên dưới phân biệt code đã tích hợp với dịch vụ 
 
 ## Cấu hình model đang thực sự hoạt động
 
-Python API hỗ trợ hai model. Đặt các giá trị sau trong `apps/python-api/.env` (không commit API key):
+Python API hỗ trợ tách model chat và model tác vụ. Cấu hình miễn phí khuyến nghị dùng Groq với chuỗi model dự phòng. Sao chép các giá trị cần thiết từ `apps/python-api/.env.ai.example` sang `apps/python-api/.env` và không commit API key:
 
 ```dotenv
-STUDYHUB_AI_PROVIDER=openai
-STUDYHUB_AI_API_KEY=your-key-here
-STUDYHUB_AI_BASE_URL=https://api.openai.com/v1
-STUDYHUB_AI_MODEL=gpt-4o
-STUDYHUB_AI_TASK_MODEL=gpt-4o-mini
+STUDYHUB_AI_PROVIDER=groq
+GROQ_API_KEY=replace-with-your-new-groq-key
+STUDYHUB_AI_BASE_URL=https://api.groq.com/openai/v1
+STUDYHUB_AI_MODEL=openai/gpt-oss-120b
+STUDYHUB_AI_TASK_MODEL=openai/gpt-oss-20b
+STUDYHUB_AI_FALLBACK_MODELS=qwen/qwen3.8-27b,openai/gpt-oss-20b
+STUDYHUB_AI_TASK_FALLBACK_MODELS=qwen/qwen3.8-27b,openai/gpt-oss-120b
 ```
+
+Nova chỉ đổi sang model tiếp theo khi model hiện tại không tồn tại, hết quota/rate limit hoặc provider lỗi. Lỗi xác thực 401 không kích hoạt failover vì mọi model dùng chung key. Khi tất cả model provider lỗi, engine offline tiếp tục trả lời từ tài liệu của người học.
 
 ## Kiểm tra trạng thái runtime
 
@@ -31,3 +35,5 @@ STUDYHUB_AI_TASK_MODEL=gpt-4o-mini
 ## Giới hạn và trạng thái deploy
 
 Graph-RAG hiện dùng đồ thị đồng xuất hiện từ khóa cục bộ, không phụ thuộc dịch vụ vector bên ngoài. Web search chỉ chạy khi câu hỏi yêu cầu tìm web rõ ràng. `exec` chỉ hỗ trợ biểu thức số học qua AST sandbox và không chạy lệnh hệ điều hành. Production cần API key và kho tài liệu phù hợp; Render Free không phù hợp để lưu trữ dữ liệu thật vì filesystem tạm thời và service có thể spin down. Xem mục deploy trong `README.md`.
+
+Embedding/reranking chưa được cài đặt: `text-embedding-3-large` không còn được khai báo như model đang hoạt động vì không có ingestion/index/query embedding path trong runtime.

@@ -31,7 +31,7 @@ const MARKDOWN_COMPONENTS = {
 };
 
 // Nova tự chọn cách trả lời; nhãn này cho người học biết nó đã hiểu câu hỏi theo hướng nào.
-const MODE_LABELS = { explain: 'Giải thích', solve: 'Giải bài', hint: 'Gợi ý', summarize: 'Tóm tắt', generate_quiz: 'Quiz' };
+const MODE_LABELS = { explain: 'Giải thích', solve: 'Giải bài', hint: 'Gợi ý', guided: 'Từng bước', review: 'Nhận xét', summarize: 'Tóm tắt', generate_quiz: 'Quiz' };
 
 export default function AITutorMessage({ message, onRetry }) {
   const copy = async () => {

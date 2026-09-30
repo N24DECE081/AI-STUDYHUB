@@ -22,8 +22,15 @@ SKILL_ROOT = APP_ROOT / 'skills'
 PROVIDER_DEFAULTS = {
     'openai': {'base_url': 'https://api.openai.com/v1', 'model': 'gpt-4o-mini', 'keys': ('OPENAI_API_KEY',)},
     'deepseek': {'base_url': 'https://api.deepseek.com/v1', 'model': 'deepseek-chat', 'keys': ('DEEPSEEK_API_KEY',)},
-    'openrouter': {'base_url': 'https://openrouter.ai/api/v1', 'model': 'openai/gpt-4o-mini', 'keys': ('OPENROUTER_API_KEY',)},
-    'groq': {'base_url': 'https://api.groq.com/openai/v1', 'model': 'llama-3.3-70b-versatile', 'keys': ('GROQ_API_KEY',)},
+    'openrouter': {'base_url': 'https://openrouter.ai/api/v1', 'model': 'openrouter/free', 'keys': ('OPENROUTER_API_KEY',)},
+    'groq': {
+        'base_url': 'https://api.groq.com/openai/v1',
+        'model': 'openai/gpt-oss-120b',
+        'task_model': 'openai/gpt-oss-20b',
+        'fallback_models': ('qwen/qwen3.8-27b', 'openai/gpt-oss-20b'),
+        'task_fallback_models': ('qwen/qwen3.8-27b', 'openai/gpt-oss-120b'),
+        'keys': ('GROQ_API_KEY',),
+    },
     'mistral': {'base_url': 'https://api.mistral.ai/v1', 'model': 'mistral-large-latest', 'keys': ('MISTRAL_API_KEY',)},
     'together': {'base_url': 'https://api.together.xyz/v1', 'model': 'meta-llama/Llama-3.3-70B-Instruct-Turbo', 'keys': ('TOGETHER_API_KEY',)},
     'xai': {'base_url': 'https://api.x.ai/v1', 'model': 'grok-2-latest', 'keys': ('XAI_API_KEY',)},
@@ -92,8 +99,22 @@ def explicit_settings(environ=None) -> dict:
     base_url = (environ.get('STUDYHUB_AI_BASE_URL') or '').strip()
     model = (environ.get('STUDYHUB_AI_MODEL') or '').strip()
     task_model = (environ.get('STUDYHUB_AI_TASK_MODEL') or '').strip()
+    fallback_models = (environ.get('STUDYHUB_AI_FALLBACK_MODELS') or '').strip()
+    task_fallback_models = (environ.get('STUDYHUB_AI_TASK_FALLBACK_MODELS') or '').strip()
     return {'provider': provider, 'api_key': api_key, 'base_url': base_url,
-            'model': model, 'task_model': task_model}
+            'model': model, 'task_model': task_model, 'fallback_models': fallback_models,
+            'task_fallback_models': task_fallback_models}
+
+
+def model_list(value) -> list[str]:
+    """Ordered, duplicate-free model IDs from CSV or an iterable."""
+    items = value.split(',') if isinstance(value, str) else (value or ())
+    result: list[str] = []
+    for item in items:
+        name = str(item).strip()
+        if name and name not in result:
+            result.append(name)
+    return result
 
 
 def model_catalog(path: Path = MODEL_CATALOG_PATH) -> dict:
@@ -181,13 +202,17 @@ def provider_settings(environ=None) -> dict | None:
     catalog_provider, catalog_model, catalog_task_model = catalog_models()
     catalog_matches = not catalog_provider or catalog_provider == name
     model = explicit['model'] or (catalog_model if catalog_matches else '') or spec.get('model') or 'gpt-4o-mini'
-    task_model = explicit['task_model'] or (catalog_task_model if catalog_matches else '') or model
+    task_model = (explicit['task_model'] or (catalog_task_model if catalog_matches else '')
+                  or spec.get('task_model') or model)
+    fallback_models = model_list(explicit['fallback_models'] or spec.get('fallback_models'))
+    task_fallback_models = model_list(explicit['task_fallback_models'] or spec.get('task_fallback_models'))
     if not base_url:
         return None
     if not api_key and not spec.get('keyless'):
         return None
     return {'provider': name, 'api_key': api_key, 'base_url': base_url,
-            'model': model, 'task_model': task_model}
+            'model': model, 'task_model': task_model, 'fallback_models': fallback_models,
+            'task_fallback_models': task_fallback_models}
 
 
 def engine_status(environ=None) -> dict:
@@ -198,6 +223,7 @@ def engine_status(environ=None) -> dict:
                 'label': 'Nova offline (bám theo tài liệu của bạn)',
                 'hint': 'Đặt API key vào apps/python-api/.env rồi chạy lại backend để Nova dùng mô hình AI.'}
     return {'engine': 'provider', 'provider': settings['provider'], 'model': settings['model'],
-            'task_model': settings['task_model'],
+            'task_model': settings['task_model'], 'fallback_models': settings['fallback_models'],
+            'task_fallback_models': settings['task_fallback_models'],
             'label': f"Nova AI · {settings['provider']} · {settings['model']}",
             'hint': ''}
