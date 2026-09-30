@@ -100,7 +100,7 @@ export default function ProgressDashboard({ user, analytics, progress, studyTime
       </header>
 
       <div className="progress-metrics">
-        <MetricCard icon={FireIcon} label="Chuỗi học" value={`${user ? streak.current_streak : 0} ngày`} note="Duy trì nhịp mỗi ngày" tone="flame" />
+        <MetricCard icon={user && streak.current_streak > 0 ? FireIcon : ClockIcon} label="Chuỗi học" value={`${user ? streak.current_streak : 0} ngày`} note="Duy trì nhịp mỗi ngày" tone="flame" />
         <MetricCard icon={BoltIcon} label="Điểm kinh nghiệm" value={`${xp} XP`} note="Quiz và thẻ đã nhớ" tone="xp" />
         <MetricCard icon={CheckCircleIcon} label="Thẻ đã nhớ" value={learnedCards} note={`${quizDecks.length} bộ thẻ`} tone="answer" />
         <MetricCard icon={TrophyIcon} label="Độ chính xác" value={`${summary.accuracy_percent || 0}%`} note={`${summary.correct_answers || 0} câu trả lời đúng`} tone="accuracy" />
@@ -135,7 +135,7 @@ export default function ProgressDashboard({ user, analytics, progress, studyTime
         <div className="progress-surface__head"><div><span className="progress-section-label">YOUR JOURNEY</span><h2 id="progress-journey-title">Hành trình chinh phục</h2></div><strong>{journey}%</strong></div>
         <div className="progress-journey__labels"><span>START</span><span>GOAL</span></div>
         <div className="progress-journey__rail" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={journey}>
-          <span style={{ width: `${journey}%` }}><i aria-hidden="true"><FireIcon /></i></span>
+          <span style={{ width: `${journey}%` }}>{user && streak.current_streak > 0 && <i className={`fire-level-${Math.min(streak.current_streak, 3)}`} aria-hidden="true"><FireIcon /></i>}</span>
         </div>
         <p>{motivation(journey)}</p>
       </section>

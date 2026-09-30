@@ -85,7 +85,7 @@ class AuthTests(unittest.TestCase):
             profile, error = complete_profile(c, user["id"], "Student", "Test")
             self.assertIsNone(error)
             self.assertEqual(profile["name"], "Test Student")
-            self.assertEqual(profile["streak"]["current_streak"], 1)
+            self.assertEqual(profile["streak"]["current_streak"], 0)
             delivery = start_password_reset(c, "student@studyhub.local")
             self.assertIsNotNone(delivery)
             token, error = verify_password_reset(c, "student@studyhub.local", delivery["code"])

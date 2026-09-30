@@ -8,6 +8,7 @@ from app.db.database import Database
 from app.db.seed import seed
 
 EXPECTED_TABLES = {
+    "flashcard_decks",
     "schema_migrations", "auth_sessions", "oauth_accounts", "password_reset_otps", "study_sessions", "external_knowledge_cache",
     "learner_memories", "learner_profiles",
     "users", "subjects", "documents", "courses", "course_documents", "user_streaks", "user_activity_days",
