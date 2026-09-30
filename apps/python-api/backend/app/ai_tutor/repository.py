@@ -106,6 +106,32 @@ def conversations_for(conn, user_id: int, limit: int = 20, messages_each: int = 
     return conversations
 
 
+def delete_conversation(conn, user_id: int, client_key: str) -> bool:
+    """Delete one conversation only when it belongs to the current learner."""
+    cursor = conn.execute(
+        'DELETE FROM tutor_conversations WHERE user_id=? AND client_key=?',
+        (user_id, str(client_key)),
+    )
+    conn.commit()
+    return bool(cursor.rowcount)
+
+
+def delete_conversations(conn, user_id: int) -> int:
+    """Delete all chat history for one learner; profile/memory is intentionally retained."""
+    cursor = conn.execute('DELETE FROM tutor_conversations WHERE user_id=?', (user_id,))
+    conn.commit()
+    return max(0, int(cursor.rowcount or 0))
+
+
+def conversation_owned(conn, conversation_id: int, user_id: int) -> bool:
+    """Recheck ownership/existence before persisting a long-running AI response."""
+    row = conn.execute(
+        'SELECT 1 FROM tutor_conversations WHERE id=? AND user_id=?',
+        (conversation_id, user_id),
+    ).fetchone()
+    return row is not None
+
+
 # --------------------------------------------------------------- assessments ---
 def create_assessment(conn, user_id: int, *, subject: str, goal: str, current_level: str,
                       target_level: str, study_time: int, pace: str, strengths: list,

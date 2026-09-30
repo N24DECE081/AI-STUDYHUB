@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { askAiTutor, deleteDocument, getTutorEngine, getTutorConversations, getSubjects, uploadDocument } from '../../api';
+import { askAiTutor, deleteAllTutorConversations, deleteDocument, deleteTutorConversation, getTutorEngine, getTutorConversations, getSubjects, uploadDocument } from '../../api';
 import { freshConversation, loadConversations, mergeConversations, newId, persistConversations } from './conversationStore';
 import AITutorSidebar from './AITutorSidebar';
 import AITutorChat from './AITutorChat';
@@ -18,6 +18,8 @@ export default function AITutorPage({ selectedDocument, user, onDocumentsChanged
   const [draft, setDraft] = useState(''); const [files, setFiles] = useState(() => selectedDocument?.id ? [{ id: String(selectedDocument.id), name: selectedDocument.title || 'Tài liệu đã chọn', existing: true }] : []);
   const [search, setSearch] = useState(''); const [sending, setSending] = useState(false); const [drawer, setDrawer] = useState(false); const [view, setView] = useState('chat');
   const [engine, setEngine] = useState(null);
+  const [depth, setDepth] = useState('auto');
+  const [model, setModel] = useState('auto');
   const loadEngine = () => getTutorEngine().then(setEngine).catch(() => setEngine(null));
   useEffect(() => { let alive = true; getTutorEngine().then((data) => { if (alive) setEngine(data); }).catch(() => { if (alive) setEngine(null); }); return () => { alive = false; }; }, []);
   const applyConversations = useCallback((updater) => setConversations((current) => { const next = typeof updater === 'function' ? updater(current) : updater; persistConversations(next, userScope); return next; }), [userScope]);
@@ -26,7 +28,20 @@ export default function AITutorPage({ selectedDocument, user, onDocumentsChanged
   const conversation = useMemo(() => conversations.find((item) => item.id === activeId) || conversations[0], [conversations, activeId]);
   const updateConversation = (id, updater) => applyConversations((current) => current.map((item) => item.id === id ? updater(item) : item));
   const createConversation = () => { const next = freshConversation(); applyConversations((current) => [next, ...current]); setActiveId(next.id); setFiles([]); setDrawer(false); };
-  const deleteConversation = (id) => { const next = conversations.filter((item) => item.id !== id); if (!next.length) { createConversation(); return; } applyConversations(next); if (id === activeId) setActiveId(next[0].id); };
+  const deleteConversation = async (id) => {
+    if (!window.confirm('Xóa cuộc hội thoại này? Thao tác không thể khôi phục.')) return;
+    try { if (userScope !== 'guest') await deleteTutorConversation(id); }
+    catch (error) { window.alert(`Không thể xóa hội thoại: ${error.message}`); return; }
+    const next = conversations.filter((item) => item.id !== id);
+    if (!next.length) { const fresh = freshConversation(); applyConversations([fresh]); setActiveId(fresh.id); }
+    else { applyConversations(next); if (id === activeId) setActiveId(next[0].id); }
+  };
+  const deleteAllConversations = async () => {
+    if (!window.confirm('Xóa toàn bộ lịch sử chat của tài khoản này? Không thể khôi phục. Hồ sơ học tập và trí nhớ cá nhân hóa sẽ được giữ lại.')) return;
+    try { if (userScope !== 'guest') await deleteAllTutorConversations(); }
+    catch (error) { window.alert(`Không thể xóa toàn bộ lịch sử: ${error.message}`); return; }
+    const fresh = freshConversation(); applyConversations([fresh]); setActiveId(fresh.id); setDraft(''); setFiles([]); setSending(false);
+  };
   const upload = async (file) => {
     if (files.filter((item) => !item.error).length >= MAX_TUTOR_FILES) return;
     const placeholder = { id: newId(), name: `${file.name} đang tải…`, uploading: true };
@@ -65,13 +80,13 @@ export default function AITutorPage({ selectedDocument, user, onDocumentsChanged
     if (!retryMessage) { updateConversation(conversation.id, (current) => ({ ...current, title: current.messages.length <= 1 ? text.slice(0, 44) : current.title, updatedAt: Date.now(), messages: [...current.messages, userMessage] })); setDraft(''); }
     else updateConversation(conversation.id, (current) => ({ ...current, messages: current.messages.filter((message) => message.id !== retryMessage.id) }));
     setSending(true);
-    try { const result = await askAiTutor({ conversationId: conversation.id, message: text, mode: 'auto', fileIds: files.filter((file) => !file.uploading && !file.deleting && !file.error).map((file) => file.id) }); updateConversation(conversation.id, (current) => ({ ...current, updatedAt: Date.now(), messages: [...current.messages, { id: result.message_id || newId(), role: 'assistant', content: result.content, quiz: result.quiz || null, mode: result.mode || null }] })); if (result.engine_degraded) loadEngine(); }
+    try { const result = await askAiTutor({ conversationId: conversation.id, message: text, mode: 'auto', depth, model, fileIds: files.filter((file) => !file.uploading && !file.deleting && !file.error).map((file) => file.id) }); updateConversation(conversation.id, (current) => ({ ...current, updatedAt: Date.now(), messages: [...current.messages, { id: result.message_id || newId(), role: 'assistant', content: result.content, quiz: result.quiz || null, mode: result.mode || null, depth: result.depth || depth, model: result.model_used || null }] })); if (result.engine_degraded) loadEngine(); }
     catch (error) { updateConversation(conversation.id, (current) => ({ ...current, messages: [...current.messages, { id: newId(), role: 'assistant', content: '', error: `Không thể kết nối AI Tutor: ${error.message}`, original: text }] })); }
     finally { setSending(false); }
   };
-  return <div className="ai-tutor-page"><AITutorSidebar conversations={conversations} activeId={conversation.id} search={search} setSearch={setSearch} onNew={createConversation} onSelect={(id) => { setActiveId(id); setDrawer(false); }} onDelete={deleteConversation} open={drawer} onClose={() => setDrawer(false)} /><div className="tutor-main">
+  return <div className="ai-tutor-page"><AITutorSidebar conversations={conversations} activeId={conversation.id} search={search} setSearch={setSearch} onNew={createConversation} onSelect={(id) => { setActiveId(id); setDrawer(false); }} onDelete={deleteConversation} onDeleteAll={deleteAllConversations} open={drawer} onClose={() => setDrawer(false)} /><div className="tutor-main">
     <nav className="tutor-tabs" aria-label="Khu vực AI Tutor">{VIEWS.map(([id, label]) => <button type="button" key={id} className={view === id ? 'active' : ''} onClick={() => setView(id)}>{label}</button>)}<button type="button" className="tutor-menu" onClick={() => setDrawer(true)} aria-label="Mở danh sách hội thoại">☰</button></nav>
-    {view === 'chat' ? <AITutorChat conversation={conversation} value={draft} onChange={setDraft} onSend={send} sending={sending} files={files} onUpload={upload} onRemove={removeFile} maxFiles={MAX_TUTOR_FILES} onRetry={send} onOpenSidebar={() => setDrawer(true)} engine={engine} /> : null}
+    {view === 'chat' ? <AITutorChat conversation={conversation} value={draft} onChange={setDraft} onSend={send} sending={sending} files={files} onUpload={upload} onRemove={removeFile} maxFiles={MAX_TUTOR_FILES} onRetry={send} onOpenSidebar={() => setDrawer(true)} engine={engine} depth={depth} onDepthChange={setDepth} model={model} onModelChange={setModel} /> : null}
     {view === 'journey' ? <AITutorJourney onPractice={() => setView('practice')} /> : null}
     {view === 'practice' ? <AITutorExercise onNeedJourney={() => setView('journey')} /> : null}
   </div></div>;

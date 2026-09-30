@@ -280,3 +280,7 @@
 }
 
 .tutor-new,.tutor-primary,.tutor-send{color:var(--button-ink);border-radius:999px}.tutor-chat h1 em{color:var(--pink-ink)}
+.tutor-delete-all{margin:12px 14px 4px;border:1px solid #ef9a9a;border-radius:9px;padding:9px 12px;color:#b42318;background:transparent;cursor:pointer}
+.tutor-delete-note{margin:0 14px 14px;color:var(--muted);line-height:1.35}
+.tutor-chat-controls{margin-left:auto;display:flex;gap:8px;align-items:center}.tutor-chat-controls label{display:grid;gap:3px;font-size:10px;color:var(--muted)}.tutor-chat-controls select{max-width:190px;border:1px solid var(--border-color);border-radius:8px;padding:5px 7px;background:var(--bg-main);color:var(--text-main)}
+.tutor-mode-note{margin:0;padding:6px 20px;border-bottom:1px solid var(--border-color);font-size:11px;color:var(--muted);background:var(--bg-main)}

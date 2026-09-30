@@ -1274,6 +1274,21 @@ class H(BaseHTTPRequestHandler):
  def do_DELETE(self):
   if not self.gateway_access(): return
   path=urlparse(self.path).path
+  if path=='/api/ai-tutor/conversations':
+   user=require_user(self)
+   if not user:return
+   with db() as connection:
+    deleted=tutor_store.delete_conversations(connection,user['id'])
+   return self.json({'ok':True,'deleted':deleted,'memory_retained':True},200)
+  match=re.fullmatch(r'/api/ai-tutor/conversations/([^/]+)',path)
+  if match:
+   user=require_user(self)
+   if not user:return
+   client_key=unquote(match.group(1))
+   with db() as connection:
+    deleted=tutor_store.delete_conversation(connection,user['id'],client_key)
+   if not deleted:return self.json({'error':'Cuộc hội thoại không tồn tại'},404)
+   return self.json({'ok':True,'conversation_id':client_key},200)
   match=re.fullmatch(r'/api/documents/(\d+)',path)
   if not match:return self.json({'error':'not found'},404)
   user=require_user(self)
@@ -1588,7 +1603,7 @@ class H(BaseHTTPRequestHandler):
      document_id=file_ids[0]
     conversation_id=str(x.get('conversation_id') or secrets.token_hex(16))
     mode=str(x.get('mode') or 'explain').lower()
-    if mode not in ('explain','solve','hint','summarize','generate_quiz'):
+    if mode not in tutor_engine.MODES:
      return self.json({'error':'invalid tutor mode'},400)
    if not question:return self.json({'error':'Câu hỏi không được để trống'},400)
    with db() as c:
@@ -1628,6 +1643,15 @@ class H(BaseHTTPRequestHandler):
    x=json_body(data)
    if not isinstance(x,dict): return self.json({'error':'Dữ liệu AI Tutor không hợp lệ'},400)
    mode=str(x.get('mode') or 'auto').lower()
+   depth=str(x.get('depth') or 'auto').lower()
+   if depth not in tutor_engine.DEPTHS:
+    return self.json({'error':'invalid explanation depth'},400)
+   requested_model=str(x.get('model') or 'auto').strip()
+   settings=tutor_config.provider_settings()
+   allowed_models=[] if not settings else tutor_config.model_list([settings['model'],*settings['fallback_models']])
+   if requested_model!='auto' and requested_model not in allowed_models:
+    return self.json({'error':'Model không được cấu hình hoặc không có quyền sử dụng'},400)
+   model_override=None if requested_model=='auto' else requested_model
    message=str(x.get('message') or '').strip()
    if not message:return self.json({'error':'Câu hỏi không được để trống'},400)
    # Khung chat một ô: người học không chọn chế độ nữa, Nova tự đọc câu hỏi để quyết
@@ -1635,7 +1659,7 @@ class H(BaseHTTPRequestHandler):
    # cho client cũ và cho test.
    if mode in ('', 'auto', 'tu_dong'):
     mode=tutor_engine.detect_mode(message)
-   if mode not in ('explain','solve','hint','summarize','generate_quiz'):
+   if mode not in tutor_engine.MODES:
     return self.json({'error':'invalid tutor mode'},400)
    file_ids=x.get('file_ids',[])
    if not isinstance(file_ids,list):
@@ -1643,16 +1667,20 @@ class H(BaseHTTPRequestHandler):
    if len(file_ids)>5:
     return self.json({'error':'Nova chỉ hỗ trợ tối đa 5 tài liệu trong một cuộc trò chuyện'},400)
    conversation_key=str(x.get('conversation_id') or '').strip() or secrets.token_hex(16)
-   try:
-    context,sources,query_keywords=tutor_context(u['id'],file_ids,message,fallback=mode in ('summarize','generate_quiz'))
-   except LookupError:
-    return self.json({'error':'Tài liệu không tồn tại hoặc không thuộc tài khoản này'},404)
-   context,tool_sources,agent_trace=tutor_agent.run(message,context)
-   sources.extend(tool_sources)
+   preference_intent=tutor_memory.chat_preference(message)
+   if preference_intent:
+    context,sources,query_keywords,agent_trace='',[],[],[{'tool':'preference_router','status':'handled'}]
+   else:
+    try:
+     context,sources,query_keywords=tutor_context(u['id'],file_ids,message,fallback=mode in ('summarize','generate_quiz'))
+    except LookupError:
+     return self.json({'error':'Tài liệu không tồn tại hoặc không thuộc tài khoản này'},404)
+    context,tool_sources,agent_trace=tutor_agent.run(message,context)
+    sources.extend(tool_sources)
    engine=get_engine()
-   retrieval_tier='documents' if context else 'miss'
+   retrieval_tier='conversation' if preference_intent else ('documents' if context else 'miss')
    cached_knowledge=None
-   if not context:
+   if not context and not preference_intent:
     cached_knowledge=external_cache_lookup(message,query_keywords)
     if cached_knowledge:
      context=f"Bộ nhớ kiến thức bên ngoài: {cached_knowledge['answer']}"
@@ -1664,13 +1692,15 @@ class H(BaseHTTPRequestHandler):
     history=tutor_store.history(c,conversation_id,8)
     memory_profile=tutor_memory.profile(c,u['id'])
     profile_summary=str(memory_profile.get('summary') or '')
-    if profile_summary and 'Chưa đủ dữ liệu' not in profile_summary:
-     context=f'{context}\n\nHồ sơ học tập riêng của người dùng hiện tại:\n{profile_summary}'.strip()
+    if 'Chưa đủ dữ liệu' in profile_summary:
+     profile_summary=''
    quiz=None; quiz_topic=''
    if mode=='generate_quiz':
     quiz,quiz_topic=chat_quiz(engine,message,context)
    try:
-    if quiz:
+    if preference_intent:
+     answer=preference_intent['reply']
+    elif quiz:
      answer=(f'## Quiz nhanh: {quiz_topic}\n\n'
              f'{len(quiz["questions"])} câu hỏi bám theo tài liệu. Chọn đáp án rồi bấm **Kiểm tra** để xem kết quả.')
     elif retrieval_tier=='miss' and not getattr(engine,'uses_model',False):
@@ -1679,7 +1709,8 @@ class H(BaseHTTPRequestHandler):
              'nhưng chưa có kết quả. Hãy bổ sung tài liệu liên quan hoặc cấu hình AI provider để '
              'Nova tìm hiểu và lưu câu trả lời vào cache cho lần sau.')
     else:
-     answer=engine.answer(mode=mode,question=message,context=context,history=history)
+     answer=engine.answer(mode=mode,question=message,context=context,history=history,
+                          learner_profile=profile_summary,depth=depth,model=model_override)
    except TutorEngineError as error:
     return self.json({'error':f'AI Tutor tạm thời không trả lời được: {error}','retryable':True},502)
    health=tutor_engine.PROVIDER_HEALTH
@@ -1693,6 +1724,9 @@ class H(BaseHTTPRequestHandler):
             '> Nguồn: kho kiến thức bên ngoài đã lưu, do tài liệu của bạn không có nội dung phù hợp.')
    degraded=bool(getattr(engine,'name','')=='provider-resilient' and not health.get('ok',True))
    with db() as c:
+    if not tutor_store.conversation_owned(c,conversation_id,u['id']):
+     return self.json({'conversation_id':conversation_key,'role':'assistant','content':'',
+       'discarded':True,'reason':'conversation_deleted'},200)
     tutor_store.add_message(c,conversation_id,'user',message,mode)
     message_id=tutor_store.add_message(c,conversation_id,'assistant',answer,mode,payload=quiz)
     tutor_memory.observe_question(c,u['id'],message)
@@ -1703,7 +1737,11 @@ class H(BaseHTTPRequestHandler):
     if conversation_title in ('','Cuộc hội thoại mới'):
      tutor_store.rename_conversation(c,conversation_id,message[:60])
     c.commit()
-   return self.json({'conversation_id':conversation_key,'message_id':str(message_id),'role':'assistant','content':answer,'sources':sources,'mode':mode,
+   provider_engine=getattr(engine,'primary',None)
+   model_used=getattr(provider_engine,'last_model',None)
+   failovers=getattr(provider_engine,'last_failovers',[])
+   return self.json({'conversation_id':conversation_key,'message_id':str(message_id),'role':'assistant','content':answer,'sources':sources,'mode':mode,'depth':depth,
+     'model_requested':requested_model,'model_used':model_used,'model_failovers':failovers,
      'quiz':quiz,
      'retrieval':{'tier':retrieval_tier,'keywords':query_keywords},
      'agent_trace':agent_trace,
@@ -1757,6 +1795,9 @@ class H(BaseHTTPRequestHandler):
      'target_level':x.get('target_level') or assessment.get('target_level'),
      'pace':x.get('pace') or assessment.get('pace') or 'steady',
      'study_time':x.get('study_time') or assessment.get('study_time') or 240,
+     'learner_type':str(x.get('learner_type') or '').strip(),
+     'deadline_weeks':x.get('deadline_weeks') or 4,
+     'constraints':str(x.get('constraints') or '').strip(),
      'strengths':x.get('strengths') if isinstance(x.get('strengths'),list) else assessment.get('strengths') or [],
      'weaknesses':x.get('weaknesses') if isinstance(x.get('weaknesses'),list) else assessment.get('weaknesses') or [],
      'topics':x.get('topics') if isinstance(x.get('topics'),list) else []}

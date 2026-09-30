@@ -11,13 +11,26 @@ import ast
 import json
 import math
 import re
+import ssl
 import urllib.error
 import urllib.request
 from collections import Counter
 
 from . import config
 
-MODES = ('explain', 'solve', 'hint', 'summarize', 'generate_quiz')
+try:
+    import certifi
+except ImportError:  # Development remains usable before optional dependencies are installed.
+    certifi = None
+
+MODES = ('explain', 'solve', 'hint', 'guided', 'review', 'summarize', 'generate_quiz')
+DEPTHS = ('auto', 'basic', 'standard', 'deep')
+DEPTH_INSTRUCTIONS = {
+    'auto': 'Tự chọn độ sâu phù hợp với câu hỏi và nền tảng người học.',
+    'basic': 'Giải thích cơ bản, câu ngắn, ít thuật ngữ và một ví dụ trực quan.',
+    'standard': 'Giải thích cân bằng giữa bản chất, ví dụ và bước áp dụng.',
+    'deep': 'Giải thích chuyên sâu: nêu điều kiện tiên quyết, ngoại lệ, đánh đổi và cách kiểm chứng.',
+}
 # Chỉ dẫn hành vi cho từng chế độ. Khi Nova dùng model thật, chỉ gửi mỗi tên chế độ
 # ("chế độ hiện tại: hint") là không đủ — model vẫn đưa đáp án, nên mỗi chế độ nói rõ
 # nó muốn gì. Bản offline đã tự định tuyến sang compose_* riêng nên không cần phần này.
@@ -36,6 +49,12 @@ MODE_INSTRUCTIONS = {
              'hai gạch đầu dòng kiến thức/công thức cần nhớ, (3) bước tiếp theo cần làm, (4) MỘT câu hỏi gợi mở. '
              'Không giảng lại toàn bộ khái niệm và KHÔNG đưa ví dụ đã giải sẵn — ví dụ giải sẵn là để chép, '
              'phải dành cho chế độ "Giải thích"; ở đây người học phải tự làm từng bước.'),
+    'guided': ('Nhiệm vụ của lượt này: HƯỚNG DẪN TỪNG BƯỚC. Chia việc thành các bước nhỏ, giải thích mục đích '
+               'của bước hiện tại và chỉ đưa bước kế tiếp người học cần tự thực hiện. Không ép người học chỉ nhận gợi ý '
+               'nếu họ đã yêu cầu lời giải đầy đủ; trong trường hợp đó hãy chuyển sang giải bài.'),
+    'review': ('Nhiệm vụ của lượt này: NHẬN XÉT BÀI LÀM. Đối chiếu nội dung người học gửi với tài liệu/rubric có thật; '
+               'nêu phần đúng, chỉ vị trí lỗi hoặc thiếu bằng chứng, giải thích lý do và đề xuất sửa nhỏ nhất. '
+               'Phân biệt lỗi chắc chắn với điểm chưa thể xác minh; không khẳng định đã chạy code nếu chưa chạy.'),
     'summarize': ('Nhiệm vụ của lượt này: TÓM TẮT. Bám sát ngữ cảnh tài liệu được cung cấp, trình bày theo '
                   'mục ngắn gọn, không thêm kiến thức ngoài tài liệu; mục nào tài liệu không có thì ghi rõ '
                   'là tài liệu chưa đề cập.'),
@@ -299,10 +318,15 @@ AUTO_MODE_RULES = (
     ('hint', r'gợi\s+ý|hint|đừng\s+(cho|đưa)\s+(mình\s+)?đáp\s+án|không\s+(cho|đưa)\s+đáp\s+án|'
              r'chỉ\s+(hướng|gợi)|gợi\s+mở|hướng\s+dẫn\s+(mình|em|tôi)\s+tự|để\s+(mình|em|tôi)\s+tự|'
              r'cho\s+(mình|em|tôi)\s+tự\s+làm|manh\s+mối'),
+    ('review', r'nhận\s+xét\s+(bài|lời\s+giải|code)|review\s+(bài|lời\s+giải|code)|'
+               r'kiểm\s+tra\s+(bài\s+làm|lời\s+giải|code)|xem\s+(giúp\s+)?(bài\s+làm|lời\s+giải|code)\s+(của\s+)?(mình|em|tôi)|'
+               r'sửa\s+(giúp\s+)?(code|bài\s+làm)|chấm\s+(giúp\s+)?bài\s+làm'),
     ('summarize', r'tóm\s+tắt|summary|tổng\s+hợp\s+lại|nội\s+dung\s+chính|ý\s+chính|tài\s+liệu\s+(này|đó|mình)\s+'
                   r'(nói|có)\s+gì|có\s+gì\s+trong\s+tài\s+liệu|điểm\s+chính'),
     ('explain', r'giải\s+thích|định\s+nghĩa|\blà\s+gì\b|khái\s+niệm|tại\s+sao|vì\s+sao|\bwhy\b|'
                 r'khác\s+(gì|nhau|biệt)|so\s+sánh|phân\s+biệt|nguyên\s+lý|cơ\s+chế'),
+    ('guided', r'hướng\s+dẫn\s+(mình|em|tôi)?\s*từng\s+bước|dẫn\s+dắt|cùng\s+(mình|em|tôi)\s+làm|'
+               r'từng\s+bước\s+một|giúp\s+(mình|em|tôi)\s+tự\s+làm'),
     ('solve', r'giải\s+(bài|giúp|hộ|dùm|đi)\b|lời\s+giải|bài\s+giải|đáp\s+án|đáp\s+số|kết\s+quả\s+(là|cuối|bằng)|'
               r'tính\s+(giúp|toán|ra|hộ)|sắp\s+xếp\s+(giúp|hộ|dùm)|cho\s+mình\s+(kết\s+quả|xem\s+lời)|'
               r'hướng\s+giải|kết\s+luận\s+giúp|\bsolve\b'),
@@ -760,6 +784,39 @@ def compose_hint(question: str, context: str) -> str:
     return '\n'.join(lines)
 
 
+def compose_guided(question: str, context: str) -> str:
+    """Give one grounded next step, then let the learner do the following step."""
+    focus = focus_phrase(question) or 'bài tập của bạn'
+    passages = rank_passages(question, context, limit=3)
+    lines = [f'## Cùng làm từng bước: {heading(focus)}', '']
+    if passages:
+        lines.append('**Bước 1 — Chọn dữ kiện:**')
+        lines.extend(f'- {item["sentence"].strip()}{source_tag(item)}' for item in passages[:2])
+        lines += ['', '**Bước tiếp theo của bạn:** hãy chỉ ra công thức/quy tắc phù hợp và thay dữ kiện vào.']
+    else:
+        lines += ['**Bước 1:** viết lại điều đề bài đã cho và điều cần tìm.',
+                  '**Bước tiếp theo của bạn:** nêu một công thức hoặc quy tắc có thể nối hai phần đó.']
+        lines.append('Chưa tìm thấy tài liệu phù hợp, nên khung trên là cách học chung chứ chưa phải lời giải.')
+    lines += ['', 'Gửi bước bạn vừa làm; mình sẽ kiểm tra rồi cùng đi tiếp.']
+    return '\n'.join(lines)
+
+
+def compose_review(question: str, context: str) -> str:
+    """Review conservatively offline: cite matching evidence and state what is unverified."""
+    passages = rank_passages(question, context, limit=4)
+    lines = ['## Nhận xét bài làm', '']
+    if passages:
+        lines.append('**Điểm có thể đối chiếu với tài liệu:**')
+        lines.extend(f'- {item["sentence"].strip()}{source_tag(item)}' for item in passages[:3])
+        lines += ['', '**Giới hạn kiểm tra:** đây là đoạn liên quan để đối chiếu; Nova offline chưa đủ căn cứ '
+                  'để kết luận toàn bộ lời giải/code đúng hay sai nếu thiếu rubric, đáp án chuẩn hoặc trình chạy phù hợp.']
+    else:
+        lines.append('Chưa có tài liệu/rubric phù hợp để xác minh tính đúng của phần bạn gửi.')
+        lines.append('Mình có thể nhận xét cách trình bày, nhưng cần đề bài và tiêu chí chấm để chỉ ra lỗi nội dung đáng tin cậy.')
+    lines += ['', 'Nếu muốn kiểm tra chính xác hơn, gửi kèm đề bài và kết quả bạn mong đợi.']
+    return '\n'.join(lines)
+
+
 def compose_summary(question: str, context: str) -> str:
     focus = focus_phrase(question)
     pool: list[dict] = []
@@ -892,7 +949,8 @@ class LocalEngine:
     uses_model = False
 
     # ---------------------------------------------------------------- chat ---
-    def answer(self, *, mode: str, question: str, context: str, history: list | None = None) -> str:
+    def answer(self, *, mode: str, question: str, context: str, history: list | None = None,
+               learner_profile: str = '', depth: str = 'auto', model: str | None = None) -> str:
         mode = mode if mode in MODES else 'explain'
         if is_gibberish(question):
             return ('## Mình chưa rõ câu hỏi\n\n'
@@ -904,6 +962,10 @@ class LocalEngine:
             return compose_solve(asked, context)
         if mode == 'hint':
             return compose_hint(asked, context)
+        if mode == 'guided':
+            return compose_guided(asked, context)
+        if mode == 'review':
+            return compose_review(asked, context)
         if mode == 'summarize':
             return compose_summary(asked, context)
         if mode == 'generate_quiz':
@@ -1063,32 +1125,56 @@ class ProviderEngine:
     uses_model = True
 
     def __init__(self, *, base_url: str, api_key: str, model: str,
-                 task_model: str | None = None, timeout: int = 45):
+                 task_model: str | None = None, fallback_models=None,
+                 task_fallback_models=None, timeout: int = 45):
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.model = model
         self.task_model = task_model or model
+        self.fallback_models = self._unique_models(fallback_models)
+        self.task_fallback_models = self._unique_models(task_fallback_models)
         self.timeout = timeout
+        self.last_model = None
+        self.last_failovers = []
 
-    def _chat(self, messages: list[dict], *, json_mode: bool = False,
-              model: str | None = None) -> str:
-        body = {'model': model or self.model, 'messages': messages, 'temperature': 0.2}
+    @staticmethod
+    def _unique_models(models) -> list[str]:
+        result: list[str] = []
+        for item in models or ():
+            name = str(item).strip()
+            if name and name not in result:
+                result.append(name)
+        return result
+
+    @staticmethod
+    def _can_try_another_model(error: BaseException) -> bool:
+        status = re.search(r'error (\d{3})', str(error))
+        code = int(status.group(1)) if status else None
+        return code in (404, 408, 409, 429) or bool(code and code >= 500)
+
+    def _chat_once(self, messages: list[dict], *, json_mode: bool, model: str) -> str:
+        """Make one provider request; model failover is handled by `_chat`."""
+        body = {'model': model, 'messages': messages, 'temperature': 0.2}
         if json_mode:
             body['response_format'] = {'type': 'json_object'}
-        headers = {'Content-Type': 'application/json'}
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'User-Agent': 'AI-StudyHub-Nova/1.0',
+        }
         if self.api_key:
             headers['Authorization'] = f'Bearer {self.api_key}'
+        if 'openrouter.ai' in self.base_url.lower():
+            headers['HTTP-Referer'] = 'https://github.com/N24DECE081/AI-STUDYHUB'
+            headers['X-Title'] = 'AI StudyHub - Nova Tutor'
         request = urllib.request.Request(
-            f'{self.base_url}/chat/completions',
-            data=json.dumps(body).encode('utf-8'),
-            headers=headers,
-            method='POST',
-        )
+            f'{self.base_url}/chat/completions', data=json.dumps(body).encode('utf-8'),
+            headers=headers, method='POST')
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            tls_context = ssl.create_default_context(cafile=certifi.where()) if certifi else None
+            with urllib.request.urlopen(request, timeout=self.timeout, context=tls_context) as response:
                 payload = json.loads(response.read().decode('utf-8'))
         except urllib.error.HTTPError as error:
-            detail = ''
             try:
                 detail = error.read().decode('utf-8', 'ignore')[:300]
             except Exception:  # noqa: BLE001 - body is best effort only
@@ -1101,7 +1187,27 @@ class ProviderEngine:
             raise EngineError('AI provider returned an empty response')
         return (choices[0].get('message') or {}).get('content') or ''
 
-    def answer(self, *, mode: str, question: str, context: str, history: list | None = None) -> str:
+    def _chat(self, messages: list[dict], *, json_mode: bool = False,
+              model: str | None = None) -> str:
+        primary = model or self.model
+        fallbacks = self.task_fallback_models if json_mode else self.fallback_models
+        candidates = self._unique_models([primary, *fallbacks])
+        last_error: EngineError | None = None
+        self.last_failovers = []
+        for index, candidate in enumerate(candidates):
+            try:
+                result = self._chat_once(messages, json_mode=json_mode, model=candidate)
+                self.last_model = candidate
+                return result
+            except EngineError as error:
+                last_error = error
+                self.last_failovers.append({'model': candidate, 'reason': provider_failure_reason(error)})
+                if index == len(candidates) - 1 or not self._can_try_another_model(error):
+                    raise
+        raise last_error or EngineError('AI provider returned no usable model')
+
+    def answer(self, *, mode: str, question: str, context: str, history: list | None = None,
+               learner_profile: str = '', depth: str = 'auto', model: str | None = None) -> str:
         skill = config.skill_prompt()
         agent_settings = ((config.yaml_settings('agents').get('capabilities') or {}).get('chat') or {})
         effort = str(agent_settings.get('reasoning_effort') or 'medium').lower()
@@ -1112,6 +1218,7 @@ class ProviderEngine:
         system = ('Bạn là Nova, gia sư AI của StudyHub. Trả lời bằng tiếng Việt, dùng Markdown gọn gàng. '
                   + reasoning
                   + f'{MODE_INSTRUCTIONS.get(mode, MODE_INSTRUCTIONS["explain"])} '
+                  + f'Mức độ giải thích: {DEPTH_INSTRUCTIONS.get(depth, DEPTH_INSTRUCTIONS["auto"])} '
                   + 'Ưu tiên ngữ cảnh tài liệu được cung cấp; nếu ngữ cảnh không có '
                   + 'thông tin cho câu hỏi, nói rõ là tài liệu chưa có phần đó rồi trả lời bằng kiến thức chung '
                   + 'và ghi chú rõ đó là kiến thức chung. Không bịa số liệu hay trích dẫn không có trong ngữ cảnh.'
@@ -1120,9 +1227,13 @@ class ProviderEngine:
         for item in (history or [])[-6:]:
             role = 'assistant' if item.get('role') == 'assistant' else 'user'
             messages.append({'role': role, 'content': str(item.get('content') or '')[:2000]})
-        messages.append({'role': 'user',
-                         'content': f'Ngữ cảnh tài liệu:\n{context[:6000]}\n\nCâu hỏi: {question}'})
-        text = self._chat(messages)
+        user_content = f'Ngữ cảnh tài liệu:\n{context[:6000]}'
+        if learner_profile.strip():
+            user_content += ('\n\nHồ sơ học tập riêng (chỉ dùng để điều chỉnh cách giải thích; '
+                             'không dùng làm bằng chứng kiến thức hoặc citation):\n'
+                             + learner_profile.strip()[:1800])
+        messages.append({'role': 'user', 'content': f'{user_content}\n\nCâu hỏi: {question}'})
+        text = self._chat(messages, model=model)
         if not text.strip():
             raise EngineError('AI provider returned an empty message')
         return text
@@ -1149,8 +1260,18 @@ class ProviderEngine:
             {'role': 'system', 'content': instructions.get(task, 'Trả về JSON hợp lệ.')},
             {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)[:8000]},
         ], json_mode=True, model=self.task_model)
+        cleaned = text.strip()
+        fenced = re.fullmatch(r'```(?:json)?\s*([\s\S]*?)\s*```', cleaned, re.IGNORECASE)
+        if fenced:
+            cleaned = fenced.group(1).strip()
+        # Some free instruct models add a short sentence around otherwise valid
+        # JSON despite the system instruction. Keep only the outer JSON object.
+        if not cleaned.startswith('{') or not cleaned.endswith('}'):
+            start, end = cleaned.find('{'), cleaned.rfind('}')
+            if start >= 0 and end > start:
+                cleaned = cleaned[start:end + 1]
         try:
-            result = json.loads(text)
+            result = json.loads(cleaned)
         except json.JSONDecodeError as error:
             raise EngineError(f'invalid JSON from provider: {error}') from error
         if not isinstance(result, dict):
@@ -1180,6 +1301,12 @@ def provider_failure_reason(error: BaseException) -> str:
     return 'không kết nối được nhà cung cấp'
 
 
+def provider_failure_code(error: BaseException) -> int | None:
+    """HTTP status from a provider error, when the provider returned one."""
+    status = re.search(r'error (\d{3})', str(error))
+    return int(status.group(1)) if status else None
+
+
 class ResilientEngine:
     """Provider first; when it fails (quota, key, network) answer offline.
 
@@ -1201,7 +1328,7 @@ class ResilientEngine:
 
     def _degrade(self, error: BaseException) -> str:
         reason = provider_failure_reason(error)
-        PROVIDER_HEALTH.update({'ok': False, 'reason': reason, 'code': None})
+        PROVIDER_HEALTH.update({'ok': False, 'reason': reason, 'code': provider_failure_code(error)})
         return reason
 
     @staticmethod
@@ -1209,12 +1336,15 @@ class ResilientEngine:
         return (f'> ⚠️ Mô hình AI đang tạm không dùng được ({reason}). '
                 'Câu trả lời dưới đây do Nova dựng từ tài liệu của bạn.\n\n')
 
-    def answer(self, *, mode: str, question: str, context: str, history: list | None = None) -> str:
+    def answer(self, *, mode: str, question: str, context: str, history: list | None = None,
+               learner_profile: str = '', depth: str = 'auto', model: str | None = None) -> str:
         try:
-            text = self.primary.answer(mode=mode, question=question, context=context, history=history)
+            text = self.primary.answer(mode=mode, question=question, context=context, history=history,
+                                       learner_profile=learner_profile, depth=depth, model=model)
         except EngineError as error:
             reason = self._degrade(error)
-            offline = self.fallback.answer(mode=mode, question=question, context=context, history=history)
+            offline = self.fallback.answer(mode=mode, question=question, context=context, history=history,
+                                           learner_profile=learner_profile, depth=depth, model=model)
             return self._notice(reason) + offline
         PROVIDER_HEALTH.update({'ok': True, 'reason': '', 'code': None})
         return text
@@ -1240,5 +1370,7 @@ def get_engine():
             api_key=settings['api_key'],
             model=settings['model'],
             task_model=settings.get('task_model'),
+            fallback_models=settings.get('fallback_models'),
+            task_fallback_models=settings.get('task_fallback_models'),
         )
     )
