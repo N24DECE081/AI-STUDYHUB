@@ -188,3 +188,13 @@ export const getWebAssistantStarters = () => request("/web-assistant/starters");
 export const askWebAssistant = ({ message, history = [] }) =>
   postJson("/web-assistant/chat", { message, history });
 
+
+export const getFlashcardDecks = () => request('/flashcards');
+export const saveFlashcardDeck = (deck) => postJson('/flashcards', deck);
+export const deleteFlashcardDeck = (id) => request(`/flashcards/${encodeURIComponent(id)}`, { method: 'DELETE' });
+export const reviewFlashcard = (id, cardId, rating) => postJson(`/flashcards/${encodeURIComponent(id)}/review`, { card_id: cardId, rating });
+export const getFlashcardPronunciation = (term, signal) => request(`/flashcards/pronunciation?term=${encodeURIComponent(term)}`, { signal });
+export const previewFlashcardDocument = (file, signal) => {
+  const body = new FormData(); body.append('file', file);
+  return request('/flashcards/preview', { method: 'POST', body, signal });
+};

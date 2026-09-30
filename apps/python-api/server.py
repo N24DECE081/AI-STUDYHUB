@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
+import tempfile
+from backend.app.flashcards import service as flashcards
 import json, os, re, secrets, sqlite3, hashlib, mimetypes, html, zipfile, smtplib, ssl
 from datetime import datetime, timezone, timedelta
 from calendar import monthrange
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs, quote
+from urllib.parse import urlparse, parse_qs, quote, unquote
 import unicodedata
 import math, threading, time
 import xml.etree.ElementTree as ET
@@ -492,6 +494,7 @@ def advance_document_progress(connection, user_id, document_id, progress_percent
         'SELECT id FROM documents WHERE id=? AND uploaded_by=?',(document_id,user_id)
     ).fetchone()
     if not owned:return None
+    if progress_percent > 0: update_streak(connection,user_id,record=True)
     current=connection.execute(
         'SELECT id,progress_percent,last_position FROM user_progress WHERE user_id=? AND document_id=?',
         (user_id,document_id),
@@ -1107,6 +1110,16 @@ class H(BaseHTTPRequestHandler):
     ensure_study_session(c,u['id'],token)
     summary=study_time_summary(c,u['id'],token)
    return self.json(summary)
+  if path=='/api/flashcards':
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    decks=[json.loads(row['payload']) for row in c.execute('SELECT payload FROM flashcard_decks WHERE user_id=? ORDER BY id',(u['id'],)).fetchall()]
+   return self.json(decks)
+  if path=='/api/flashcards/pronunciation':
+   u=require_user(self)
+   if not u:return
+   return self.json(flashcards.pronunciation(parse_qs(p.query).get('term',[''])[0]))
   if path=='/api/streak':
     u=require_user(self)
     if not u:return
@@ -1270,6 +1283,13 @@ class H(BaseHTTPRequestHandler):
  def do_DELETE(self):
   if not self.gateway_access(): return
   path=urlparse(self.path).path
+  match=re.fullmatch(r'/api/flashcards/([^/]+)',path)
+  if match:
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    deleted=c.execute('DELETE FROM flashcard_decks WHERE id=? AND user_id=?',(unquote(match.group(1)),u['id'])).rowcount;c.commit()
+   return self.json({'ok':True} if deleted else {'error':'Bộ thẻ không tồn tại'},200 if deleted else 404)
   if path=='/api/ai-tutor/conversations':
    user=require_user(self)
    if not user:return
@@ -1325,6 +1345,62 @@ class H(BaseHTTPRequestHandler):
    p=urlparse(self.path); path=p.path; data=self.body()
   except ValueError:
    return self.json({'error':'Content-Length không hợp lệ'},400)
+  if path=='/api/flashcards/preview':
+   u=require_user(self)
+   if not u:return
+   ctype=self.headers.get('Content-Type','')
+   if 'multipart/form-data' not in ctype or 'boundary=' not in ctype:
+    return self.json({'error':'multipart form required'},400)
+   msg=BytesParser(policy=default).parsebytes(b'Content-Type: '+ctype.encode()+b'\r\n\r\n'+data)
+   parts=[part for part in msg.iter_parts() if part.get_filename()] if msg.is_multipart() else []
+   if len(parts)!=1:return self.json({'error':'Hãy chọn một file'},400)
+   filename=parts[0].get_filename(); content=parts[0].get_payload(decode=True) or b''
+   extension=os.path.splitext(filename)[1].lower()
+   if extension not in ALLOWED_UPLOAD_EXTENSIONS:return self.json({'error':'Định dạng file không được hỗ trợ'},400)
+   if not content:return self.json({'error':'File không được rỗng'},400)
+   if len(content)>MAX_UPLOAD_BYTES:return self.json({'error':'File quá lớn'},413)
+   if extension=='.pdf' and not content.lstrip().startswith(b'%PDF-'):
+    return self.json({'error':'File PDF không hợp lệ'},422)
+   if extension in ('.docx','.pptx','.xlsx') and not content.startswith(b'PK'):
+    return self.json({'error':'File Office không hợp lệ'},422)
+   try:
+    with tempfile.TemporaryDirectory() as folder:
+     target=os.path.join(folder,'preview'+extension)
+     with open(target,'wb') as output:output.write(content)
+     extracted=extract_document_text(target)
+    if not extracted.strip():raise DocumentTextError('empty')
+   except Exception:
+    return self.json({'error':'Không đọc được nội dung chữ trong tài liệu'},422)
+   return self.json(flashcards.suggest(extracted,filename,get_engine()))
+  if path=='/api/flashcards':
+   u=require_user(self)
+   if not u:return
+   try:deck=flashcards.normalize_deck(json_body(data))
+   except ValueError as error:return self.json({'error':str(error)},400)
+   with db() as c:
+    existing=c.execute('SELECT id FROM flashcard_decks WHERE id=? AND user_id=?',(deck['id'],u['id'])).fetchone()
+    payload=json.dumps(deck,ensure_ascii=False)
+    if existing:c.execute('UPDATE flashcard_decks SET payload=? WHERE id=? AND user_id=?',(payload,deck['id'],u['id']))
+    else:c.execute('INSERT INTO flashcard_decks(id,user_id,payload) VALUES(?,?,?)',(deck['id'],u['id'],payload))
+    c.commit()
+   return self.json(deck,200 if existing else 201)
+  match=re.fullmatch(r'/api/flashcards/([^/]+)/review',path)
+  if match:
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   if not isinstance(x,dict) or x.get('rating') not in ('known','again'):
+    return self.json({'error':'Đánh giá không hợp lệ'},400)
+   with db() as c:
+    row=c.execute('SELECT payload FROM flashcard_decks WHERE id=? AND user_id=?',(unquote(match.group(1)),u['id'])).fetchone()
+    if not row:return self.json({'error':'Bộ thẻ không tồn tại'},404)
+    deck=json.loads(row['payload'])
+    card=next((card for card in deck['cards'] if card['id']==x.get('card_id')),None)
+    if not card:return self.json({'error':'Thẻ không tồn tại'},404)
+    card['remembered']=x['rating']=='known'
+    c.execute('UPDATE flashcard_decks SET payload=? WHERE id=? AND user_id=?',(json.dumps(deck,ensure_ascii=False),deck['id'],u['id']))
+    streak=update_streak(c,u['id'],record=True);c.commit()
+   return self.json({'deck':deck,'streak':streak})
   if path=='/api/quizzes/generate':
    u=require_user(self)
    if not u:return
@@ -1379,6 +1455,7 @@ class H(BaseHTTPRequestHandler):
      correct=selected is not None and selected==row['correct_index']
      score += int(correct)
      items.append({'id':row['id'],'question':row['question'],'selected_index':selected,'correct_index':row['correct_index'],'correct':correct,'explanation':row['explanation'],'source_document_id':row['document_id'],'source_title':row.get('source_title'),'source_locator':row['source_locator'],'options':row['options']})
+    update_streak(c,u['id'],record=True)
     attempt_payload={'kind':'quiz_attempt','score':score,'total':len(rows),'answers':answers}
     attempt_id=c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(quiz['id'],'user',json.dumps(attempt_payload,ensure_ascii=False))).lastrowid
     automatic_progress=60+round((score/max(len(rows),1))*40)
@@ -1836,6 +1913,7 @@ class H(BaseHTTPRequestHandler):
     return self.json({'error':f'Không chấm được bài làm: {error}','retryable':True},422)
    adapted=None; progress={'total_exercises':0,'graded':0,'average_percentage':0,'completed':False}
    with db() as c:
+    update_streak(c,u['id'],record=True)
     submission_id=tutor_store.add_submission(c,exercise['id'],u['id'],answer=answer,answer_type=answer_type,result=result)
     submissions=tutor_store.submissions_for_roadmap(c,exercise['roadmap_id'],u['id'])
     progress=tutor_store.progress_for_roadmap(c,exercise['roadmap_id'],u['id'])

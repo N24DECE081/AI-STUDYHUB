@@ -13,3 +13,13 @@
 @keyframes flashcardRemember{40%{transform:scale(1.03);box-shadow:var(--shadow-subtle)}}@keyframes flashcardFlame{50%{transform:translateY(-7px) scale(1.25)}}
 @media(max-width:600px){.flashcard-form-row{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){.study-card.is-remembered,.study-card.is-remembered>.study-card__flame{animation:none}}
+.flashcard-editor{display:grid;gap:14px;border:0;padding:0;min-width:0}
+.flashcard-editor>label{display:grid;gap:5px}
+.study-session .study-card{border:2px solid var(--card-color);background:color-mix(in srgb,var(--card-color) 22%,var(--bg-main));box-shadow:0 6px 24px color-mix(in srgb,var(--card-color) 20%,transparent)}
+.quiz-deck-cover.is-lines{background-image:repeating-linear-gradient(0deg,transparent 0 14px,#ffffff55 14px 15px)}
+.quiz-deck-cover.is-grid{background-image:linear-gradient(#ffffff44 1px,transparent 1px),linear-gradient(90deg,#ffffff44 1px,transparent 1px)}
+.flashcard-pronunciation{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin:12px 0}
+.flashcard-pronunciation small{font-size:11px}
+
+.flashcard-pronunciation button{border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;background:var(--bg-main);color:var(--text-dark);font:inherit;cursor:pointer}
+.flashcard-pronunciation button:disabled{opacity:.6;cursor:wait}
