@@ -222,7 +222,8 @@ def engine_status(environ=None) -> dict:
         return {'engine': 'local', 'provider': None, 'model': None,
                 'label': 'Nova offline (bám theo tài liệu của bạn)',
                 'hint': 'Đặt API key vào apps/python-api/.env rồi chạy lại backend để Nova dùng mô hình AI.'}
-    return {'engine': 'provider', 'provider': settings['provider'], 'model': settings['model'],
+    models = model_list([settings['model'], *settings['fallback_models']])
+    return {'engine': 'provider', 'provider': settings['provider'], 'model': settings['model'], 'models': models,
             'task_model': settings['task_model'], 'fallback_models': settings['fallback_models'],
             'task_fallback_models': settings['task_fallback_models'],
             'label': f"Nova AI · {settings['provider']} · {settings['model']}",
