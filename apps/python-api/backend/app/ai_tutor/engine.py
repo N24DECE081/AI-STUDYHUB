@@ -916,9 +916,45 @@ class LocalEngine:
             return self._grading(payload)
         if task == 'roadmap':
             return self._roadmap(payload)
+        if task == 'roadmap_adapt':
+            return self._roadmap_adapt(payload)
         if task == 'quiz':
             return self._quiz_json(payload)
+        if task == 'mindmap':
+            return self._mindmap(payload)
+        if task == 'flashcard':
+            return self._flashcard(payload)
         raise EngineError(f'unsupported local task: {task}')
+
+    def _roadmap_adapt(self, payload: dict) -> dict:
+        original = payload.get('original_roadmap') or {}
+        if not original:
+            return self._roadmap(payload)
+        original['title'] = original.get('title', '') + ' (Đã cập nhật)'
+        return original
+
+    def _flashcard(self, payload: dict) -> dict:
+        topic = str(payload.get('topic') or 'Kiến thức chung')
+        return {
+            'cards': [
+                {'question': f'Khái niệm về {topic}?', 'answer': 'Đây là kiến thức cơ bản cần ghi nhớ.', 'hint': 'Xem phần mở đầu', 'difficulty': 'beginner'},
+                {'question': 'Ví dụ minh hoạ?', 'answer': 'Áp dụng vào thực tế.', 'hint': 'Nghĩ về ứng dụng', 'difficulty': 'intermediate'}
+            ]
+        }
+
+    def _mindmap(self, payload: dict) -> dict:
+        topic = str(payload.get('topic') or payload.get('subject') or 'Mindmap')
+        return {
+            'title': f'Sơ đồ tư duy: {topic}',
+            'root': {
+                'id': 'root',
+                'label': topic,
+                'children': [
+                    {'id': 'c1', 'label': 'Khái niệm cơ bản', 'children': []},
+                    {'id': 'c2', 'label': 'Ví dụ thực tế', 'children': []}
+                ]
+            }
+        }
 
     def _grading(self, payload: dict) -> dict:
         answer = str(payload.get('student_answer') or '')
@@ -1134,16 +1170,33 @@ class ProviderEngine:
             'roadmap': ('Tạo lộ trình học. Chỉ trả về JSON, không thêm chữ nào ngoài JSON. Cấu trúc bắt buộc:\n'
                         '{"title": str, "summary": str, "focus_weaknesses": [str], "modules": ['
                         '{"key": "m1", "title": str, "difficulty": "beginner|intermediate|advanced", '
+                        '"project": {"title": str, "type": "Intro Project|Personal Project|Real Project|Career Project", "description": str}, '
                         '"lessons": [{"key": "m1-l1", "title": str, "objectives": [str], "examples": [str], '
                         '"estimated_minutes": int}], "quiz": {"question_count": int, "max_score": 10}, '
-                        '"assessment": {"type": "short_answer", "max_score": 10}}]}\n'
+                        '"assessment": {"title": str, "type": "short_answer|multiple_choice", "max_score": 10}}]}\n'
                         'Mỗi module PHẢI có 2-4 lesson là object có "title"; không được để lessons rỗng '
-                        'và không được trả lesson dạng chuỗi.'),
+                        'và không được trả lesson dạng chuỗi. Cố gắng thêm project và assessment vào mỗi module.'),
+            'roadmap_adapt': ('Cập nhật lộ trình học (JSON) hiện tại dựa trên bối cảnh mới (đổi mục tiêu, thêm tài liệu, thời gian, v.v.). '
+                              'Chỉ trả về JSON, không markdown, không text dư thừa. '
+                              'QUAN TRỌNG: Phải giữ nguyên cấu trúc JSON của lộ trình. '
+                              'BẮT BUỘC: NẾU giữ lại bài học/module cũ, PHẢI GIỮ NGUYÊN "key" cũ (vd: "m1-l1", "m2-l2") để bảo toàn tiến độ học tập của user trong DB. '
+                              'NẾU thêm bài học/module mới, hãy tạo "key" mới chưa từng tồn tại. '
+                              'Có thể xoá bài học/module nếu không còn phù hợp với mục tiêu mới. '
+                              'Có thể sửa "title", "objectives" của bài học cũ. '
+                              'Cấu trúc bắt buộc: giống y hệt task "roadmap".'),
             'quiz': ('Tạo quiz trắc nghiệm bám sát tài liệu. Chỉ trả về JSON, không thêm chữ nào ngoài JSON. '
                      'Cấu trúc bắt buộc: {"questions": [{"question": str, "options": [str, str, str, str], '
                      '"answer_index": int (0..3, vị trí đáp án đúng), "max_score": int}], "topic": str}. '
                      'Tạo 3-5 câu, mỗi câu ĐÚNG 4 lựa chọn; nội dung câu hỏi và lựa chọn phải lấy từ tài liệu, '
                      'các lựa chọn sai phải hợp lý chứ không vô nghĩa.'),
+            'mindmap': ('Tạo sơ đồ tư duy (mindmap) bám sát tài liệu hoặc ngữ cảnh bài học được cung cấp. Chỉ trả về JSON, không markdown, không text dư thừa. '
+                        'Cấu trúc bắt buộc tối thiểu: {"title": str, "root": {"id": "root", "label": str, "children": []}}. '
+                        'Mỗi node con (child) phải có định dạng tương tự: {"id": str, "label": str, "children": []}. '
+                        'Không tự bịa nội dung ngoài context, không dùng markdown code block, chỉ xuất valid JSON.'),
+            'flashcard': ('Tạo bộ flashcard ghi nhớ bám sát tài liệu hoặc ngữ cảnh được cung cấp. Chỉ trả về JSON, không markdown, không text dư thừa. '
+                          'Cấu trúc bắt buộc: {"cards": [{"question": str, "answer": str, "hint": str, "difficulty": "beginner|intermediate|advanced"}]}. '
+                          'Tạo 5-10 thẻ, mỗi thẻ là một khái niệm hoặc câu hỏi quan trọng từ tài liệu. '
+                          'Không tự bịa nội dung ngoài tài liệu, chỉ xuất valid JSON.'),
         }
         text = self._chat([
             {'role': 'system', 'content': instructions.get(task, 'Trả về JSON hợp lệ.')},

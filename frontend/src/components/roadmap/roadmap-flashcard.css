@@ -1,0 +1,109 @@
+.roadmap-flashcard-launcher {
+  margin: 1rem 0;
+}
+
+.roadmap-flashcard-container {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: var(--surface-1, #f8f9fa);
+  border: 1px solid var(--border-color, #dee2e6);
+  border-radius: 8px;
+}
+
+.flashcard-loading {
+  color: var(--text-muted, #868e96);
+  font-style: italic;
+  padding: 1rem 0;
+  text-align: center;
+}
+
+.flashcard-error {
+  color: var(--danger-color, #dc3545);
+  padding: 1rem 0;
+  text-align: center;
+}
+
+.flashcard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.flashcard-item {
+  height: 180px;
+  background: var(--surface-0, #ffffff);
+  border: 1px solid var(--primary-color, #228be6);
+  border-radius: 12px;
+  padding: 1rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+  transition: all 0.3s ease;
+}
+
+.flashcard-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(0,0,0,0.1);
+}
+
+.flashcard-item.is-flipped {
+  background: var(--primary-color, #228be6);
+  color: white;
+}
+
+.flashcard-front, .flashcard-back {
+  width: 100%;
+}
+
+.flashcard-badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--primary-color, #228be6);
+  background: var(--primary-light, #e7f5ff);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  display: inline-block;
+  margin-bottom: 0.5rem;
+}
+
+.flashcard-item.is-flipped .flashcard-badge {
+  background: rgba(255,255,255,0.2);
+  color: white;
+}
+
+.flashcard-question {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary, #212529);
+}
+
+.flashcard-hint-text {
+  font-size: 0.75rem;
+  color: var(--text-muted, #868e96);
+  margin-top: 1rem;
+  margin-bottom: 0;
+}
+
+.flashcard-back-title {
+  font-size: 0.85rem;
+  margin: 0 0 0.5rem 0;
+  color: rgba(255,255,255,0.8);
+}
+
+.flashcard-answer {
+  font-size: 0.95rem;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.flashcard-hint {
+  font-size: 0.75rem;
+  font-style: italic;
+  margin-top: 0.5rem;
+  color: rgba(255,255,255,0.7);
+}

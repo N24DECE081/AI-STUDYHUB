@@ -15,7 +15,7 @@ EXPECTED_TABLES = {
     "chat_messages", "document_chunks", "user_progress", "subscription_changes",
     # AI Tutor: hội thoại, đánh giá năng lực, lộ trình, bài tập và bài nộp
     "tutor_conversations", "tutor_messages", "tutor_assessments",
-    "tutor_roadmaps", "tutor_exercises", "tutor_submissions"
+    "tutor_roadmaps", "tutor_exercises", "tutor_submissions", "roadmap_lesson_progress"
 }
 
 

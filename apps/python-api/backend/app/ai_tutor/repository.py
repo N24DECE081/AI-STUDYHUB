@@ -238,7 +238,7 @@ def add_submission(conn, exercise_id: int, user_id: int, *, answer: str, answer_
 
 def submissions_for_roadmap(conn, roadmap_id: int, user_id: int) -> list[dict]:
     rows = conn.execute(
-        """SELECT s.*, e.exercise_type, e.topic, e.difficulty
+        """SELECT s.*, e.exercise_type, e.topic, e.difficulty, e.lesson_key
            FROM tutor_submissions s JOIN tutor_exercises e ON e.id=s.exercise_id
            WHERE e.roadmap_id=? AND s.user_id=? ORDER BY s.id""",
         (roadmap_id, user_id),
@@ -270,6 +270,27 @@ def progress_for_roadmap(conn, roadmap_id: int, user_id: int) -> dict:
         'completed': graded >= total_count > 0,
     }
 
+def lesson_progress_for_roadmap(conn, roadmap_id: int, user_id: int) -> dict:
+    """Returns a dict mapping lesson_key to status info."""
+    rows = conn.execute(
+        'SELECT lesson_key, status, progress_percent, last_score FROM roadmap_lesson_progress WHERE roadmap_id=? AND user_id=?',
+        (roadmap_id, user_id)
+    ).fetchall()
+    return {row['lesson_key']: _row_to_dict(row) for row in rows}
+
+def update_lesson_progress(conn, user_id: int, roadmap_id: int, lesson_key: str, status: str, progress_percent: int, last_score: float) -> None:
+    conn.execute(
+        """INSERT INTO roadmap_lesson_progress(user_id, roadmap_id, lesson_key, status, progress_percent, last_score)
+           VALUES(?, ?, ?, ?, ?, ?)
+           ON CONFLICT(user_id, roadmap_id, lesson_key) DO UPDATE SET
+               status=excluded.status,
+               progress_percent=excluded.progress_percent,
+               last_score=excluded.last_score,
+               updated_at=CURRENT_TIMESTAMP""",
+        (user_id, roadmap_id, lesson_key, status, progress_percent, last_score)
+    )
+    conn.commit()
+
 
 def to_public_assessment(row: dict):
     """Learner-facing assessment summary (JSON columns decoded, no answer keys)."""
@@ -294,7 +315,7 @@ def recent_submissions(conn, user_id: int, limit: int = 20) -> list[dict]:
     """Latest submissions for a learner across every roadmap."""
     rows = conn.execute(
         """
-        SELECT s.*, e.exercise_type, e.topic, e.difficulty
+        SELECT s.*, e.exercise_type, e.topic, e.difficulty, e.lesson_key
         FROM tutor_submissions s
         JOIN tutor_exercises e ON e.id = s.exercise_id
         WHERE s.user_id = ?

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AI_SERVICE_URL } from '../config';
+import { postJson } from '../api';
 import robotImg from '../assets/robot-capybara.png';
 
 function FlashcardTab({ currentDocument }) {
@@ -14,15 +14,8 @@ function FlashcardTab({ currentDocument }) {
     setFlippedCards({});
 
     try {
-      const res = await fetch(`${AI_SERVICE_URL}/api/documents/flashcards`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ context: currentDocument.extractedText }),
-      });
-
-      if (!res.ok) throw new Error('Không thể tạo Flashcard!');
-      const data = await res.json();
-      setCards(typeof data === 'string' ? JSON.parse(data) : data);
+      const data = await postJson("/ai-tutor/flashcards", { context: currentDocument.extractedText });
+      setCards(data.cards || []);
     } catch (err) {
       alert('Lỗi: ' + err.message);
     } finally {
@@ -86,15 +79,15 @@ function FlashcardTab({ currentDocument }) {
                 {!isFlipped ? (
                   <div>
                     <span style={{ fontSize: '11px', color: '#a78bfa', textTransform: 'uppercase', letterSpacing: '1px' }}>Thuật ngữ</span>
-                    <h3 style={{ color: '#ffffff', marginTop: '10px', fontSize: '18px' }}>{card.term}</h3>
+                    <h3 style={{ color: '#ffffff', marginTop: '10px', fontSize: '18px' }}>{card.question || card.term}</h3>
                     <p style={{ fontSize: '11px', color: '#64748b', marginTop: '20px' }}>👆 Nhấn để xem giải thích</p>
                   </div>
                 ) : (
                   <div>
                     <h4 style={{ color: '#c4b5fd', margin: '0 0 8px 0', fontSize: '14px' }}>Định nghĩa:</h4>
-                    <p style={{ color: '#e2e8f0', fontSize: '13px', lineHeight: '1.5', margin: 0 }}>{card.definition}</p>
-                    {card.example && (
-                      <p style={{ color: '#94a3b8', fontSize: '11px', fontStyle: 'italic', marginTop: '8px' }}>Ví dụ: {card.example}</p>
+                    <p style={{ color: '#e2e8f0', fontSize: '13px', lineHeight: '1.5', margin: 0 }}>{card.answer || card.definition}</p>
+                    {card.hint && (
+                      <p style={{ color: '#94a3b8', fontSize: '11px', fontStyle: 'italic', marginTop: '8px' }}>Gợi ý: {card.hint}</p>
                     )}
                   </div>
                 )}

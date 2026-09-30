@@ -514,6 +514,24 @@ CREATE INDEX IF NOT EXISTS ix_tutor_exercises_roadmap
     ON tutor_exercises(roadmap_id, id);
 CREATE INDEX IF NOT EXISTS ix_tutor_submissions_exercise
     ON tutor_submissions(exercise_id, user_id);
+
+CREATE TABLE IF NOT EXISTS roadmap_lesson_progress (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL,
+    roadmap_id      INTEGER NOT NULL,
+    lesson_key      TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'NOT_STARTED' CHECK(status IN ('NOT_STARTED', 'IN_PROGRESS', 'NEED_REVIEW', 'COMPLETED', 'MASTERED')),
+    progress_percent INTEGER NOT NULL DEFAULT 0,
+    last_score      REAL,
+    completed_at    TEXT,
+    updated_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, roadmap_id, lesson_key),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY(roadmap_id) REFERENCES tutor_roadmaps(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_roadmap_lesson_progress_roadmap
+    ON roadmap_lesson_progress(roadmap_id, user_id);
+
 CREATE INDEX IF NOT EXISTS ix_learner_memories_user_type
     ON learner_memories(user_id, memory_type, confidence DESC);
 
@@ -533,3 +551,5 @@ INSERT OR IGNORE INTO schema_migrations(version,description)
 VALUES(9,'Google and Facebook OAuth account links');
 INSERT OR IGNORE INTO schema_migrations(version,description)
 VALUES(10,'Per-user L2 learning facts and L3 learner profiles');
+INSERT OR IGNORE INTO schema_migrations(version,description)
+VALUES(11,'Roadmap lesson progress status tracking');

@@ -259,19 +259,25 @@ def summarize_answers(answers: list[dict], questions: list[dict] | None = None) 
 
 
 def build_roadmap(payload: dict, *, engine) -> dict:
-    """Ask the engine for a roadmap, then normalize it into the wire contract.
-
-    A model can answer with a half-formed JSON (a module without lessons, an
-    empty list…). Such a payload is unusable, so the offline engine is asked
-    instead of failing the request — the learner still gets a roadmap.
-    """
+    """Ask the engine for a roadmap, then normalize it into the wire contract."""
     try:
-        return _roadmap_from_engine(payload, engine=engine)
+        return _roadmap_from_engine(payload, engine=engine, task='roadmap')
     except (RoadmapError, EngineError) as error:
         fallback = getattr(engine, 'fallback', None)
         if fallback is None:
             raise
-        return _roadmap_from_engine(payload, engine=fallback)
+        return _roadmap_from_engine(payload, engine=fallback, task='roadmap')
+
+
+def adapt_roadmap(payload: dict, *, engine) -> dict:
+    """Ask the engine to adapt an existing roadmap."""
+    try:
+        return _roadmap_from_engine(payload, engine=engine, task='roadmap_adapt')
+    except (RoadmapError, EngineError) as error:
+        fallback = getattr(engine, 'fallback', None)
+        if fallback is None:
+            raise
+        return _roadmap_from_engine(payload, engine=fallback, task='roadmap_adapt')
 
 
 def _as_text_list(value) -> list[str]:
@@ -288,11 +294,13 @@ def _lesson_from(raw, module_index: int, lesson_index: int) -> dict | None:
     """Một bài học, dù model trả dict đầy đủ hay chỉ một dòng tiêu đề."""
     if isinstance(raw, str):
         title, objectives, examples, minutes = raw.strip(), [], [], 40
+        key = None
     elif isinstance(raw, dict):
         title = str(raw.get('title') or raw.get('name') or raw.get('topic') or '').strip()
         objectives = _as_text_list(raw.get('objectives') or raw.get('goals')
                                    or raw.get('outcomes') or raw.get('content'))
         examples = _as_text_list(raw.get('examples') or raw.get('example'))
+        key = str(raw.get('key')).strip() if raw.get('key') else None
         try:
             minutes = int(raw.get('estimated_minutes') or raw.get('duration') or raw.get('minutes') or 40)
         except (TypeError, ValueError):
@@ -302,7 +310,7 @@ def _lesson_from(raw, module_index: int, lesson_index: int) -> dict | None:
     if not title:
         title = f'Bài {lesson_index}'
     return {
-        'key': f'm{module_index}-l{lesson_index}',
+        'key': key if key else f'm{module_index}-l{lesson_index}',
         'title': title[:160],
         'objectives': objectives,
         'examples': examples,
@@ -310,7 +318,7 @@ def _lesson_from(raw, module_index: int, lesson_index: int) -> dict | None:
     }
 
 
-def _roadmap_from_engine(payload: dict, *, engine) -> dict:
+def _roadmap_from_engine(payload: dict, *, engine, task: str = 'roadmap') -> dict:
     subject = str(payload.get('subject') or '').strip() or 'Kiến thức nền'
     goal = str(payload.get('goal') or '').strip() or 'Nắm vững kiến thức cơ bản'
     current = normalize_level(payload.get('current_level'))
@@ -321,18 +329,21 @@ def _roadmap_from_engine(payload: dict, *, engine) -> dict:
     strengths = payload.get('strengths') if isinstance(payload.get('strengths'), list) else []
     weaknesses = payload.get('weaknesses') if isinstance(payload.get('weaknesses'), list) else []
     topics = payload.get('topics') if isinstance(payload.get('topics'), list) else []
+    engine_payload = {
+        'subject': subject,
+        'goal': goal,
+        'current_level': current,
+        'target_level': target,
+        'pace': pace,
+        'study_time': payload.get('study_time') or PACE_MINUTES[pace],
+        'strengths': strengths,
+        'weaknesses': weaknesses,
+        'topics': topics,
+    }
+    if 'original_roadmap' in payload:
+        engine_payload['original_roadmap'] = payload['original_roadmap']
     try:
-        raw = engine.complete_json(task='roadmap', payload={
-            'subject': subject,
-            'goal': goal,
-            'current_level': current,
-            'target_level': target,
-            'pace': pace,
-            'study_time': payload.get('study_time') or PACE_MINUTES[pace],
-            'strengths': strengths,
-            'weaknesses': weaknesses,
-            'topics': topics,
-        })
+        raw = engine.complete_json(task=task, payload=engine_payload)
     except EngineError as error:
         raise RoadmapError(f'roadmap generation failed: {error}') from error
 
@@ -535,27 +546,47 @@ def adapt(roadmap: dict, submissions: list[dict], *, engine=None) -> dict:
     from .grading import adaptation_for
     if not submissions:
         return roadmap
+        
     percents = [int(item.get('percentage') or 0) for item in submissions]
-    average = round(sum(percents) / len(percents))
+    average = round(sum(percents) / len(percents)) if percents else 0
+    
+    lesson_best = {}
+    for sub in submissions:
+        key = sub.get('lesson_key')
+        if not key: continue
+        pct = int(sub.get('percentage') or 0)
+        lesson_best[key] = max(lesson_best.get(key, -1), pct)
+
     modules = [dict(module) for module in roadmap['modules']]
-    decision = adaptation_for(average, difficulty=modules[0]['difficulty'] if modules else 'beginner')
-    notes = [decision['message']]
-    if decision['action'] == 'review':
-        for module in modules[:2]:
-            module['difficulty'] = decision['next_difficulty']
-            module['extra_practice'] = decision['extra_exercises']
-        notes.append('Ưu tiên ôn lại các chặng đầu trước khi sang chặng mới.')
-    elif decision['action'] == 'advance':
-        for module in modules:
-            module['difficulty'] = decision['next_difficulty']
-        notes.append('Chặng tiếp theo đã được nâng độ khó.')
-    else:
-        for module in modules:
-            module['extra_practice'] = decision['extra_exercises']
-        notes.append('Giữ nguyên độ khó, tăng bài tập luyện tập.')
+    notes = []
+    
+    for module in modules:
+        lessons = module.get('lessons') or []
+        for lesson in lessons:
+            key = lesson.get('key')
+            if key in lesson_best:
+                pct = lesson_best[key]
+                decision = adaptation_for(pct, difficulty=module.get('difficulty') or 'beginner')
+                
+                if decision['action'] == 'review':
+                    lesson['difficulty'] = decision['next_difficulty']
+                    lesson['extra_practice'] = decision.get('extra_exercises', 2)
+                    notes.append(f"Bài '{lesson.get('title')}': {decision['message']}")
+                elif decision['action'] == 'practice':
+                    lesson['extra_practice'] = decision.get('extra_exercises', 1)
+                    notes.append(f"Bài '{lesson.get('title')}': {decision['message']}")
+                elif decision['action'] == 'advance':
+                    lesson['difficulty'] = decision['next_difficulty']
+                    notes.append(f"Bài '{lesson.get('title')}': {decision['message']}")
+
+    unique_notes = []
+    for n in notes:
+        if n not in unique_notes:
+            unique_notes.append(n)
+            
     updated = dict(roadmap)
     updated['modules'] = modules
-    updated['adaptation_note'] = ' '.join(notes)
+    updated['adaptation_note'] = ' '.join(unique_notes[-3:]) if unique_notes else 'Tiếp tục học lộ trình hiện tại.'
     updated['average_score'] = average
     return updated
 

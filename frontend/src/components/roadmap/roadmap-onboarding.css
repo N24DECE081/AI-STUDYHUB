@@ -1,0 +1,28 @@
+.roadmap-onboarding-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.roadmap-onboarding-wrapper .lr-modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.roadmap-onboarding-wrapper .lr-modes button {
+  flex: 1 1 calc(25% - 1rem);
+  min-width: 180px;
+}
+
+@media (max-width: 768px) {
+  .roadmap-onboarding-wrapper .lr-modes button {
+    flex: 1 1 calc(50% - 1rem);
+  }
+}
+
+@media (max-width: 480px) {
+  .roadmap-onboarding-wrapper .lr-modes button {
+    flex: 1 1 100%;
+  }
+}

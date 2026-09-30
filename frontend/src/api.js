@@ -176,6 +176,15 @@ export const submitTutorExercise = (exerciseId, { answer, answerType = "text" })
     answer_type: answerType,
   });
 export const getTutorSubmissions = () => request("/ai-tutor/submissions");
+export const updateLessonProgress = (lessonKey, status, progressPercent, lastScore) => 
+  postJson("/ai-tutor/roadmap/lessons/status", {
+    lesson_key: lessonKey,
+    status,
+    progress_percent: progressPercent,
+    last_score: lastScore
+  });
+export const generateMindmap = (topic, context) => postJson("/ai-tutor/mindmap", { topic, context });
+export const generateFlashcards = (topic, context) => postJson("/ai-tutor/flashcards", { topic, context });
 
 // --- Chatbot tư vấn thông tin StudyHub (widget nhỏ ở trang chủ, khách không cần đăng nhập) ---
 export const getWebAssistantStarters = () => request("/web-assistant/starters");

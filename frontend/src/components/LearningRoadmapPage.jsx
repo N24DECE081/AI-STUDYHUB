@@ -8,6 +8,12 @@ import {
   submitTutorExercise,
 } from "../api";
 import "./learning-roadmap.css";
+import RoadmapCareerForm from "./roadmap/RoadmapCareerForm";
+import RoadmapSubjectForm from "./roadmap/RoadmapSubjectForm";
+import RoadmapHighSchoolForm from "./roadmap/RoadmapHighSchoolForm";
+import RoadmapLessonStatus from "./roadmap/RoadmapLessonStatus";
+import RoadmapMindmap from "./roadmap/RoadmapMindmap";
+import RoadmapFlashcard from "./roadmap/RoadmapFlashcard";
 
 const FIELDS = [
   { name: "Software Engineering", goal: "Backend Developer", icon: "⌘" },
@@ -116,11 +122,38 @@ export default function LearningRoadmapPage({
     return items;
   }, [documents, filter, progressByDocument, search]);
 
-  const lessonRows = useMemo(() => (careerRoadmap?.modules || []).flatMap((module) => (module.lessons || []).map((lesson) => ({
-    module,
-    lesson,
-    exercises: (careerRoadmap.exercises || []).filter((exercise) => String(exercise.lesson_key) === String(lesson.key)),
-  }))), [careerRoadmap]);
+  const lessonRows = useMemo(() => (careerRoadmap?.modules || []).flatMap((module) => {
+    const rows = (module.lessons || []).map((lesson) => ({
+      module,
+      lesson,
+      exercises: (careerRoadmap.exercises || []).filter((exercise) => String(exercise.lesson_key) === String(lesson.key)),
+    }));
+    if (module.project && module.project.title) {
+      rows.push({
+        module,
+        lesson: {
+          key: `${module.key}-project`,
+          title: module.project.title,
+          is_project: true,
+          project: module.project,
+        },
+        exercises: [],
+      });
+    }
+    if (module.assessment && module.assessment.title) {
+      rows.push({
+        module,
+        lesson: {
+          key: `${module.key}-assessment`,
+          title: module.assessment.title,
+          is_assessment: true,
+          assessment: module.assessment,
+        },
+        exercises: [],
+      });
+    }
+    return rows;
+  }), [careerRoadmap]);
   const exerciseGrades = useMemo(() => {
     const ids = new Set((careerRoadmap?.exercises || []).map((exercise) => String(exercise.id)));
     const best = new Map();
@@ -154,7 +187,7 @@ export default function LearningRoadmapPage({
   const quizExercise = selectedExercises.find((item) => item.exercise_type === "multiple_choice") || selectedExercises[0];
 
   useEffect(() => {
-    if (mode !== "career" || roadmapLoaded || userScope === "guest") return undefined;
+    if (mode === "documents" || roadmapLoaded || userScope === "guest") return undefined;
     let active = true;
     Promise.allSettled([getTutorRoadmap(), getTutorSubmissions()]).then(([pathResult, submissionsResult]) => {
       if (!active) return;
@@ -166,7 +199,17 @@ export default function LearningRoadmapPage({
         setCurrentLevel(data.current_level || "beginner");
         setTargetLevel(data.target_level || "advanced");
         setWeeklyHours(String(Math.max(2, Math.min(40, Math.round(Number(data.study_time || 480) / 60)))));
-        setSelectedLessonId(data.modules?.[0]?.lessons?.[0]?.key || null);
+        const findNext = (d) => {
+          for (const s of ["NEED_REVIEW", "IN_PROGRESS", "NOT_STARTED"]) {
+            for (const m of d.modules || []) {
+              for (const l of m.lessons || []) {
+                if ((l.status_info?.status || "NOT_STARTED") === s) return l.key;
+              }
+            }
+          }
+          return d.modules?.[0]?.lessons?.[0]?.key || null;
+        };
+        setSelectedLessonId(findNext(data));
       }
       if (submissionsResult.status === "fulfilled") setSubmissions(submissionsResult.value?.items || []);
       if (pathResult.status === "rejected") setError(pathResult.reason?.message || "Không tải được lộ trình đã lưu.");
@@ -198,11 +241,9 @@ export default function LearningRoadmapPage({
     try { localStorage.setItem(sourceStorageKey, JSON.stringify(next)); } catch { /* giữ state trong phiên hiện tại */ }
   };
 
-  const generateCareerRoadmap = async (event) => {
-    event.preventDefault();
-    const hours = Math.max(2, Math.min(40, Number(weeklyHours) || 0));
-    if (!goal.trim()) {
-      setError("Hãy nhập mục tiêu nghề nghiệp trước khi tạo lộ trình.");
+  const handleGenerateRoadmap = async (formData) => {
+    if (!formData.goal.trim()) {
+      setError("Hãy nhập mục tiêu trước khi tạo lộ trình.");
       return;
     }
     setBusy("generate");
@@ -210,22 +251,27 @@ export default function LearningRoadmapPage({
     setGrade(null);
     try {
       const previousIds = new Set((careerRoadmap?.exercises || []).map((exercise) => String(exercise.id)));
-      const relevant = submissions.filter((item) => previousIds.has(String(item.exercise_id)) && careerRoadmap?.subject === field);
+      const relevant = submissions.filter((item) => previousIds.has(String(item.exercise_id)) && careerRoadmap?.subject === formData.subject);
       const strengths = [...new Set(relevant.filter((item) => Number(item.percentage) >= 80).map((item) => item.topic).filter(Boolean))].slice(0, 5);
       const weaknesses = [...new Set(relevant.filter((item) => Number(item.percentage) < 60).map((item) => item.topic).filter(Boolean))].slice(0, 5);
-      const data = await generateTutorRoadmap({
-        subject: field,
-        goal: goal.trim(),
-        current_level: currentLevel,
-        target_level: targetLevel,
-        pace: hours <= 4 ? "slow" : hours <= 8 ? "steady" : "fast",
-        study_time: hours * 60,
-        strengths,
-        weaknesses,
-        topics: [],
-      });
+      
+      const payload = { ...formData, strengths, weaknesses, topics: [] };
+      if (careerRoadmap && careerRoadmap.roadmap_id) {
+        payload.adapt_existing = true;
+      }
+      const data = await generateTutorRoadmap(payload);
       setCareerRoadmap(data);
-      setSelectedLessonId(data.modules?.[0]?.lessons?.[0]?.key || null);
+      const findNext = (d) => {
+        for (const s of ["NEED_REVIEW", "IN_PROGRESS", "NOT_STARTED"]) {
+          for (const m of d.modules || []) {
+            for (const l of m.lessons || []) {
+              if ((l.status_info?.status || "NOT_STARTED") === s) return l.key;
+            }
+          }
+        }
+        return d.modules?.[0]?.lessons?.[0]?.key || null;
+      };
+      setSelectedLessonId(findNext(data));
       setActiveExerciseId(null);
       setRoadmapLoaded(true);
       const latest = await getTutorSubmissions().catch(() => null);
@@ -281,9 +327,11 @@ export default function LearningRoadmapPage({
         </div>
       </header>
 
-      <nav className="lr-modes" aria-label="Chọn loại lộ trình">
-        <button type="button" className={mode === "documents" ? "is-active" : ""} aria-pressed={mode === "documents"} onClick={() => { setMode("documents"); setError(""); }}><BookOpenIcon aria-hidden="true" /><span><strong>Theo tài liệu</strong><small>Học từ nguồn của bạn</small></span></button>
-        <button type="button" className={mode === "career" ? "is-active" : ""} aria-pressed={mode === "career"} onClick={() => { setMode("career"); setError(""); }}><span className="lr-mode-icon" aria-hidden="true">✳</span><span><strong>Theo chuyên ngành</strong><small>Từ nền tảng đến mục tiêu nghề nghiệp</small></span></button>
+      <nav className="lr-modes roadmap-onboarding-wrapper" aria-label="Chọn loại lộ trình" style={{ flexDirection: "row", gap: "1rem" }}>
+        <button type="button" className={mode === "career" ? "is-active" : ""} aria-pressed={mode === "career"} onClick={() => { setMode("career"); setError(""); }}><span className="lr-mode-icon" aria-hidden="true">✳</span><span><strong>Theo ngành</strong><small>Định hướng</small></span></button>
+        <button type="button" className={mode === "subject" ? "is-active" : ""} aria-pressed={mode === "subject"} onClick={() => { setMode("subject"); setError(""); }}><span className="lr-mode-icon" aria-hidden="true">📚</span><span><strong>Theo môn học</strong><small>Kiến thức</small></span></button>
+        <button type="button" className={mode === "highschool" ? "is-active" : ""} aria-pressed={mode === "highschool"} onClick={() => { setMode("highschool"); setError(""); }}><span className="lr-mode-icon" aria-hidden="true">🎓</span><span><strong>Học sinh THPT</strong><small>Mục tiêu điểm</small></span></button>
+        <button type="button" className={mode === "documents" ? "is-active" : ""} aria-pressed={mode === "documents"} onClick={() => { setMode("documents"); setError(""); }}><BookOpenIcon aria-hidden="true" /><span><strong>Theo tài liệu</strong><small>Từ nguồn</small></span></button>
       </nav>
       {error && <p className="lr-error" role="alert">{error}</p>}
 
@@ -327,6 +375,8 @@ export default function LearningRoadmapPage({
                           <span className="lr-source-pill">📄 From your document</span><h4>Nội dung trích từ nguồn</h4><p className="lr-source-excerpt">{selectedSource.excerpt || "Tiêu đề được trích trực tiếp từ tài liệu. Mở bản gốc để xem nội dung."}</p>
                           {selectedSource.sourceLine && <small className="lr-source-line">Dòng nguồn {selectedSource.sourceLine}</small>}
                           <div className="lr-detail-meta"><span><ClockIcon aria-hidden="true" /> Theo nhịp học của bạn</span><span>Tiên quyết: {selectedSourceIndex ? sourceSections[selectedSourceIndex - 1]?.title : "Không có"}</span></div>
+                          <RoadmapMindmap topic={selectedSource.title} context={selectedSource.excerpt || selectedSource.title} />
+                          <RoadmapFlashcard topic={selectedSource.title} context={selectedSource.excerpt || selectedSource.title} />
                           <div className="lr-detail-actions"><button type="button" className="lr-button lr-button-primary" disabled={selectedSourceIndex > 0 && !sourceDone[String(selectedDocumentId) + ":" + sourceSections[selectedSourceIndex - 1]?.id]} onClick={completeSourceNode}>{sourceDone[selectedSourceKey] ? "Đánh dấu chưa hoàn thành" : "Hoàn tất mốc"}<CheckIcon aria-hidden="true" /></button>{onOpenDocument && <button type="button" className="lr-button" onClick={() => onOpenDocument(selectedDocument)}>Mở tài liệu</button>}{onTakeQuiz && <button type="button" className="lr-button lr-button-quiet" onClick={() => onTakeQuiz(selectedDocument)}>Tạo Quiz từ tài liệu</button>}</div>
                         </> : <div className="lr-detail-blank"><span>◉</span><p>Chọn một node để xem nội dung nguồn và các thao tác học.</p></div>}
                       </aside>
@@ -336,15 +386,14 @@ export default function LearningRoadmapPage({
         </div>
       ) : (
         <div className="lr-career-mode">
-          <aside className="lr-career-setup"><span className="lr-eyebrow">BUILD YOUR PATH</span><h2>Chọn điểm đến</h2><p>Lộ trình tạo theo chuyên ngành, trình độ và thời gian học của bạn.</p>
-            <form onSubmit={generateCareerRoadmap}>
-              <label>Chuyên ngành<select value={field} onChange={(event) => { const next = FIELDS.find((item) => item.name === event.target.value); setField(event.target.value); if (next) setGoal(next.goal); }}>{FIELDS.map((item) => <option value={item.name} key={item.name}>{item.name}</option>)}</select></label>
-              <label>Trình độ hiện tại<select value={currentLevel} onChange={(event) => setCurrentLevel(event.target.value)}>{LEVELS.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></label>
-              <label>Mục tiêu nghề nghiệp<input value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="Ví dụ: Backend Developer" maxLength={200} /></label>
-              <div className="lr-level-pair"><label>Đích đến<select value={targetLevel} onChange={(event) => setTargetLevel(event.target.value)}>{LEVELS.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></label><label>Giờ / tuần<input type="number" min="2" max="40" value={weeklyHours} onChange={(event) => setWeeklyHours(event.target.value)} /></label></div>
-              <button className="lr-button lr-button-primary lr-generate" type="submit" disabled={busy === "generate"}>{busy === "generate" ? <><span className="lr-spinner" />Nova đang tạo...</> : <><SparklesIcon aria-hidden="true" />Tạo lộ trình AI</>}</button>
-            </form>
-            <div className="lr-ai-note"><span>✳</span><p>Kết quả quiz đã chấm trong cùng chuyên ngành giúp nhận diện điểm mạnh và phần cần ôn.</p></div>
+          <aside className="lr-career-setup">
+            <span className="lr-eyebrow">BUILD YOUR PATH</span>
+            <h2>Chọn điểm đến</h2>
+            <p>Lộ trình tạo theo mục tiêu và thời gian học của bạn.</p>
+            {mode === "career" && <RoadmapCareerForm onGenerate={handleGenerateRoadmap} isGenerating={busy === "generate"} />}
+            {mode === "subject" && <RoadmapSubjectForm onGenerate={handleGenerateRoadmap} isGenerating={busy === "generate"} />}
+            {mode === "highschool" && <RoadmapHighSchoolForm onGenerate={handleGenerateRoadmap} isGenerating={busy === "generate"} />}
+            <div className="lr-ai-note"><span>✳</span><p>Kết quả quiz đã chấm giúp AI nhận diện điểm mạnh và phần cần ôn.</p></div>
           </aside>
 
           <section className="lr-career-workspace" aria-label="Lộ trình theo chuyên ngành">
@@ -365,28 +414,63 @@ export default function LearningRoadmapPage({
                           const locked = globalIndex > 0 && lessonRows.slice(0, globalIndex).some((item) => lessonMastery(item) < 60);
                           const status = mastery >= 95 ? "mastered" : mastery >= 60 ? "familiar" : mastery > 0 ? "learning" : locked ? "locked" : "available";
                           const selected = selectedLessonRow?.lesson.key === row.lesson.key;
-                          return <button type="button" className={"lr-career-node is-" + status + (selected ? " is-selected" : "")} key={row.lesson.key} onClick={() => { setSelectedLessonId(row.lesson.key); setActiveExerciseId(null); setGrade(null); setError(""); }} aria-pressed={selected}><span className="lr-node-orb">{status === "mastered" ? <CheckIcon aria-hidden="true" /> : locked ? "▣" : String(nodeIndex + 1).padStart(2, "0")}</span><span className="lr-career-node-copy"><small>{status === "locked" ? "LOCKED" : status === "available" ? "AVAILABLE" : masteryLabel(mastery).toUpperCase()}</small><strong>{row.lesson.title}</strong><em><i style={{ width: mastery + "%" }} />{mastery}%</em></span><ArrowRightIcon aria-hidden="true" /></button>;
+                          return <button type="button" className={"lr-career-node is-" + status + (selected ? " is-selected" : "")} key={row.lesson.key} onClick={() => { setSelectedLessonId(row.lesson.key); setActiveExerciseId(null); setGrade(null); setError(""); }} aria-pressed={selected}><span className="lr-node-orb">{status === "mastered" ? <CheckIcon aria-hidden="true" /> : locked ? "▣" : String(nodeIndex + 1).padStart(2, "0")}</span><span className="lr-career-node-copy"><RoadmapLessonStatus mastery={mastery} explicitStatus={row.lesson.status_info?.status} locked={locked} /><strong>{row.lesson.title}</strong><em><i style={{ width: mastery + "%" }} />{mastery}%</em></span><ArrowRightIcon aria-hidden="true" /></button>;
                         })}</div>
                       </section>;
                     })}
                     <div className="lr-path-end">CAREER GOAL · {careerRoadmap.goal}</div>
                   </div>
                   <aside className="lr-detail-panel lr-career-detail" aria-live="polite">
-                    {selectedLessonRow ? <>
-                      <div className="lr-detail-top"><span>LEARNING CHECKPOINT</span><span className={"lr-difficulty is-" + selectedLessonRow.module.difficulty}>{levelLabel(selectedLessonRow.module.difficulty)}</span></div>
+                      {selectedLessonRow ? <>
+                      <div className="lr-detail-top"><span>{selectedLessonRow.lesson.is_project ? "PROJECT" : selectedLessonRow.lesson.is_assessment ? "ASSESSMENT" : "LEARNING CHECKPOINT"}</span><span className={"lr-difficulty is-" + selectedLessonRow.module.difficulty}>{levelLabel(selectedLessonRow.module.difficulty)}</span></div>
                       <span className="lr-detail-index">{String(selectedLessonIndex + 1).padStart(2, "0")} / {String(lessonRows.length).padStart(2, "0")}</span><h3>{selectedLessonRow.lesson.title}</h3>
-                      <div className="lr-detail-meta"><span><ClockIcon aria-hidden="true" /> ~{selectedLessonRow.lesson.estimated_minutes} phút</span><span>Mastery: {lessonMastery(selectedLessonRow)}% · {masteryLabel(lessonMastery(selectedLessonRow))}</span></div>
-                      {selectedPrevious && <p className="lr-prerequisite">Tiên quyết · {selectedPrevious.lesson.title}</p>}
-                      {selectedLessonRow.lesson.objectives?.length ? <><h4>Bạn sẽ học</h4><ul className="lr-objectives">{selectedLessonRow.lesson.objectives.map((item) => <li key={item}>{item}</li>)}</ul></> : <p className="lr-empty-inline">Chưa có mục tiêu chi tiết cho node này.</p>}
-                      {selectedLessonRow.lesson.examples?.length > 0 && <p className="lr-example">Ví dụ · {selectedLessonRow.lesson.examples[0]}</p>}
-                      {isLessonLocked && <p className="lr-locked-note">Đạt mastery 60% ở checkpoint trước để mở node này.</p>}
-                      <div className="lr-exercise-actions"><button type="button" className="lr-button lr-button-primary" disabled={isLessonLocked || !practiceExercise} onClick={() => startExercise(practiceExercise)}>Bắt đầu học <ArrowRightIcon aria-hidden="true" /></button><button type="button" className="lr-button" disabled={isLessonLocked || !quizExercise} onClick={() => startExercise(quizExercise)}>Làm Quiz</button></div>
-                      {activeExercise && <form className="lr-exercise" onSubmit={sendExercise}>
-                        <div className="lr-exercise-top"><span>{activeExercise.exercise_type === "multiple_choice" ? "QUIZ" : "PRACTICE"}</span><button type="button" onClick={() => startExercise(null)} aria-label="Đóng bài luyện"><XMarkIcon aria-hidden="true" /></button></div><p>{activeExercise.prompt}</p>
-                        {activeExercise.options?.length ? <div className="lr-exercise-options">{activeExercise.options.map((option, index) => <label key={String(activeExercise.id) + "-" + index} className={answer === option ? "is-selected" : ""}><input type="radio" name={"exercise-" + activeExercise.id} checked={answer === option} onChange={() => setAnswer(option)} /><span>{option}</span></label>)}</div> : activeExercise.exercise_type === "math" ? <input inputMode="decimal" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Nhập đáp án" /> : <textarea rows="3" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Viết câu trả lời của bạn..." />}
-                        {grade && <div className="lr-grade-result" role="status"><strong>{grade.percentage}% · {grade.grade}</strong><span>{grade.feedback}</span></div>}
-                        <button type="submit" className="lr-button lr-button-primary" disabled={!answer.trim() || busy === "grade"}>{busy === "grade" ? "Đang chấm..." : "Nộp bài"}</button>
-                      </form>}
+                      
+                      {selectedLessonRow.lesson.is_project ? (
+                        <>
+                          <div className="lr-detail-meta" style={{ alignItems: "center" }}>
+                            <span>Trạng thái dự án</span>
+                          </div>
+                          <p className="lr-prerequisite">Loại dự án · {selectedLessonRow.lesson.project?.type}</p>
+                          <h4>Mô tả</h4>
+                          <p>{selectedLessonRow.lesson.project?.description}</p>
+                          <div className="lr-exercise-actions">
+                            <button type="button" className="lr-button lr-button-primary" disabled={isLessonLocked} onClick={() => {
+                              // Mark as completed
+                            }}>Đánh dấu hoàn thành</button>
+                          </div>
+                        </>
+                      ) : selectedLessonRow.lesson.is_assessment ? (
+                        <>
+                          <div className="lr-detail-meta" style={{ alignItems: "center" }}>
+                            <span>Trạng thái bài kiểm tra</span>
+                          </div>
+                          <p className="lr-prerequisite">Hình thức · {selectedLessonRow.lesson.assessment?.type}</p>
+                          <h4>Điểm tối đa</h4>
+                          <p>{selectedLessonRow.lesson.assessment?.max_score} điểm</p>
+                          <div className="lr-exercise-actions">
+                            <button type="button" className="lr-button lr-button-primary" disabled={isLessonLocked} onClick={() => {
+                              // Mark as completed
+                            }}>Đánh dấu hoàn thành</button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="lr-detail-meta" style={{ alignItems: "center" }}><span><ClockIcon aria-hidden="true" /> ~{selectedLessonRow.lesson.estimated_minutes} phút</span><span><RoadmapLessonStatus mastery={lessonMastery(selectedLessonRow)} explicitStatus={selectedLessonRow.lesson.status_info?.status} locked={isLessonLocked} /> {lessonMastery(selectedLessonRow)}% mastery</span></div>
+                          {selectedPrevious && <p className="lr-prerequisite">Tiên quyết · {selectedPrevious.lesson.title}</p>}
+                          {selectedLessonRow.lesson.objectives?.length ? <><h4>Bạn sẽ học</h4><ul className="lr-objectives">{selectedLessonRow.lesson.objectives.map((item) => <li key={item}>{item}</li>)}</ul></> : <p className="lr-empty-inline">Chưa có mục tiêu chi tiết cho node này.</p>}
+                          {selectedLessonRow.lesson.examples?.length > 0 && <p className="lr-example">Ví dụ · {selectedLessonRow.lesson.examples[0]}</p>}
+                          {isLessonLocked && <p className="lr-locked-note">Đạt mastery 60% ở checkpoint trước để mở node này.</p>}
+                          <RoadmapMindmap topic={selectedLessonRow.lesson.title} context={`Chủ đề: ${careerRoadmap.subject}. Mục tiêu: ${careerRoadmap.goal}. Bài học: ${selectedLessonRow.lesson.title}. Chi tiết: ${(selectedLessonRow.lesson.objectives || []).join('; ')}`} />
+                          <RoadmapFlashcard topic={selectedLessonRow.lesson.title} context={`Chủ đề: ${careerRoadmap.subject}. Mục tiêu: ${careerRoadmap.goal}. Bài học: ${selectedLessonRow.lesson.title}. Chi tiết: ${(selectedLessonRow.lesson.objectives || []).join('; ')}`} />
+                          <div className="lr-exercise-actions"><button type="button" className="lr-button lr-button-primary" disabled={isLessonLocked || !practiceExercise} onClick={() => startExercise(practiceExercise)}>Bắt đầu học <ArrowRightIcon aria-hidden="true" /></button><button type="button" className="lr-button" disabled={isLessonLocked || !quizExercise} onClick={() => startExercise(quizExercise)}>Làm Quiz</button></div>
+                          {activeExercise && <form className="lr-exercise" onSubmit={sendExercise}>
+                            <div className="lr-exercise-top"><span>{activeExercise.exercise_type === "multiple_choice" ? "QUIZ" : "PRACTICE"}</span><button type="button" onClick={() => startExercise(null)} aria-label="Đóng bài luyện"><XMarkIcon aria-hidden="true" /></button></div><p>{activeExercise.prompt}</p>
+                            {activeExercise.options?.length ? <div className="lr-exercise-options">{activeExercise.options.map((option, index) => <label key={String(activeExercise.id) + "-" + index} className={answer === option ? "is-selected" : ""}><input type="radio" name={"exercise-" + activeExercise.id} checked={answer === option} onChange={() => setAnswer(option)} /><span>{option}</span></label>)}</div> : activeExercise.exercise_type === "math" ? <input inputMode="decimal" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Nhập đáp án" /> : <textarea rows="3" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Viết câu trả lời của bạn..." />}
+                            {grade && <div className="lr-grade-result" role="status"><strong>{grade.percentage}% · {grade.grade}</strong><span>{grade.feedback}</span></div>}
+                            <button type="submit" className="lr-button lr-button-primary" disabled={!answer.trim() || busy === "grade"}>{busy === "grade" ? "Đang chấm..." : "Nộp bài"}</button>
+                          </form>}
+                        </>
+                      )}
                     </> : <div className="lr-detail-blank"><span>◉</span><p>Chọn một checkpoint trên hành trình để xem chi tiết.</p></div>}
                   </aside>
                 </div>

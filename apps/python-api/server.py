@@ -23,7 +23,7 @@ from backend.app.ai_tutor import (
     EngineError as TutorEngineError,
     GradingError as TutorGradingError,
     RoadmapError as TutorRoadmapError,
-    adapt as adapt_roadmap,
+    adapt as adapt_lesson,
     build_assessment_questions,
     build_exercises,
     build_roadmap,
@@ -32,6 +32,7 @@ from backend.app.ai_tutor import (
     start_assessment,
     summarize_answers,
 )
+from backend.app.ai_tutor.roadmap import normalize_level, normalize_pace, adapt_roadmap
 from backend.app.ai_tutor import config as tutor_config
 from backend.app.ai_tutor import engine as tutor_engine
 from backend.app.ai_tutor import repository as tutor_store
@@ -540,7 +541,7 @@ def chat_quiz(engine, topic, context):
     title=str(data.get('topic') or topic or 'Tài liệu của bạn').strip()[:120]
     return {'topic':title,'questions':questions},title
 
-def public_roadmap(row, exercises, progress):
+def public_roadmap(row, exercises, progress, lesson_statuses=None):
     payload=row.get('payload') or {}
     if not isinstance(payload,dict): payload={}
     by_lesson={}
@@ -549,6 +550,8 @@ def public_roadmap(row, exercises, progress):
     for module in payload.get('modules') or []:
         for lesson in module.get('lessons') or []:
             lesson['exercise_ids']=by_lesson.get(str(lesson.get('key')),[])
+            if lesson_statuses and str(lesson.get('key')) in lesson_statuses:
+                lesson['status_info'] = lesson_statuses[str(lesson.get('key'))]
     return {
         'roadmap_id': str(row.get('id')),
         'title': payload.get('title') or row.get('title'),
@@ -1098,9 +1101,18 @@ class H(BaseHTTPRequestHandler):
         FROM documents d JOIN subjects s ON s.id=d.subject_id
         LEFT JOIN user_progress p ON p.document_id=d.id AND p.user_id=?
         WHERE d.uploaded_by=? ORDER BY d.created_at DESC''',(u['id'],u['id']))]
+     roadmap_rows=[dict(r) for r in c.execute('''SELECT p.id as id, NULL as course_id, 'roadmap-' || r.id as document_id,
+        COALESCE(ROUND(AVG(p.progress_percent)),0) progress_percent, 0 as last_position,
+        MIN(CASE WHEN p.status = 'COMPLETED' OR p.status = 'MASTERED' THEN 1 ELSE 0 END) as completed,
+        MAX(p.updated_at) as updated_at, NULL as course_title, r.title as document_title,
+        NULL as subject_id, r.subject as subject_code
+        FROM tutor_roadmaps r
+        LEFT JOIN roadmap_lesson_progress p ON p.roadmap_id=r.id AND p.user_id=?
+        WHERE r.user_id=?
+        GROUP BY r.id ORDER BY r.created_at DESC''',(u['id'],u['id']))]
      analytics=quiz_progress_analytics(c,u['id'])
-    rows=course_rows+document_rows
-    measured=document_rows if document_rows else rows
+    rows=course_rows+document_rows+roadmap_rows
+    measured=document_rows+roadmap_rows if (document_rows or roadmap_rows) else rows
     average=round(sum(int(row['progress_percent'] or 0) for row in measured)/len(measured)) if measured else 0
     return self.json({'items':rows,'summary':{'count':len(measured),'completed':sum(1 for row in measured if row['completed']),'average_percent':average},'analytics':analytics})
   if path=='/api/study-time':
@@ -1241,7 +1253,8 @@ class H(BaseHTTPRequestHandler):
        'progress':{'total_exercises':0,'graded':0,'average_percentage':0,'completed':False}},200)
     rows=tutor_store.exercises_for_roadmap(c,row['id'])
     progress=tutor_store.progress_for_roadmap(c,row['id'],u['id'])
-   return self.json(public_roadmap(row,rows,progress),200)
+    lesson_statuses=tutor_store.lesson_progress_for_roadmap(c,row['id'],u['id'])
+   return self.json(public_roadmap(row,rows,progress,lesson_statuses),200)
   if path=='/api/ai-tutor/exercises':
    u=require_user(self)
    if not u:return
@@ -1748,6 +1761,7 @@ class H(BaseHTTPRequestHandler):
    if not isinstance(x,dict): return self.json({'error':'Dữ liệu lộ trình không hợp lệ'},400)
    with db() as c:
     assessment=tutor_store.latest_assessment(c,u['id'])
+    existing_roadmap=tutor_store.latest_roadmap(c,u['id']) if x.get('adapt_existing') else None
    subject=str(x.get('subject') or assessment.get('subject') or '').strip()
    goal=str(x.get('goal') or assessment.get('goal') or '').strip()
    if not subject or not goal:
@@ -1760,9 +1774,14 @@ class H(BaseHTTPRequestHandler):
      'strengths':x.get('strengths') if isinstance(x.get('strengths'),list) else assessment.get('strengths') or [],
      'weaknesses':x.get('weaknesses') if isinstance(x.get('weaknesses'),list) else assessment.get('weaknesses') or [],
      'topics':x.get('topics') if isinstance(x.get('topics'),list) else []}
+   if existing_roadmap:
+     payload['original_roadmap'] = existing_roadmap['payload']
    engine=get_engine()
    try:
-    built=build_roadmap(payload,engine=engine)
+    if existing_roadmap:
+     built=adapt_roadmap(payload,engine=engine)
+    else:
+     built=build_roadmap(payload,engine=engine)
     exercises=build_exercises(built,payload,engine=engine)
    except (TutorRoadmapError,TutorEngineError) as error:
     return self.json({'error':f'Không tạo được lộ trình: {error}','retryable':True},502)
@@ -1772,13 +1791,62 @@ class H(BaseHTTPRequestHandler):
     except (TypeError,ValueError): assessment_id=None
    if assessment_id is None and assessment.get('id'): assessment_id=int(assessment['id'])
    with db() as c:
-    roadmap_id=tutor_store.create_roadmap(c,u['id'],assessment_id,subject=subject,goal=goal,
+    if existing_roadmap:
+     roadmap_id = existing_roadmap['id']
+     tutor_store.update_roadmap(c, roadmap_id, built, "Adapted by user request")
+     tutor_store.replace_exercises(c,roadmap_id,u['id'],exercises)
+    else:
+     roadmap_id=tutor_store.create_roadmap(c,u['id'],assessment_id,subject=subject,goal=goal,
       difficulty=built['current_level'],title=built['title'],summary=built['summary'],payload=built)
-    tutor_store.replace_exercises(c,roadmap_id,u['id'],exercises)
+     tutor_store.replace_exercises(c,roadmap_id,u['id'],exercises)
     row=tutor_store.latest_roadmap(c,u['id'])
     rows=tutor_store.exercises_for_roadmap(c,roadmap_id)
     progress=tutor_store.progress_for_roadmap(c,roadmap_id,u['id'])
-   return self.json(public_roadmap(row,rows,progress),201)
+    lesson_statuses=tutor_store.lesson_progress_for_roadmap(c,roadmap_id,u['id'])
+   return self.json(public_roadmap(row,rows,progress,lesson_statuses),201)
+  if path=='/api/ai-tutor/mindmap':
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   if not isinstance(x,dict): return self.json({'error':'Dữ liệu không hợp lệ'},400)
+   context = str(x.get('context') or '').strip()
+   topic = str(x.get('topic') or x.get('subject') or 'Mindmap').strip()
+   if not context and not topic: return self.json({'error':'Thiếu context hoặc topic'},400)
+   engine = get_engine()
+   try:
+    result = engine.complete_json(task='mindmap', payload={'topic': topic, 'context': context})
+   except Exception as error:
+    return self.json({'error': f'Lỗi tạo mindmap: {error}'}, 502)
+   return self.json(result, 201)
+  if path=='/api/ai-tutor/flashcards':
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   if not isinstance(x,dict): return self.json({'error':'Dữ liệu không hợp lệ'},400)
+   context = str(x.get('context') or '').strip()
+   topic = str(x.get('topic') or '').strip()
+   if not context and not topic: return self.json({'error':'Thiếu context hoặc topic'},400)
+   engine = get_engine()
+   try:
+    result = engine.complete_json(task='flashcard', payload={'topic': topic, 'context': context})
+   except Exception as error:
+    return self.json({'error': f'Lỗi tạo flashcard: {error}'}, 502)
+   return self.json(result, 201)
+  if path=='/api/ai-tutor/roadmap/lessons/status':
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   if not isinstance(x,dict): return self.json({'error':'Dữ liệu không hợp lệ'},400)
+   lesson_key=x.get('lesson_key')
+   status=x.get('status')
+   progress_percent=x.get('progress_percent') or 0
+   last_score=x.get('last_score') or 0.0
+   if not lesson_key or not status: return self.json({'error':'Thiếu lesson_key hoặc status'},400)
+   with db() as c:
+    row=tutor_store.latest_roadmap(c,u['id'])
+    if not row: return self.json({'error':'Không tìm thấy lộ trình'},404)
+    tutor_store.update_lesson_progress(c,u['id'],row['id'],lesson_key,status,progress_percent,last_score)
+   return self.json({'ok':True},200)
   m=re.fullmatch(r'/api/ai-tutor/exercises/(\d+)/submit',path)
   if m:
    u=require_user(self)
@@ -1802,14 +1870,30 @@ class H(BaseHTTPRequestHandler):
     submission_id=tutor_store.add_submission(c,exercise['id'],u['id'],answer=answer,answer_type=answer_type,result=result)
     submissions=tutor_store.submissions_for_roadmap(c,exercise['roadmap_id'],u['id'])
     progress=tutor_store.progress_for_roadmap(c,exercise['roadmap_id'],u['id'])
+    lesson_key = exercise.get('lesson_key')
+    if lesson_key:
+        from app.ai_tutor.grading import adaptation_for
+        decision = adaptation_for(result['percentage'], difficulty=exercise.get('difficulty') or 'beginner')
+        tutor_store.update_lesson_progress(c, u['id'], exercise['roadmap_id'], lesson_key, decision['status'], result['percentage'], result['score'])
     if roadmap_row:
      stored=json.loads(roadmap_row['payload']) if roadmap_row['payload'] else {}
      if stored:
-      adapted=adapt_roadmap(stored,submissions)
+      adapted=adapt_lesson(stored,submissions)
       tutor_store.update_roadmap(c,exercise['roadmap_id'],adapted,adapted.get('adaptation_note'))
    response=tutor_store.submission_payload(submission_id,exercise,result)
-   if adapted:
-    response['adaptation']={'note':adapted.get('adaptation_note'),'average_score':adapted.get('average_score')}
+   if adapted or lesson_key:
+    from app.ai_tutor.grading import adaptation_for
+    decision = adaptation_for(result['percentage'], difficulty=exercise.get('difficulty') or 'beginner')
+    response['adaptation']={
+        'note': adapted.get('adaptation_note') if adapted else None,
+        'average_score': adapted.get('average_score') if adapted else None,
+        'status': decision['status'],
+        'lesson_key': lesson_key,
+        'percentage': result['percentage'],
+        'recommended_action': decision['action'],
+        'next_difficulty': decision['next_difficulty'],
+        'message': decision['message']
+    }
    response['progress']=progress
    return self.json(response,201)
   if path=='/api/upload':

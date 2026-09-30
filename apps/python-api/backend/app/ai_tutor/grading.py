@@ -305,20 +305,39 @@ def adaptation_for(percentage: int, *, difficulty: str) -> dict:
     if percentage < 50:
         return {
             'action': 'review',
+            'status': 'NEED_REVIEW',
             'next_difficulty': order[max(0, index - 1)],
             'extra_exercises': 2,
-            'message': 'Điểm dưới 50% — cần ôn lại bài hiện tại, giảm độ khó và thêm bài tập.',
+            'message': 'Điểm dưới 50% — cần ôn lại kiến thức nền, giảm độ khó và thêm bài luyện.',
         }
-    if percentage < 80:
+    if percentage <= 69:
         return {
             'action': 'practice',
+            'status': 'NEED_REVIEW',
             'next_difficulty': order[index],
             'extra_exercises': 1,
-            'message': 'Điểm trung bình — giữ độ khó và thêm bài tập luyện tập.',
+            'message': 'Điểm 50-69% — cần ôn tập phần sai, giữ độ khó và thêm bài luyện.',
+        }
+    if percentage <= 84:
+        return {
+            'action': 'continue',
+            'status': 'COMPLETED',
+            'next_difficulty': order[index],
+            'extra_exercises': 0,
+            'message': 'Điểm 70-84% — hoàn thành bài học, tiếp tục lộ trình.',
+        }
+    if percentage <= 94:
+        return {
+            'action': 'advance',
+            'status': 'COMPLETED',
+            'next_difficulty': order[min(len(order) - 1, index + 1)],
+            'extra_exercises': 0,
+            'message': 'Kết quả tốt (85-94%) — tăng độ khó cho phần tiếp theo.',
         }
     return {
-        'action': 'advance',
+        'action': 'master',
+        'status': 'MASTERED',
         'next_difficulty': order[min(len(order) - 1, index + 1)],
         'extra_exercises': 0,
-        'message': 'Kết quả tốt — tăng độ khó và chuyển sang chủ đề tiếp theo.',
+        'message': 'Đã thành thạo (>=95%) — chuyển sang nội dung nâng cao.',
     }

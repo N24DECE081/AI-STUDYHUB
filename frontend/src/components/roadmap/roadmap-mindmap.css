@@ -1,0 +1,112 @@
+.roadmap-mindmap-launcher {
+  margin: 1rem 0;
+}
+
+.roadmap-mindmap-container {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: var(--surface-1, #f8f9fa);
+  border: 1px solid var(--border-color, #dee2e6);
+  border-radius: 8px;
+}
+
+.mindmap-loading {
+  color: var(--text-muted, #868e96);
+  font-style: italic;
+  padding: 1rem 0;
+}
+
+.mindmap-error {
+  color: var(--danger-color, #dc3545);
+  padding: 1rem 0;
+}
+
+.mindmap-title {
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+  font-weight: 600;
+  color: var(--text-primary, #212529);
+  text-align: center;
+}
+
+.mindmap-tree {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  padding: 1rem;
+}
+
+.mindmap-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 0.5rem;
+  position: relative;
+}
+
+.mindmap-node-label {
+  background: var(--surface-0, #ffffff);
+  border: 1px solid var(--primary-color, #228be6);
+  color: var(--text-primary, #212529);
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  z-index: 2;
+  margin-bottom: 1.5rem;
+  white-space: nowrap;
+}
+
+.mindmap-children {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  position: relative;
+  padding-top: 1.5rem;
+}
+
+.mindmap-children::before {
+  content: '';
+  position: absolute;
+  top: -1.5rem;
+  left: 50%;
+  width: 1px;
+  height: 1.5rem;
+  background: var(--primary-light, #a5d8ff);
+  z-index: 1;
+}
+
+.mindmap-children .mindmap-node::before {
+  content: '';
+  position: absolute;
+  top: -1.5rem;
+  left: 50%;
+  width: 1px;
+  height: 1.5rem;
+  background: var(--primary-light, #a5d8ff);
+  z-index: 1;
+}
+
+/* Horizontal connecting lines between siblings */
+.mindmap-children::after {
+  content: '';
+  position: absolute;
+  top: -1.5rem;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--primary-light, #a5d8ff);
+  z-index: 1;
+}
+
+/* Fix width of connecting lines to not overhang on the first/last children */
+.mindmap-node:first-child > .mindmap-children::after {
+  left: 50%;
+}
+.mindmap-node:last-child > .mindmap-children::after {
+  right: 50%;
+}
+.mindmap-node:only-child > .mindmap-children::after {
+  display: none;
+}
