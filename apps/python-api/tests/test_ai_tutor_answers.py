@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -272,6 +273,52 @@ class ProviderFallbackTests(unittest.TestCase):
         for message, expected in cases.items():
             self.assertIn(expected, engine.provider_failure_reason(engine.EngineError(message)))
 
+    def test_provider_failure_code_is_exposed_for_diagnostics(self):
+        self.assertEqual(engine.provider_failure_code(
+            engine.EngineError('AI provider error 401: unauthorized')), 401)
+        self.assertIsNone(engine.provider_failure_code(
+            engine.EngineError('AI provider unavailable: timed out')))
+
+    def test_openrouter_requests_include_safe_attribution_headers(self):
+        provider = engine.ProviderEngine(base_url='https://openrouter.ai/api/v1',
+                                         api_key='test-key-not-real', model='openrouter/free')
+        response = type('Response', (), {
+            '__enter__': lambda self: self,
+            '__exit__': lambda self, *_args: False,
+            'read': lambda self: b'{"choices":[{"message":{"content":"ok"}}]}',
+        })()
+        with mock.patch.object(engine.urllib.request, 'urlopen', return_value=response) as urlopen:
+            self.assertEqual(provider._chat([{'role': 'user', 'content': 'hello'}]), 'ok')
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.get_header('X-title'), 'AI StudyHub - Nova Tutor')
+        self.assertNotIn('test-key-not-real', request.get_header('Http-referer'))
+
+    def test_structured_output_accepts_json_markdown_from_free_models(self):
+        provider = engine.ProviderEngine(base_url='http://mock-provider/v1',
+                                         api_key='test-key-not-real', model='free-model')
+        with mock.patch.object(provider, '_chat', return_value='Kết quả:\n```json\n{"ratio": 0.8}\n```'):
+            self.assertEqual(provider.complete_json(task='grading', payload={}), {'ratio': 0.8})
+
+    def test_rate_limit_tries_the_next_model(self):
+        provider = engine.ProviderEngine(
+            base_url='http://mock-provider/v1', api_key='test-key-not-real', model='primary',
+            fallback_models=['backup-one', 'backup-two'])
+        with mock.patch.object(provider, '_chat_once', side_effect=[
+                engine.EngineError('AI provider error 429: rate limit'), 'backup answer']) as call:
+            answer = provider._chat([{'role': 'user', 'content': 'hello'}])
+        self.assertEqual(answer, 'backup answer')
+        self.assertEqual(call.call_args_list[1].kwargs['model'], 'backup-one')
+
+    def test_bad_key_does_not_waste_calls_on_backup_models(self):
+        provider = engine.ProviderEngine(
+            base_url='http://mock-provider/v1', api_key='bad-key', model='primary',
+            fallback_models=['backup'])
+        with mock.patch.object(provider, '_chat_once', side_effect=
+                               engine.EngineError('AI provider error 401: unauthorized')) as call:
+            with self.assertRaises(engine.EngineError):
+                provider._chat([{'role': 'user', 'content': 'hello'}])
+        self.assertEqual(call.call_count, 1)
+
     def test_out_of_quota_answers_from_the_documents_and_warns(self):
         health = type('BrokenProvider', (), {
             'answer': lambda self, **kwargs: (_ for _ in ()).throw(
@@ -286,6 +333,7 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIn('Kế thừa là cơ chế cho phép lớp con dùng lại', answer)
         self.assertFalse(engine.PROVIDER_HEALTH['ok'])
         self.assertIn('hạn mức', engine.PROVIDER_HEALTH['reason'])
+        self.assertEqual(engine.PROVIDER_HEALTH['code'], 429)
 
     def test_grading_still_works_when_the_provider_is_down(self):
         broken = type('Broken', (), {
@@ -632,6 +680,8 @@ class ModeInstructionTests(unittest.TestCase):
         self.assertIn('GIẢI THÍCH', prompts['explain'])
         self.assertIn('GIẢI BÀI', prompts['solve'])
         self.assertIn('GỢI Ý', prompts['hint'])
+        self.assertIn('HƯỚNG DẪN TỪNG BƯỚC', prompts['guided'])
+        self.assertIn('NHẬN XÉT BÀI LÀM', prompts['review'])
         self.assertIn('TÓM TẮT', prompts['summarize'])
         self.assertIn('TẠO QUIZ', prompts['generate_quiz'])
 

@@ -1588,7 +1588,7 @@ class H(BaseHTTPRequestHandler):
      document_id=file_ids[0]
     conversation_id=str(x.get('conversation_id') or secrets.token_hex(16))
     mode=str(x.get('mode') or 'explain').lower()
-    if mode not in ('explain','solve','hint','summarize','generate_quiz'):
+    if mode not in tutor_engine.MODES:
      return self.json({'error':'invalid tutor mode'},400)
    if not question:return self.json({'error':'Câu hỏi không được để trống'},400)
    with db() as c:
@@ -1635,7 +1635,7 @@ class H(BaseHTTPRequestHandler):
    # cho client cũ và cho test.
    if mode in ('', 'auto', 'tu_dong'):
     mode=tutor_engine.detect_mode(message)
-   if mode not in ('explain','solve','hint','summarize','generate_quiz'):
+   if mode not in tutor_engine.MODES:
     return self.json({'error':'invalid tutor mode'},400)
    file_ids=x.get('file_ids',[])
    if not isinstance(file_ids,list):
@@ -1664,8 +1664,8 @@ class H(BaseHTTPRequestHandler):
     history=tutor_store.history(c,conversation_id,8)
     memory_profile=tutor_memory.profile(c,u['id'])
     profile_summary=str(memory_profile.get('summary') or '')
-    if profile_summary and 'Chưa đủ dữ liệu' not in profile_summary:
-     context=f'{context}\n\nHồ sơ học tập riêng của người dùng hiện tại:\n{profile_summary}'.strip()
+    if 'Chưa đủ dữ liệu' in profile_summary:
+     profile_summary=''
    quiz=None; quiz_topic=''
    if mode=='generate_quiz':
     quiz,quiz_topic=chat_quiz(engine,message,context)
@@ -1679,7 +1679,8 @@ class H(BaseHTTPRequestHandler):
              'nhưng chưa có kết quả. Hãy bổ sung tài liệu liên quan hoặc cấu hình AI provider để '
              'Nova tìm hiểu và lưu câu trả lời vào cache cho lần sau.')
     else:
-     answer=engine.answer(mode=mode,question=message,context=context,history=history)
+     answer=engine.answer(mode=mode,question=message,context=context,history=history,
+                          learner_profile=profile_summary)
    except TutorEngineError as error:
     return self.json({'error':f'AI Tutor tạm thời không trả lời được: {error}','retryable':True},502)
    health=tutor_engine.PROVIDER_HEALTH
