@@ -13,3 +13,86 @@
 @keyframes flashcardRemember{40%{transform:scale(1.03);box-shadow:var(--shadow-subtle)}}@keyframes flashcardFlame{50%{transform:translateY(-7px) scale(1.25)}}
 @media(max-width:600px){.flashcard-form-row{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){.study-card.is-remembered,.study-card.is-remembered>.study-card__flame{animation:none}}
+.flashcard-editor{display:grid;gap:14px;border:0;padding:0;min-width:0}
+.flashcard-editor>label{display:grid;gap:5px}
+.study-session .study-card{border:2px solid var(--card-color);background:color-mix(in srgb,var(--card-color) 22%,var(--bg-main));box-shadow:0 6px 24px color-mix(in srgb,var(--card-color) 20%,transparent)}
+.quiz-deck-cover.is-lines{background-image:repeating-linear-gradient(0deg,transparent 0 14px,#ffffff55 14px 15px)}
+.quiz-deck-cover.is-grid{background-image:linear-gradient(#ffffff44 1px,transparent 1px),linear-gradient(90deg,#ffffff44 1px,transparent 1px)}
+.flashcard-pronunciation{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin:12px 0}
+.flashcard-pronunciation small{font-size:11px}
+
+.flashcard-pronunciation button{border:1px solid var(--border-color);border-radius:8px;padding:8px 12px;background:var(--bg-main);color:var(--text-dark);font:inherit;cursor:pointer}
+.flashcard-pronunciation button:disabled{opacity:.6;cursor:wait}
+
+/* Apply the chosen color to the entire deck, including the action area. */
+.quiz-deck-card.flashcard-deck {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--deck-color);
+  border-color: color-mix(in srgb, var(--deck-color) 75%, #0f172a);
+  color: var(--deck-ink);
+}
+.flashcard-deck::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: .16;
+}
+.flashcard-deck.is-lines::before {
+  background-image: repeating-linear-gradient(0deg, transparent 0 27px, #fff 27px 28px);
+}
+.flashcard-deck.is-grid::before {
+  background-image: linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+.flashcard-deck-emblem {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid color-mix(in srgb, var(--deck-ink) 20%, transparent);
+  border-radius: 12px;
+  background: #ffffff24;
+}
+.flashcard-deck-emblem svg { width: 23px; height: 23px; }
+.quiz-deck-card.flashcard-deck :is(h2, p, small) { color: var(--deck-ink); }
+.quiz-deck-card.flashcard-deck p { flex: 0; margin-bottom: 6px; }
+.quiz-deck-card.flashcard-deck > small:not(.flashcard-deck-count) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.quiz-deck-card.flashcard-deck progress { accent-color: var(--deck-ink); margin-top: 20px; }
+.flashcard-deck-actions { display: grid; gap: 10px; margin-top: auto; padding-top: 6px; }
+.flashcard-deck-manage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.flashcard-deck-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 8px;
+  border: 1px solid color-mix(in srgb, var(--deck-ink) 30%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--deck-color) 85%, var(--deck-ink));
+  color: var(--deck-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.flashcard-deck-actions button svg { width: 18px; height: 18px; flex-shrink: 0; }
+.flashcard-deck-actions .flashcard-deck-study { background: #0f172a; border-color: #0f172a; color: #fff; }
+.flashcard-deck-actions button:hover { background: color-mix(in srgb, var(--deck-color) 72%, var(--deck-ink)); }
+.flashcard-deck-actions .flashcard-deck-study:hover { background: #24334c; }
+.flashcard-deck-actions .flashcard-deck-delete:hover { background: #991b1b; border-color: #991b1b; color: #fff; }
+.flashcard-deck-actions button:focus-visible { outline: 2px solid var(--deck-ink); outline-offset: 3px; }

@@ -533,3 +533,10 @@ INSERT OR IGNORE INTO schema_migrations(version,description)
 VALUES(9,'Google and Facebook OAuth account links');
 INSERT OR IGNORE INTO schema_migrations(version,description)
 VALUES(10,'Per-user L2 learning facts and L3 learner profiles');
+
+CREATE TABLE IF NOT EXISTS flashcard_decks (
+    id VARCHAR(80) NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (user_id, id)
+);

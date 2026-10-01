@@ -1,3 +1,5 @@
+import './components/streak/streak.css';
+import { getFlashcardDecks, saveFlashcardDeck, deleteFlashcardDeck } from './api';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import "./Logo3D.css";
@@ -30,6 +32,7 @@ import {
   requestPasswordOtp,
   resetPassword,
   uploadDocument,
+  previewDocumentMetadata,
   verifyPasswordOtp,
 } from "./api";
 import AITutorPage from "./components/ai-tutor/AITutorPage";
@@ -40,7 +43,7 @@ import ProgressDashboard from "./components/progress/ProgressDashboard";
 import { EMPTY_PROGRESS_ANALYTICS } from "./components/progress/progressDefaults";
 import StudyDeckSession from "./components/StudyDeckSession";
 import FlashcardDeckForm from "./components/flashcard/FlashcardDeckForm";
-import { DEFAULT_FLASHCARD_COLOR, rememberedCount } from "./components/flashcard/flashcardTheme";
+import { normalizeFlashcardColor, rememberedCount } from "./components/flashcard/flashcardTheme";
 import { buildSubjectHashMap, findSubject, quickSortSubjects } from "./utils/subjectAlgorithms";
 import {
   ArrowRightIcon,
@@ -58,6 +61,7 @@ import {
   XMarkIcon,
   SparklesIcon,
   TrashIcon,
+  PencilSquareIcon,
   SunIcon,
   MoonIcon,
 } from "@heroicons/react/24/outline";
@@ -197,7 +201,7 @@ function StreakCard({ user, streak, onLogin }) {
   return (
     <section className="streak-card" aria-labelledby="streak-title">
       <div className="streak-card-heading">
-        <div className="streak-symbol"><FireIcon aria-hidden="true" /></div>
+        <div className={`streak-symbol fire-level-${user ? Math.min(streak.current_streak, 3) : 0}`}>{user && streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}</div>
         <div>
           <span className="eyebrow">THÓI QUEN HỌC TẬP</span>
           <h2 id="streak-title">Giữ chuỗi mỗi ngày</h2>
@@ -210,9 +214,9 @@ function StreakCard({ user, streak, onLogin }) {
       <p className="streak-description">
         {user
           ? todayActive
-            ? "Bạn đã đăng nhập hôm nay. Hãy duy trì nhịp học của mình."
-            : "Đăng nhập hôm nay để ghi nhận hoạt động học tập."
-          : "Đăng nhập mỗi ngày để bắt đầu chuỗi học tập của bạn."}
+            ? "Bạn đã học hôm nay. Hãy duy trì nhịp học của mình."
+            : "Ôn flashcard hoặc hoàn thành bài tập để ghi nhận ngày học."
+          : "Đăng nhập và học mỗi ngày để bắt đầu chuỗi học tập của bạn."}
       </p>
       <div className="streak-week" aria-label="Hoạt động học tập 7 ngày gần nhất">
         {days.map((day) => {
@@ -228,7 +232,7 @@ function StreakCard({ user, streak, onLogin }) {
       </div>
       <footer className="streak-card-footer">
         <span><CalendarDaysIcon aria-hidden="true" /> Hôm nay: {todayActive ? "đã ghi nhận" : "chưa ghi nhận"}</span>
-        <span>Khôi phục tự động: {user ? `${Math.min(streak.recovery_count, 3)}/3 lượt đã dùng` : "—"}</span>
+        <span>Chuỗi chỉ tính những ngày học liên tiếp</span>
         <span>GMT+7</span>
         {!user && <button className="text-link" onClick={onLogin}>Đăng nhập <ArrowRightIcon aria-hidden="true" className="link-icon" /></button>}
       </footer>
@@ -437,6 +441,8 @@ export default function App() {
     }
   });
   const [documents, setDocuments] = useState([]);
+  const [editingDeck, setEditingDeck] = useState(null);
+  const [decksLoading, setDecksLoading] = useState(false);
   const [quizDecks, setQuizDecks] = useState(() => {
     try {
       const storedUser = JSON.parse(localStorage.getItem("studyhub-user"));
@@ -489,6 +495,13 @@ export default function App() {
   const userRef = useRef(user);
   const uploadInput = useRef(null);
   const uploadInFlight = useRef(false);
+  const uploadSuggestionRequest = useRef(null);
+  const uploadTitleEdited = useRef(false);
+  const uploadDescriptionEdited = useRef(false);
+  const [uploadSuggestionBusy, setUploadSuggestionBusy] = useState(false);
+  const [uploadSuggestionNote, setUploadSuggestionNote] = useState('');
+  const [suggestedUploadTitle, setSuggestedUploadTitle] = useState('');
+  useEffect(() => () => uploadSuggestionRequest.current?.abort(), [modal]);
   const [subscription, setSubscription] = useState({
     plan: "free",
     status: "active",
@@ -628,14 +641,28 @@ export default function App() {
       setFilter("all");
       setSearch("");
       setSelectedDocument(null);
+      setQuizDecks([]);
+      setDecksLoading(Boolean(userKey));
       if (!userKey) {
         setQuizDecks([]);
         return;
       }
       try {
-        setQuizDecks(JSON.parse(localStorage.getItem(`studyhub-quiz-decks:${userKey}`)) || []);
-      } catch {
-        setQuizDecks([]);
+        const serverDecks = await getFlashcardDecks();
+        let legacy = [];
+        try { legacy = JSON.parse(localStorage.getItem(`studyhub-quiz-decks:${userKey}`)) || []; } catch { /* Invalid legacy cache. */ }
+        const imported = [];
+        for (const deck of Array.isArray(legacy) ? legacy : []) {
+          if (!active) return;
+          if (!serverDecks.some((item) => item.id === deck.id)) imported.push(await saveFlashcardDeck(deck));
+        }
+        if (!active) return;
+        setQuizDecks([...serverDecks, ...imported]);
+        localStorage.removeItem(`studyhub-quiz-decks:${userKey}`);
+      } catch (error) {
+        if (active) notify(`Không tải được bộ thẻ: ${error.message}`);
+      } finally {
+        if (active) setDecksLoading(false);
       }
       const [documentsResult, subjectsResult, progressResult, studyTimeResult, streakResult, subscriptionResult] = await Promise.allSettled([
         getDocuments(),
@@ -946,7 +973,7 @@ export default function App() {
   };
   const submitUpload = async (event) => {
     event.preventDefault();
-    if (uploadInFlight.current) return;
+    if (uploadInFlight.current || uploadSuggestionBusy) return;
     setUploadPhase("validating");
     setUploadError("");
     const fail = (message) => {
@@ -1001,15 +1028,35 @@ export default function App() {
     }
     window.location.assign(getOAuthLoginUrl(provider));
   };
-  const selectUploadFile = (file) => {
-    if (!file || !uploadInput.current) return;
-    const transfer = new DataTransfer();
-    transfer.items.add(file);
-    uploadInput.current.files = transfer.files;
-    setUploadFile(file);
-    setUploadFileName(file.name);
-    setUploadPhase("idle");
-    setUploadError("");
+  const selectUploadFile = async (file) => {
+    if (!file || uploadInFlight.current) return;
+    uploadSuggestionRequest.current?.abort();
+    const request = new AbortController(); uploadSuggestionRequest.current = request;
+    setUploadFile(file); setUploadFileName(file.name);
+    setUploadPhase('idle'); setUploadError('');
+    setUploadSuggestionNote(''); setSuggestedUploadTitle('');
+    if (!uploadTitleEdited.current) setUploadTitle('');
+    if (!uploadDescriptionEdited.current) setUploadDescription('');
+    if (!file.size || file.size > 10 * 1024 * 1024) {
+      setUploadSuggestionBusy(false);
+      setUploadSuggestionNote(!file.size ? 'File không được rỗng.' : 'File tối đa 10MB.');
+      return;
+    }
+    setUploadSuggestionBusy(true);
+    const timer = window.setTimeout(() => request.abort(), 60000);
+    try {
+      const result = await previewDocumentMetadata(file, request.signal);
+      if (request.signal.aborted || uploadSuggestionRequest.current !== request) return;
+      setSuggestedUploadTitle(result.suggestion.title);
+      if (!uploadTitleEdited.current) setUploadTitle(result.suggestion.title);
+      if (!uploadDescriptionEdited.current) setUploadDescription(result.suggestion.description || '');
+      setUploadSuggestionNote(result.warning || 'Đã gợi ý tên theo nội dung tài liệu. Bạn có thể chỉnh sửa trước khi tải lên.');
+    } catch (error) {
+      if (uploadSuggestionRequest.current === request) setUploadSuggestionNote(request.signal.aborted ? 'Phân tích quá thời gian. Bạn có thể tự nhập tên tài liệu.' : error.message);
+    } finally {
+      window.clearTimeout(timer);
+      if (uploadSuggestionRequest.current === request) setUploadSuggestionBusy(false);
+    }
   };
   const removeLibraryDocument = async (event, document) => {
     event.stopPropagation();
@@ -1048,20 +1095,23 @@ export default function App() {
       notify(`Không thể thêm môn học: ${error.message}`);
     }
   };
-  const submitQuizDeck = (deck) => {
-    if (requireLogin()) return;
-    if (!deck.name) return notify("Tên bộ thẻ không được để trống.");
-    const next = [...quizDecks, deck];
-    setQuizDecks(next);
-    localStorage.setItem(`studyhub-quiz-decks:${userKey}`, JSON.stringify(next));
-    setModal(null);
-    notify("Đã tạo bộ thẻ ghi nhớ mới.");
+  const submitQuizDeck = async (deck) => {
+    if (!userKey) throw new Error('Bạn cần đăng nhập.');
+    const saved = await saveFlashcardDeck(deck);
+    setQuizDecks((current) => current.some((item) => item.id === saved.id) ? current.map((item) => item.id === saved.id ? saved : item) : [...current, saved]);
+    setModal(null); setEditingDeck(null);
+    notify('Đã lưu bộ thẻ ghi nhớ.');
   };
-  const updateStudyDeck = (deck) => {
-    const next = quizDecks.map((item) => item.id === deck.id ? deck : item);
-    setQuizDecks(next);
-    setActiveStudyDeck(deck);
-    localStorage.setItem(`studyhub-quiz-decks:${userKey}`, JSON.stringify(next));
+  const updateStudyDeck = async (deck, alreadySaved = false) => {
+    const saved = alreadySaved ? deck : await saveFlashcardDeck(deck);
+    setQuizDecks((current) => current.map((item) => item.id === saved.id ? saved : item));
+    setActiveStudyDeck(saved);
+    getStreak().then(setStreak).catch(() => {});
+  };
+  const removeFlashcardDeck = async (deck) => {
+    if (!window.confirm(`Xóa bộ thẻ “${deck.name}”?`)) return;
+    try { await deleteFlashcardDeck(deck.id); setQuizDecks((current) => current.filter((item) => item.id !== deck.id)); }
+    catch (error) { notify(error.message); }
   };
   const requestPlan = (plan) => {
     if (requireLogin() || plan === subscription.plan) return;
@@ -1165,9 +1215,9 @@ export default function App() {
             <>
               <button
                 className="streak-pill"
-                title={`${streak.recovery_count} lần khôi phục đã dùng`}
+                title="Số ngày học liên tiếp"
               >
-                <FireIcon aria-hidden="true" />
+                {streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}
                 <strong>{streak.current_streak}</strong>
                 <span>ngày</span>
               </button>
@@ -1233,11 +1283,11 @@ export default function App() {
                 {user ? <>
                   <div className="hero-note hero-note--one"><BookOpenIcon aria-hidden="true" /><div><strong>{documents.length} tài liệu</strong><small>Đã lưu</small></div></div>
                   <div className="hero-note hero-note--two"><SparklesIcon aria-hidden="true" /><div><strong>{progress.length ? `${average}%` : "—"}</strong><small>Tiến độ</small></div></div>
-                  <div className="hero-note hero-note--three"><FireIcon aria-hidden="true" /><div><strong>{streak.current_streak} ngày</strong><small>Streak</small></div></div>
+                  <div className="hero-note hero-note--three">{streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}<div><strong>{streak.current_streak} ngày</strong><small>Streak</small></div></div>
                 </> : <>
                   <div className="hero-note hero-note--one"><BookOpenIcon aria-hidden="true" /><div><strong>Gọn một nơi</strong><small>Tài liệu & kiến thức</small></div></div>
                   <div className="hero-note hero-note--two"><SparklesIcon aria-hidden="true" /><div><strong>Rõ từng bước</strong><small>Lộ trình của riêng bạn</small></div></div>
-                  <div className="hero-note hero-note--three"><FireIcon aria-hidden="true" /><div><strong>Mỗi ngày một chút</strong><small>Xây thói quen học</small></div></div>
+                  <div className="hero-note hero-note--three">{streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}<div><strong>Mỗi ngày một chút</strong><small>Xây thói quen học</small></div></div>
                 </>}
               </div>
             </section>
@@ -1394,6 +1444,8 @@ export default function App() {
                   setUploadFile(null);
                   setUploadFileName("");
                   setUploadTitle("");
+                  uploadTitleEdited.current = false; uploadDescriptionEdited.current = false;
+                  setUploadSuggestionNote(''); setSuggestedUploadTitle(''); setUploadSuggestionBusy(false);
                   setUploadDescription("");
                   setUploadSubject("");
                   setModal("upload");
@@ -1532,17 +1584,23 @@ export default function App() {
               </button>
             </header>
             <QuizWorkspace documents={documents} user={user} initialDocumentId={selectedDocument?.id} />
-            {quizDecks.length ? (
+            {decksLoading ? <p role="status">Đang tải bộ thẻ…</p> : quizDecks.length ? (
               <div className="quiz-deck-grid reveal-stagger">
                 {quizDecks.map((deck) => (
-                  <article className="quiz-deck-card" key={deck.id}>
-                    <div className={`quiz-deck-cover is-${deck.cover || "plain"}`} style={{ "--deck-color": deck.color || DEFAULT_FLASHCARD_COLOR }} aria-hidden="true" />
+                  <article className={`quiz-deck-card flashcard-deck is-${deck.cover || "plain"}`} key={deck.id} style={{ "--deck-color": normalizeFlashcardColor(deck.color), "--deck-ink": normalizeFlashcardColor(deck.color) === "#64748b" ? "#ffffff" : "#0f172a" }}>
+                    <span className="flashcard-deck-emblem" aria-hidden="true"><RectangleStackIcon /></span>
                     <h2>{deck.name}</h2>
                     <p>{deck.subject || "Chưa phân loại"}</p>
                     {deck.description && <small>{deck.description}</small>}
-                    <progress value={rememberedCount(deck)} max={Math.max(1, deck.cards?.length || 0)} aria-label={`${rememberedCount(deck)} trên ${deck.cards?.length || 0} thẻ đã nhớ`} style={{ "--deck-color": deck.color || DEFAULT_FLASHCARD_COLOR }} />
+                    <progress value={rememberedCount(deck)} max={Math.max(1, deck.cards?.length || 0)} aria-label={`${rememberedCount(deck)} trên ${deck.cards?.length || 0} thẻ đã nhớ`} style={{ "--deck-color": normalizeFlashcardColor(deck.color) }} />
                     <small className="flashcard-deck-count">{rememberedCount(deck)}/{deck.cards?.length || 0} thẻ đã nhớ</small>
-                    <button className="btn btn-primary full" type="button" onClick={() => setActiveStudyDeck(deck)}>Bắt đầu ôn tập</button>
+                    <div className="flashcard-deck-actions">
+                      <button className="flashcard-deck-study" type="button" onClick={() => setActiveStudyDeck(deck)}><BookOpenIcon aria-hidden="true" />Bắt đầu ôn tập</button>
+                      <div className="flashcard-deck-manage">
+                        <button type="button" onClick={() => { setEditingDeck(deck); setModal("quiz-create"); }}><PencilSquareIcon aria-hidden="true" />Chỉnh sửa</button>
+                        <button type="button" className="flashcard-deck-delete" onClick={() => removeFlashcardDeck(deck)}><TrashIcon aria-hidden="true" />Xóa bộ thẻ</button>
+                      </div>
+                    </div>
                   </article>
                 ))}
               </div>
@@ -1718,6 +1776,9 @@ export default function App() {
           onClose={() => setModal(null)}
         >
           <form className="upload-form" onSubmit={submitUpload}>
+            {uploadSuggestionBusy && <p role="status">Đang đọc nội dung để gợi ý tên tài liệu…</p>}
+            {!uploadSuggestionBusy && uploadSuggestionNote && <p role="status">{uploadSuggestionNote}</p>}
+            {suggestedUploadTitle && suggestedUploadTitle !== uploadTitle && <p>Tên gợi ý: <strong>{suggestedUploadTitle}</strong> <button type="button" className="text-link" onClick={() => { uploadTitleEdited.current = false; setUploadTitle(suggestedUploadTitle); }}>Dùng tên gợi ý</button></p>}
             <fieldset className="upload-card">
               <legend>Thông tin tài liệu</legend>
               <label htmlFor="upload-title">
@@ -1728,7 +1789,7 @@ export default function App() {
                 name="title"
                 maxLength="200"
                 value={uploadTitle}
-                onChange={(event) => setUploadTitle(event.target.value)}
+                onChange={(event) => { uploadTitleEdited.current = true; setUploadTitle(event.target.value); }}
                 placeholder="Ví dụ: Chương 1 - Đạo hàm và ứng dụng"
               />
               <label htmlFor="upload-description">
@@ -1740,7 +1801,7 @@ export default function App() {
                 rows="3"
                 maxLength="2000"
                 value={uploadDescription}
-                onChange={(event) => setUploadDescription(event.target.value)}
+                onChange={(event) => { uploadDescriptionEdited.current = true; setUploadDescription(event.target.value); }}
                 placeholder="Ghi chú ngắn gọn về nội dung tài liệu…"
               />
             </fieldset>
@@ -1767,13 +1828,7 @@ export default function App() {
                   name="file"
                   type="file"
                   accept=".pdf,.txt,.md,.csv,.doc,.docx,.ppt,.pptx"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0] || null;
-                    setUploadFile(file);
-                    setUploadFileName(file?.name || "");
-                    setUploadPhase("idle");
-                    setUploadError("");
-                  }}
+                  onChange={(event) => selectUploadFile(event.target.files?.[0])}
                 />
               </div>
               {uploadPhase !== "idle" && (
@@ -1814,7 +1869,7 @@ export default function App() {
               >
                 Hủy bỏ
               </button>
-              <button className="btn btn-primary" disabled={["validating", "uploading", "processing"].includes(uploadPhase)}>Tải lên & Xử lý</button>
+              <button className="btn btn-primary" disabled={uploadSuggestionBusy || ["validating", "uploading", "processing"].includes(uploadPhase)}>Tải lên & Xử lý</button>
             </footer>
           </form>
         </Modal>
@@ -1858,8 +1913,8 @@ export default function App() {
         </Modal>
       )}
       {modal === "quiz-create" && (
-        <Modal title="Tạo bộ thẻ ghi nhớ mới" onClose={() => setModal(null)}>
-          <FlashcardDeckForm onCreate={submitQuizDeck} onCancel={() => setModal(null)} />
+        <Modal title={editingDeck ? "Chỉnh sửa bộ thẻ" : "Tạo bộ thẻ ghi nhớ mới"} onClose={() => { setModal(null); setEditingDeck(null); }}>
+          <FlashcardDeckForm key={editingDeck?.id || "new"} userKey={userKey} initialDeck={editingDeck} onCreate={submitQuizDeck} onCancel={() => { setModal(null); setEditingDeck(null); }} />
         </Modal>
       )}
       {modal === "plan" && (
@@ -1943,7 +1998,7 @@ export default function App() {
         </div>
       </footer>
       {toast && <div className="toast">{toast}</div>}
-      {activeStudyDeck && <StudyDeckSession deck={activeStudyDeck} onUpdateDeck={updateStudyDeck} onClose={() => setActiveStudyDeck(null)} />}
+      {activeStudyDeck && <StudyDeckSession key={activeStudyDeck.id} deck={activeStudyDeck} onUpdateDeck={updateStudyDeck} onClose={() => setActiveStudyDeck(null)} />}
     </div>
     </>
   );

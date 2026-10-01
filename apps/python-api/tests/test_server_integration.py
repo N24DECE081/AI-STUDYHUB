@@ -75,7 +75,7 @@ class ServerIntegrationTest(unittest.TestCase):
         },{'Cookie':cookie})
         self.assertEqual(status,201,subject)
         return subject
-    def test_streak_saved_session_records_today_and_recovers(self):
+    def test_streak_read_does_not_record_or_recover(self):
         from datetime import timedelta
         today = datetime.now(timezone(timedelta(hours=7))).date()
         status, headers, result = self.request('/api/auth/register', 'POST', {
@@ -86,15 +86,15 @@ class ServerIntegrationTest(unittest.TestCase):
         with sqlite3.connect(Path(self.tmp.name) / 'integration.db') as conn:
             uid = conn.execute("SELECT id FROM users WHERE email='streak-test@example.com'").fetchone()[0]
             conn.execute('DELETE FROM user_activity_days WHERE user_id=?', (uid,))
-            conn.execute('UPDATE user_streaks SET current_streak=5,last_activity_date=?,recovery_count=0 WHERE user_id=?',
-                         ((today - timedelta(days=2)).isoformat(), uid))
+            conn.execute('INSERT INTO user_streaks(user_id,current_streak,last_activity_date,recovery_count) VALUES(?,5,?,0)',
+                         (uid, (today - timedelta(days=2)).isoformat()))
         conn.close()
         status, _, streak = self.request('/api/streak', headers={'Cookie': cookie})
         self.assertEqual(status, 200, streak)
         self.assertEqual(streak['today'], today.isoformat())
-        self.assertEqual(streak['current_streak'], 6)
-        self.assertEqual(streak['recovery_count'], 1)
-        self.assertEqual(streak['activity_dates'], [(today - timedelta(days=2)).isoformat(), today.isoformat()])
+        self.assertEqual(streak['current_streak'], 0)
+        self.assertEqual(streak['recovery_count'], 0)
+        self.assertEqual(streak['activity_dates'], [])
         _, _, repeated = self.request('/api/streak', headers={'Cookie': cookie})
         self.assertEqual(repeated, streak)
         self.assertEqual(self.request('/api/streak')[0], 401)

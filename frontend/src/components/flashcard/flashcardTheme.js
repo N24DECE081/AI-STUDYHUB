@@ -12,3 +12,7 @@ export const DEFAULT_FLASHCARD_COLOR = FLASHCARD_COLORS[0].value;
 
 export const rememberedCount = (deck) =>
   (deck.cards || []).filter((card) => card.remembered).length;
+
+export const normalizeFlashcardColor = (value) =>
+  FLASHCARD_COLORS.some((item) => item.value === String(value).toLowerCase())
+    ? String(value).toLowerCase() : DEFAULT_FLASHCARD_COLOR;

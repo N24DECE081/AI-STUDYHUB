@@ -1,0 +1,11 @@
+.streak-symbol.fire-level-0{animation:none;background:var(--bg-alt);color:var(--text-muted)}
+.streak-symbol.fire-level-1{color:#ed8936;animation:studyFire 2s ease-in-out infinite}
+.streak-symbol.fire-level-2{color:#f97316;animation:studyFire 1.5s ease-in-out infinite}
+.streak-symbol.fire-level-3{color:#ef4444;animation:studyFire 1s ease-in-out infinite}
+@keyframes studyFire{50%{transform:scale(1.08);filter:drop-shadow(0 0 6px currentColor)}}
+@media(prefers-reduced-motion:reduce){.streak-symbol{animation:none!important}}
+
+.progress-journey__rail .fire-level-1{color:#ed8936;animation-duration:2s}
+.progress-journey__rail .fire-level-2{color:#f97316;animation-duration:1.5s}
+.progress-journey__rail .fire-level-3{color:#ef4444;animation-duration:1s}
+@media(prefers-reduced-motion:reduce){.progress-journey__rail i[class*="fire-level-"]{animation:none}}
