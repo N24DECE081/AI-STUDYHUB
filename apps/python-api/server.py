@@ -777,7 +777,7 @@ def extract_document_text(path):
     return ''
 
 def build_quiz_questions(documents, question_count=10):
-    sources = [{**document, 'text': extract_document_text(document['absolute_path'])} for document in documents]
+    sources = [{**document, 'text': document.get('text') or extract_document_text(document.get('absolute_path', ''))} for document in documents]
     return quizzes.generate(sources, question_count, get_engine())
 
 def public_quiz_payload(payload, quiz_id=None, created_at=None):
@@ -934,7 +934,7 @@ class H(BaseHTTPRequestHandler):
   client_ip=self.client_address[0]
   allowed,retry,remaining=api_rate_limiter.consume(client_ip)
   limit=API_RATE_LIMIT
-  if self.command=='POST' and path in ('/api/login','/api/auth/login','/api/register','/api/auth/register','/api/auth/password/otp','/api/auth/password/verify','/api/auth/password/reset'):
+  if self.command=='POST' and path in ('/api/login','/api/auth/login','/api/register','/api/auth/register','/api/auth/password/otp','/api/auth/forgot-password','/api/auth/password/verify','/api/auth/reset-password/verify','/api/auth/password/reset','/api/auth/reset-password'):
    auth_allowed,auth_retry,auth_remaining=auth_rate_limiter.consume(client_ip)
    if not auth_allowed: allowed,retry,remaining,limit=False,auth_retry,0,AUTH_RATE_LIMIT
    elif auth_remaining<remaining: remaining,limit=auth_remaining,AUTH_RATE_LIMIT
@@ -1408,8 +1408,7 @@ class H(BaseHTTPRequestHandler):
     docs=[]
     for document_id in document_ids:
      row=by_id[document_id]
-     absolute_path=row['storage_path'] if os.path.isabs(row['storage_path']) else os.path.join(ROOT,row['storage_path'])
-     docs.append({'id':row['id'],'title':row['title'],'absolute_path':absolute_path})
+     docs.append({'id':row['id'],'title':row['title'],'text':document_text(row, c)})
     try: questions=build_quiz_questions(docs,question_count)
     except quizzes.QuizGenerationError as error:return self.json({'error':str(error),'code':'quiz_quality_failed'},422)
     except TutorEngineError:return self.json({'error':'AI chưa sẵn sàng tạo đủ câu hỏi chất lượng. Vui lòng thử lại sau.','code':'quiz_provider_unavailable','retryable':True},503)
@@ -1488,7 +1487,7 @@ class H(BaseHTTPRequestHandler):
    with db() as c: user,error=complete_profile(c,u['id'],first_name,last_name)
    if error:return self.json({'error':error},400)
    return self.json({'user':user},200)
-  if path=='/api/auth/password/otp':
+  if path in ('/api/auth/password/otp', '/api/auth/forgot-password'):
    x=json_body(data)
    identifier=x.get('identifier','') if isinstance(x,dict) else ''
    if not isinstance(identifier,str) or not identifier.strip(): return self.json({'error':'Vui lòng nhập email hoặc số điện thoại'},400)
@@ -1500,13 +1499,13 @@ class H(BaseHTTPRequestHandler):
     self.log_error('Password-reset email failed: %r',error)
     return self.json({'error':'Không thể gửi mã OTP. Vui lòng thử lại sau.'},503)
    return self.json({'ok':True},202)
-  if path=='/api/auth/password/verify':
+  if path in ('/api/auth/password/verify', '/api/auth/reset-password/verify'):
    x=json_body(data)
    identifier=x.get('identifier','') if isinstance(x,dict) else ''; code=x.get('code','') if isinstance(x,dict) else ''
    with db() as c: reset_token,error=verify_password_reset(c,identifier,code)
    if error:return self.json({'error':error},400)
    return self.json({'reset_token':reset_token},200)
-  if path=='/api/auth/password/reset':
+  if path in ('/api/auth/password/reset', '/api/auth/reset-password'):
    x=json_body(data)
    reset_token=x.get('reset_token','') if isinstance(x,dict) else ''; password=x.get('password','') if isinstance(x,dict) else ''
    if not isinstance(reset_token,str) or not isinstance(password,str): return self.json({'error':'Dữ liệu đặt lại mật khẩu không hợp lệ'},400)

@@ -303,7 +303,7 @@ function StudyHubAuthScreen({ mode, user, oauthStatus, error, identifier, onBack
     otp: ["Kiểm tra hộp thư", "Nhập mã OTP gồm 6 chữ số vừa được gửi."],
     reset: ["Đặt mật khẩu mới", "Mật khẩu mới cần đáp ứng yêu cầu bảo mật."],
   }[mode] || [];
-  const showProviders = mode === "login";
+  const showProviders = mode === "login" || mode === "register";
   const identity = user?.email || user?.phone || "";
   return (
     <main className="studyhub-auth" aria-labelledby="studyhub-auth-title">
@@ -411,6 +411,7 @@ function StudyHubAuthScreen({ mode, user, oauthStatus, error, identifier, onBack
               </div>
             </label>
             <label>Gmail<input name="email" type="email" autoComplete="email" required /></label>
+            <button type="button" className="studyhub-auth__link studyhub-auth__forgot" onClick={() => onMode("forgot")}>Quên mật khẩu?</button>
             <button className="studyhub-auth__submit">Tạo tài khoản</button>
             <p>Đã có tài khoản? <button type="button" className="studyhub-auth__link" onClick={() => onMode("login")}>Đăng nhập</button></p>
           </form>
