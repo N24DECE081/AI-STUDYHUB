@@ -1,6 +1,7 @@
 """End-to-end coverage for the AI Tutor journey (plan train AI §1-§9)."""
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -29,13 +30,19 @@ GRADES = ('Excellent', 'Very Good', 'Good', 'Pass', 'Needs Improvement')
 TYPES = ('multiple_choice', 'short_answer', 'essay', 'code', 'math')
 
 
+def available_port():
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        return listener.getsockname()[1]
+
+
 class AITutorJourneyTests(unittest.TestCase):
     maxDiff = None
 
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
-        cls.port = 8767
+        cls.port = available_port()
         env = os.environ.copy()
         env.pop('MYSQL_DATABASE', None)
         env.update({
@@ -65,8 +72,15 @@ class AITutorJourneyTests(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 cls.proc.kill(); out = ''
             raise RuntimeError('server did not start: ' + out)
-        cls.cookie = cls.register()
-        cls.upload_owned_document()
+        try:
+            cls.cookie = cls.register()
+            cls.subject_id = cls.ensure_test_subject()
+            cls.upload_owned_document(cls.subject_id)
+        except Exception:
+            cls.proc.terminate()
+            cls.proc.wait(timeout=5)
+            cls.tmp.cleanup()
+            raise
 
     @classmethod
     def tearDownClass(cls):
@@ -99,17 +113,16 @@ class AITutorJourneyTests(unittest.TestCase):
         return headers.get('Set-Cookie').split(';', 1)[0]
 
     @classmethod
-    def upload_owned_document(cls):
-        status, _, raw_sub = cls.raw('/api/subjects', 'POST', json.dumps({
-            'name': 'Lập trình hướng đối tượng',
-            'code': 'OOP101',
-            'description': 'Môn học kiểm thử',
-        }).encode(), {
-            'Cookie': cls.cookie,
-            'Content-Type': 'application/json',
-        })
-        assert status == 201, raw_sub
-        subject_id = json.loads(raw_sub)['id']
+    def ensure_test_subject(cls):
+        headers = {'Cookie': cls.cookie, 'Content-Type': 'application/json'}
+        payload = json.dumps({'code': 'AITUTOR', 'name': 'AI Tutor Test Subject',
+                              'description': 'Subject owned by the isolated AI Tutor test user.'}).encode()
+        status, _, body = cls.raw('/api/subjects', 'POST', payload, headers)
+        assert status == 201, f'POST /api/subjects returned {status}: {body!r}'
+        return json.loads(body)['id']
+
+    @classmethod
+    def upload_owned_document(cls, subject_id):
         boundary = '----NovaJourneyDocument'
         content = (
             'Object-oriented programming uses classes and objects. '
@@ -127,7 +140,7 @@ class AITutorJourneyTests(unittest.TestCase):
             'Cookie': cls.cookie,
             'Content-Type': f'multipart/form-data; boundary={boundary}',
         })
-        assert status == 201, response
+        assert status == 201, f'POST /api/upload returned {status}: {response!r}'
 
     @classmethod
     def api(cls, path, method='GET', payload=None):

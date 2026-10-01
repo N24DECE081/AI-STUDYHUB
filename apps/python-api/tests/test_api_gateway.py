@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -13,10 +14,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def available_port():
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        return listener.getsockname()[1]
+
+
 class ApiGatewayIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.port = 8767
+        cls.port = available_port()
         cls.tmp = tempfile.TemporaryDirectory()
         env = os.environ.copy()
         env.update({
@@ -62,6 +69,7 @@ class ApiGatewayIntegrationTest(unittest.TestCase):
         self.assertEqual(self.api_get()[0], 200)
         status, headers, payload = self.api_get()
         self.assertEqual(status, 429)
+        self.assertEqual(headers.get_content_type(), 'application/json')
         self.assertEqual(payload['code'], 'rate_limited')
         self.assertGreaterEqual(int(headers['Retry-After']), 1)
         self.assertEqual(headers['X-RateLimit-Remaining'], '0')
