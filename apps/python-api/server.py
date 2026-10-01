@@ -1345,7 +1345,7 @@ class H(BaseHTTPRequestHandler):
    p=urlparse(self.path); path=p.path; data=self.body()
   except ValueError:
    return self.json({'error':'Content-Length không hợp lệ'},400)
-  if path=='/api/flashcards/preview':
+  if path in ('/api/flashcards/preview','/api/documents/preview'):
    u=require_user(self)
    if not u:return
    ctype=self.headers.get('Content-Type','')
@@ -1371,7 +1371,8 @@ class H(BaseHTTPRequestHandler):
     if not extracted.strip():raise DocumentTextError('empty')
    except Exception:
     return self.json({'error':'Không đọc được nội dung chữ trong tài liệu'},422)
-   return self.json(flashcards.suggest(extracted,filename,get_engine()))
+   suggest = flashcards.document_suggestion if path=='/api/documents/preview' else flashcards.suggest
+   return self.json(suggest(extracted,filename,get_engine()))
   if path=='/api/flashcards':
    u=require_user(self)
    if not u:return

@@ -53,11 +53,47 @@ def normalize_deck(payload):
         'difficulty': payload.get('difficulty') if payload.get('difficulty') in ('beginner','intermediate','advanced') else 'beginner',
         'color': deck_color, 'cover': payload.get('cover') if payload.get('cover') in ('lines','grid','plain') else 'plain', 'cards': normalized}
 
+def content_title(content):
+    """Prefer a content heading over page markers, institutional headers and filenames."""
+    candidates = []
+    for line in content.splitlines()[:100]:
+        line = re.sub(r'\[(?:PAGE|SLIDE|SHEET):[^\]]*\]', '', line, flags=re.I).strip()
+        heading = bool(re.match(r'^#{1,6}\s+', line))
+        line = re.sub(r'^#{1,6}\s+|[*`]', '', line).strip()
+        if not line or re.fullmatch(r'[\W\d_]+', line):
+            continue
+        if re.match(r'^(?:trường\b|khoa\s|bộ giáo dục|giảng viên|sinh viên|họ và tên|mã sinh viên|tác giả|mục lục$|table of contents$|page\s+\d|trang\s+\d)', line, re.I):
+            continue
+        priority = 0 if heading or re.match(r'^(?:chương|bài|chapter|unit)\s+\d', line, re.I) else 1
+        candidates.append((priority, len(candidates), line))
+    if not candidates:
+        return 'Tài liệu học tập'
+    title = min(candidates)[2]
+    if len(title) > 120:
+        title = title[:120].rsplit(' ', 1)[0]
+    return title
+
+
+def document_suggestion(content, filename, engine):
+    if not content.strip():
+        raise ValueError('Tài liệu không có nội dung chữ')
+    fallback = {'title': content_title(content), 'description': content[:500]}
+    sampled = content if len(content) <= 6500 else '\n[…]\n'.join((content[:2100], content[len(content)//2-1050:len(content)//2+1050], content[-2100:]))
+    try:
+        raw = engine.complete_json(task='document_metadata', payload={'filename': filename, 'document': sampled})
+        if not isinstance(raw, dict) or not text(raw.get('title'), 200):
+            raise ValueError('missing title')
+        return {'suggestion': {'title': text(raw['title'], 200),
+            'description': text(raw.get('description'), 2000) or fallback['description']}, 'warning': ''}
+    except Exception:
+        return {'suggestion': fallback, 'warning': 'Chưa nhận được gợi ý AI. Tên được trích từ tiêu đề trong tài liệu; bạn có thể chỉnh sửa trước khi lưu.'}
+
+
 def suggest(content, filename, engine):
     lines = [line.strip() for line in content.splitlines() if line.strip()]
     if not lines:
         raise ValueError('Tài liệu không có nội dung chữ')
-    fallback = {'name': lines[0][:100], 'description': content[:500], 'subject': '',
+    fallback = {'name': content_title(content)[:100], 'description': content[:500], 'subject': '',
         'keywords': [], 'difficulty': 'beginner', 'cards': [{'front': lines[0][:200], 'back': content[:1500]}]}
     warning = ''
     try:
@@ -67,7 +103,12 @@ def suggest(content, filename, engine):
         if not isinstance(raw, dict):
             raise ValueError('invalid AI JSON')
         candidate = {**fallback, **raw, 'name': raw.get('title') or raw.get('name') or fallback['name']}
-        deck = normalize_deck(candidate)
+        try:
+            deck = normalize_deck(candidate)
+        except ValueError:
+            candidate['cards'] = fallback['cards']
+            deck = normalize_deck(candidate)
+            warning = 'Nội dung thẻ AI chưa hợp lệ; đã giữ tên gợi ý và dùng bản nháp trích từ tài liệu.'
         if (not all(key in raw for key in ('description','subject','keywords','difficulty','cards'))
                 or not all(isinstance(raw.get(key), str) for key in ('description', 'subject'))
                 or not isinstance(raw.get('keywords'), list)

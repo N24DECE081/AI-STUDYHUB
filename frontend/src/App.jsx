@@ -32,6 +32,7 @@ import {
   requestPasswordOtp,
   resetPassword,
   uploadDocument,
+  previewDocumentMetadata,
   verifyPasswordOtp,
 } from "./api";
 import AITutorPage from "./components/ai-tutor/AITutorPage";
@@ -60,6 +61,7 @@ import {
   XMarkIcon,
   SparklesIcon,
   TrashIcon,
+  PencilSquareIcon,
   SunIcon,
   MoonIcon,
 } from "@heroicons/react/24/outline";
@@ -493,6 +495,13 @@ export default function App() {
   const userRef = useRef(user);
   const uploadInput = useRef(null);
   const uploadInFlight = useRef(false);
+  const uploadSuggestionRequest = useRef(null);
+  const uploadTitleEdited = useRef(false);
+  const uploadDescriptionEdited = useRef(false);
+  const [uploadSuggestionBusy, setUploadSuggestionBusy] = useState(false);
+  const [uploadSuggestionNote, setUploadSuggestionNote] = useState('');
+  const [suggestedUploadTitle, setSuggestedUploadTitle] = useState('');
+  useEffect(() => () => uploadSuggestionRequest.current?.abort(), [modal]);
   const [subscription, setSubscription] = useState({
     plan: "free",
     status: "active",
@@ -971,7 +980,7 @@ export default function App() {
   };
   const submitUpload = async (event) => {
     event.preventDefault();
-    if (uploadInFlight.current) return;
+    if (uploadInFlight.current || uploadSuggestionBusy) return;
     setUploadPhase("validating");
     setUploadError("");
     const fail = (message) => {
@@ -1026,15 +1035,35 @@ export default function App() {
     }
     window.location.assign(getOAuthLoginUrl(provider));
   };
-  const selectUploadFile = (file) => {
-    if (!file || !uploadInput.current) return;
-    const transfer = new DataTransfer();
-    transfer.items.add(file);
-    uploadInput.current.files = transfer.files;
-    setUploadFile(file);
-    setUploadFileName(file.name);
-    setUploadPhase("idle");
-    setUploadError("");
+  const selectUploadFile = async (file) => {
+    if (!file || uploadInFlight.current) return;
+    uploadSuggestionRequest.current?.abort();
+    const request = new AbortController(); uploadSuggestionRequest.current = request;
+    setUploadFile(file); setUploadFileName(file.name);
+    setUploadPhase('idle'); setUploadError('');
+    setUploadSuggestionNote(''); setSuggestedUploadTitle('');
+    if (!uploadTitleEdited.current) setUploadTitle('');
+    if (!uploadDescriptionEdited.current) setUploadDescription('');
+    if (!file.size || file.size > 10 * 1024 * 1024) {
+      setUploadSuggestionBusy(false);
+      setUploadSuggestionNote(!file.size ? 'File không được rỗng.' : 'File tối đa 10MB.');
+      return;
+    }
+    setUploadSuggestionBusy(true);
+    const timer = window.setTimeout(() => request.abort(), 60000);
+    try {
+      const result = await previewDocumentMetadata(file, request.signal);
+      if (request.signal.aborted || uploadSuggestionRequest.current !== request) return;
+      setSuggestedUploadTitle(result.suggestion.title);
+      if (!uploadTitleEdited.current) setUploadTitle(result.suggestion.title);
+      if (!uploadDescriptionEdited.current) setUploadDescription(result.suggestion.description || '');
+      setUploadSuggestionNote(result.warning || 'Đã gợi ý tên theo nội dung tài liệu. Bạn có thể chỉnh sửa trước khi tải lên.');
+    } catch (error) {
+      if (uploadSuggestionRequest.current === request) setUploadSuggestionNote(request.signal.aborted ? 'Phân tích quá thời gian. Bạn có thể tự nhập tên tài liệu.' : error.message);
+    } finally {
+      window.clearTimeout(timer);
+      if (uploadSuggestionRequest.current === request) setUploadSuggestionBusy(false);
+    }
   };
   const removeLibraryDocument = async (event, document) => {
     event.stopPropagation();
@@ -1422,6 +1451,8 @@ export default function App() {
                   setUploadFile(null);
                   setUploadFileName("");
                   setUploadTitle("");
+                  uploadTitleEdited.current = false; uploadDescriptionEdited.current = false;
+                  setUploadSuggestionNote(''); setSuggestedUploadTitle(''); setUploadSuggestionBusy(false);
                   setUploadDescription("");
                   setUploadSubject("");
                   setModal("upload");
@@ -1563,15 +1594,20 @@ export default function App() {
             {decksLoading ? <p role="status">Đang tải bộ thẻ…</p> : quizDecks.length ? (
               <div className="quiz-deck-grid reveal-stagger">
                 {quizDecks.map((deck) => (
-                  <article className="quiz-deck-card" key={deck.id}>
-                    <div className={`quiz-deck-cover is-${deck.cover || "plain"}`} style={{ "--deck-color": normalizeFlashcardColor(deck.color) }} aria-hidden="true" />
+                  <article className={`quiz-deck-card flashcard-deck is-${deck.cover || "plain"}`} key={deck.id} style={{ "--deck-color": normalizeFlashcardColor(deck.color), "--deck-ink": normalizeFlashcardColor(deck.color) === "#64748b" ? "#ffffff" : "#0f172a" }}>
+                    <span className="flashcard-deck-emblem" aria-hidden="true"><RectangleStackIcon /></span>
                     <h2>{deck.name}</h2>
                     <p>{deck.subject || "Chưa phân loại"}</p>
                     {deck.description && <small>{deck.description}</small>}
                     <progress value={rememberedCount(deck)} max={Math.max(1, deck.cards?.length || 0)} aria-label={`${rememberedCount(deck)} trên ${deck.cards?.length || 0} thẻ đã nhớ`} style={{ "--deck-color": normalizeFlashcardColor(deck.color) }} />
                     <small className="flashcard-deck-count">{rememberedCount(deck)}/{deck.cards?.length || 0} thẻ đã nhớ</small>
-                    <button className="btn btn-primary full" type="button" onClick={() => setActiveStudyDeck(deck)}>Bắt đầu ôn tập</button>
-                    <button type="button" onClick={() => { setEditingDeck(deck); setModal("quiz-create"); }}>Chỉnh sửa</button> <button type="button" onClick={() => removeFlashcardDeck(deck)}>Xóa bộ thẻ</button>
+                    <div className="flashcard-deck-actions">
+                      <button className="flashcard-deck-study" type="button" onClick={() => setActiveStudyDeck(deck)}><BookOpenIcon aria-hidden="true" />Bắt đầu ôn tập</button>
+                      <div className="flashcard-deck-manage">
+                        <button type="button" onClick={() => { setEditingDeck(deck); setModal("quiz-create"); }}><PencilSquareIcon aria-hidden="true" />Chỉnh sửa</button>
+                        <button type="button" className="flashcard-deck-delete" onClick={() => removeFlashcardDeck(deck)}><TrashIcon aria-hidden="true" />Xóa bộ thẻ</button>
+                      </div>
+                    </div>
                   </article>
                 ))}
               </div>
@@ -1747,6 +1783,9 @@ export default function App() {
           onClose={() => setModal(null)}
         >
           <form className="upload-form" onSubmit={submitUpload}>
+            {uploadSuggestionBusy && <p role="status">Đang đọc nội dung để gợi ý tên tài liệu…</p>}
+            {!uploadSuggestionBusy && uploadSuggestionNote && <p role="status">{uploadSuggestionNote}</p>}
+            {suggestedUploadTitle && suggestedUploadTitle !== uploadTitle && <p>Tên gợi ý: <strong>{suggestedUploadTitle}</strong> <button type="button" className="text-link" onClick={() => { uploadTitleEdited.current = false; setUploadTitle(suggestedUploadTitle); }}>Dùng tên gợi ý</button></p>}
             <fieldset className="upload-card">
               <legend>Thông tin tài liệu</legend>
               <label htmlFor="upload-title">
@@ -1757,7 +1796,7 @@ export default function App() {
                 name="title"
                 maxLength="200"
                 value={uploadTitle}
-                onChange={(event) => setUploadTitle(event.target.value)}
+                onChange={(event) => { uploadTitleEdited.current = true; setUploadTitle(event.target.value); }}
                 placeholder="Ví dụ: Chương 1 - Đạo hàm và ứng dụng"
               />
               <label htmlFor="upload-description">
@@ -1769,7 +1808,7 @@ export default function App() {
                 rows="3"
                 maxLength="2000"
                 value={uploadDescription}
-                onChange={(event) => setUploadDescription(event.target.value)}
+                onChange={(event) => { uploadDescriptionEdited.current = true; setUploadDescription(event.target.value); }}
                 placeholder="Ghi chú ngắn gọn về nội dung tài liệu…"
               />
             </fieldset>
@@ -1796,13 +1835,7 @@ export default function App() {
                   name="file"
                   type="file"
                   accept=".pdf,.txt,.md,.csv,.doc,.docx,.ppt,.pptx"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0] || null;
-                    setUploadFile(file);
-                    setUploadFileName(file?.name || "");
-                    setUploadPhase("idle");
-                    setUploadError("");
-                  }}
+                  onChange={(event) => selectUploadFile(event.target.files?.[0])}
                 />
               </div>
               {uploadPhase !== "idle" && (
@@ -1843,7 +1876,7 @@ export default function App() {
               >
                 Hủy bỏ
               </button>
-              <button className="btn btn-primary" disabled={["validating", "uploading", "processing"].includes(uploadPhase)}>Tải lên & Xử lý</button>
+              <button className="btn btn-primary" disabled={uploadSuggestionBusy || ["validating", "uploading", "processing"].includes(uploadPhase)}>Tải lên & Xử lý</button>
             </footer>
           </form>
         </Modal>

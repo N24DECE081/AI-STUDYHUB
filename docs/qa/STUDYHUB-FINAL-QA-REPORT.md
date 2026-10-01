@@ -106,3 +106,21 @@ Tests và tài liệu:
 ## FINAL STATUS
 
 READY cho kiểm thử local trong phạm vi đã xác minh. Đây không phải chứng nhận tất cả provider, thiết bị và database production.
+
+## Bổ sung sửa lỗi ngày 2026-10-01
+
+Phát hiện thiếu tích hợp: tính năng gợi ý trước đây chỉ có ở form flashcard, chưa được gọi từ form upload Kho học liệu. Đã thêm `/api/documents/preview` và nối cả chọn file lẫn kéo-thả; giữ nguyên phần người dùng tự sửa, chống response cũ khi đổi file. Cải thiện fallback để bỏ marker trang/header trường và giữ tên AI hợp lệ ngay cả khi nội dung flashcard AI lỗi.
+
+Xác minh sau sửa:
+- API regression: 162 pass, 2 skip (164 test).
+- Playwright: 8 pass, gồm 2 test mới cho tên upload, lưu/reload, gõ trong khi AI đang chạy và đổi file liên tiếp.
+- Lint/build: PASS.
+- Kiểm tra trực tiếp backend đang chạy với DeepSeek, file mẫu `scan001.txt` chứa nội dung Java OOP: trả tên **Lập trình hướng đối tượng trong Java**, không có warning. Chỉ preview, không lưu tài liệu mẫu vào kho.
+- Backend đã restart để áp dụng endpoint mới.
+
+## Bổ sung giao diện bộ thẻ ngày 2026-10-01
+
+- Màu và mẫu bìa phủ toàn bộ card trong danh sách, thay vì chỉ một dải màu phía trên. Màu chữ đổi theo palette để đọc rõ cả màu tối.
+- Nút ôn tập có hàng riêng; Chỉnh sửa/Xóa bộ thẻ nằm cạnh nhau, có icon, chiều cao tối thiểu 44px và trạng thái hover/focus.
+- Lint/build pass. Chạy lại 2 E2E liên quan đến tạo/sửa/xóa, màu và reload: pass.
+- Kiểm tra trực quan cả 7 màu ở desktop, dark mode và viewport 390px; không tràn ngang hoặc page error. Các thao tác sửa/xóa đã được thực hiện trên database QA tạm, không thay đổi dữ liệu người dùng.

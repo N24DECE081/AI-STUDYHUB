@@ -70,3 +70,9 @@ npm run test:e2e
 ```
 
 E2E tự mở backend 5013 và Vite 5183 với database/upload trong thư mục tạm riêng, không đọc `.env` và không dùng database thật. Kiểm thử browser dùng Chromium, có viewport mobile và reduced motion. Test IPA/audio dùng dữ liệu hoặc media mock để không phụ thuộc mạng và loa thiết bị. Provider lỗi/timeout/JSON sai được kiểm tra bằng mock; không sử dụng API key trả phí trong test.
+
+## Bổ sung 2026-10-01: gợi ý tên trong Kho học liệu
+
+`POST /api/documents/preview` dùng cùng bước validate/extract của preview flashcard, nhưng gọi task `document_metadata` và trả `{suggestion: {title, description}, warning}`. Không lưu document trong bước preview.
+
+Chọn file hoặc kéo thả trong **Upload tài liệu mới** sẽ tự gọi endpoint này. Tên/mô tả tự điền chỉ khi người dùng chưa chỉnh trường tương ứng. Người dùng có thể chủ động chọn **Dùng tên gợi ý**. Khi đổi file/hủy modal, request cũ được hủy; kết quả cũ không được áp vào file mới. Khi provider lỗi, fallback bỏ qua marker trang/tên trường và ưu tiên heading nội dung.
