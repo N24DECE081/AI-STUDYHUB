@@ -13,6 +13,8 @@ const fieldStyle = {
 };
 
 export default function QuizWorkspace({ documents, user, initialDocumentId }) {
+  const [questionCount, setQuestionCount] = useState("10");
+  const validCount = /^\d+$/.test(questionCount) && Number(questionCount) >= 1 && Number(questionCount) <= 120;
   const [subjectFilter, setSubjectFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState(() => initialDocumentId ? [initialDocumentId] : []);
   const [quiz, setQuiz] = useState(null);
@@ -49,6 +51,7 @@ export default function QuizWorkspace({ documents, user, initialDocumentId }) {
   };
   const selectVisible = () => setSelectedIds((current) => current.length === filteredDocuments.length ? [] : filteredDocuments.map((document) => document.id));
   const generate = async () => {
+    if (!validCount) { setError("Số câu phải là số nguyên dương từ 1 đến 120."); return; }
     if (!selectedIds.length) {
       setError("Hãy chọn ít nhất một tài liệu.");
       return;
@@ -59,7 +62,7 @@ export default function QuizWorkspace({ documents, user, initialDocumentId }) {
     setAnswers({});
     setCurrentQuestion(0);
     try {
-      setQuiz(await createQuiz(selectedIds));
+      setQuiz(await createQuiz(selectedIds, Number(questionCount)));
     } catch (requestError) {
       setQuiz(null);
       setError(requestError.message || "Không thể tạo Quiz.");
@@ -86,7 +89,7 @@ export default function QuizWorkspace({ documents, user, initialDocumentId }) {
         <div>
           <span className="eyebrow">QUIZ CARD AI</span>
           <h2>Tạo Quiz từ một hoặc nhiều tài liệu</h2>
-          <p className="muted">Chọn theo môn học, tổng hợp tối đa 30 câu, làm bài và xem giải thích ngay sau khi nộp.</p>
+          <p className="muted">Chọn 1–120 câu bám trọng tâm tài liệu, gồm hiểu bản chất, vận dụng và phân tích.</p>
         </div>
         <label className="quiz-subject-filter">
           <span>Môn học</span>
@@ -98,7 +101,16 @@ export default function QuizWorkspace({ documents, user, initialDocumentId }) {
       </div>
 
       {!quiz && <>
-        <div className="quiz-picker-actions"><span>{selectedIds.length} tài liệu đã chọn · tối đa 30 câu</span><button type="button" className="text-link" onClick={selectVisible}>{filteredDocuments.length > 0 && selectedIds.length === filteredDocuments.length ? "Bỏ chọn tất cả" : "Chọn tất cả môn này"}</button></div>
+        <label className="quiz-count-field">
+          <span>Số câu hỏi</span>
+          <input type="text" inputMode="numeric" value={questionCount} disabled={loading}
+            aria-invalid={!validCount} aria-describedby="quiz-count-help" style={fieldStyle}
+            onChange={(event) => setQuestionCount(event.target.value)} />
+        </label>
+        <p id="quiz-count-help" className={validCount ? "muted" : "form-error"}>
+          {validCount ? "Nhập số nguyên từ 1 đến 120. Đề dài cần nhiều thời gian; tài liệu phải đủ nội dung." : "Số câu phải là số nguyên dương từ 1 đến 120."}
+        </p>
+        <div className="quiz-picker-actions"><span>{selectedIds.length} tài liệu đã chọn · tối đa 120 câu</span><button type="button" className="text-link" onClick={selectVisible}>{filteredDocuments.length > 0 && selectedIds.length === filteredDocuments.length ? "Bỏ chọn tất cả" : "Chọn tất cả môn này"}</button></div>
         <div className="quiz-document-picker">
           {filteredDocuments.map((document) => (
             <label className={`quiz-document-option${selectedIds.includes(document.id) ? " selected" : ""}`} key={document.id}>
@@ -108,12 +120,12 @@ export default function QuizWorkspace({ documents, user, initialDocumentId }) {
           ))}
           {!filteredDocuments.length && <p className="empty-state">Chưa có tài liệu trong môn học này. Hãy upload tài liệu trước.</p>}
         </div>
-        <button type="button" className="btn btn-primary" onClick={generate} disabled={loading || !filteredDocuments.length}>{loading ? "AI đang đọc tài liệu…" : `Tạo Quiz Card (${selectedIds.length} tài liệu)`}</button>
+        <button type="button" className="btn btn-primary" onClick={generate} disabled={loading || !filteredDocuments.length || !validCount}>{loading ? "AI đang đọc tài liệu…" : `Tạo Quiz Card (${selectedIds.length} tài liệu)`}</button>
       </>}
 
       {quiz && <div className="quiz-question-list">
-        <div className="quiz-result-head"><div><span className="eyebrow">BỘ QUIZ ĐANG LÀM · {quiz.questions.length} CÂU</span><h2>{quiz.title}</h2></div><button type="button" className="btn btn-ghost" onClick={() => { setQuiz(null); setResult(null); }}>Chọn lại tài liệu</button></div>
-        <QuizFlashCard quiz={quiz} answers={answers} result={result} currentIndex={currentQuestion} loading={loading} onAnswer={(questionId, optionIndex) => setAnswers((current) => ({ ...current, [questionId]: optionIndex }))} onNavigate={setCurrentQuestion} onSubmit={submit} />
+        <div className="quiz-result-head"><div><span className="eyebrow">BỘ QUIZ ĐANG LÀM · {quiz.questions.length} CÂU</span><h2>{quiz.title}</h2></div><button type="button" className="btn btn-ghost" disabled={loading} onClick={() => { setQuiz(null); setResult(null); }}>Chọn lại tài liệu</button></div>
+        <QuizFlashCard key={quiz.id} quiz={quiz} answers={answers} result={result} currentIndex={currentQuestion} loading={loading} onAnswer={(questionId, optionIndex) => setAnswers((current) => ({ ...current, [questionId]: optionIndex }))} onNavigate={setCurrentQuestion} onSubmit={submit} />
         {result && <QuizResultSummary quiz={quiz} result={result} onReviewQuestion={setCurrentQuestion} />}
       </div>}
       {!quiz && <section className="quiz-history"><div><span className="eyebrow">LỊCH SỬ ÔN TẬP</span><h3>Các bài Quiz đã làm</h3></div>{history.length ? <div className="quiz-history-list">{history.map((item) => <article key={item.id}><div><strong>{item.title}</strong><small>{item.question_count} câu · {new Date(item.created_at).toLocaleDateString("vi-VN")}</small></div>{item.attempts?.length ? <b>{item.attempts[0].score}/{item.attempts[0].total} · {item.attempts[0].score_10}/10</b> : <span>Chưa nộp bài</span>}</article>)}</div> : <p className="muted">Chưa có lịch sử. Hãy chọn tài liệu để bắt đầu bài Quiz đầu tiên.</p>}</section>}

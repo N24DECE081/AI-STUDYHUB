@@ -1,0 +1,11 @@
+GIAO DỊCH VÀ TÍNH TOÀN VẸN CƠ SỞ DỮ LIỆU
+
+Atomicity đảm bảo mọi thao tác của giao dịch cùng thành công hoặc toàn bộ được rollback. Khi chuyển tiền, thao tác trừ tiền và cộng tiền phải thuộc cùng giao dịch để tránh thất thoát.
+Consistency yêu cầu giao dịch giữ các ràng buộc dữ liệu, như số dư không âm. Isolation kiểm soát tác động giữa các giao dịch đồng thời. Durability đảm bảo dữ liệu đã commit không mất khi hệ thống khởi động lại.
+Dirty read xảy ra khi đọc dữ liệu chưa commit của giao dịch khác; nếu giao dịch kia rollback, giá trị đã đọc là không hợp lệ. Read Committed ngăn dirty read nhưng vẫn có thể xảy ra non-repeatable read.
+Non-repeatable read là đọc lại cùng bản ghi nhưng giá trị thay đổi do giao dịch khác đã commit. Phantom read là chạy lại truy vấn điều kiện và tập bản ghi thay đổi do có bản ghi mới phù hợp điều kiện.
+Serializable đảm bảo kết quả tương đương thực hiện tuần tự, giảm bất thường đồng thời nhưng có thể giảm thông lượng và tăng chờ khóa. Không nên chọn isolation cao nhất cho mọi tác vụ mà không cân nhắc tải và tính nhất quán cần thiết.
+Lost update xảy ra khi hai giao dịch cùng đọc một giá trị rồi cập nhật, bản ghi sau ghi đè thay đổi trước. Có thể dùng khóa bản ghi hoặc optimistic locking với cột phiên bản; khi phiên bản thay đổi cần thử lại thay vì ghi đè.
+Deadlock xuất hiện khi hai giao dịch giữ khóa mà giao dịch kia cần. Truy cập tài nguyên theo cùng thứ tự giúp giảm deadlock. Hệ quản trị có thể hủy một giao dịch để phá vòng chờ; ứng dụng cần retry có giới hạn.
+Index tăng tốc truy vấn chọn lọc nhưng tốn dung lượng và làm tăng chi phí insert/update/delete. Index trên cột ít giá trị phân biệt có thể không hữu ích với truy vấn trả phần lớn bảng; cần đánh giá kế hoạch thực thi.
+Foreign key bảo vệ toàn vẹn tham chiếu, không thay thế index cho mọi mục đích hiệu năng. Unique constraint ngăn giá trị trùng lặp. Backup và replication không thay thế ràng buộc toàn vẹn hoặc transaction.

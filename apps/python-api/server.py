@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import tempfile
 from backend.app.flashcards import service as flashcards
+from backend.app.quizzes import service as quizzes
 import json, os, re, secrets, sqlite3, hashlib, mimetypes, html, zipfile, smtplib, ssl
 from datetime import datetime, timezone, timedelta
 from calendar import monthrange
@@ -775,54 +776,16 @@ def extract_document_text(path):
         return markitdown_text or ''
     return ''
 
-def quiz_candidates(text):
-    clean=re.sub(r'\s+',' ',text or '').strip()
-    parts=[part.strip(' -•\t') for part in re.split(r'(?<=[.!?])\s+|\n+',text or '')]
-    parts=[re.sub(r'\s+',' ',part).strip() for part in parts if len(re.sub(r'\s+',' ',part).strip())>=25]
-    if not parts and clean:
-        parts=[clean]
-    unique=[]
-    for part in parts:
-        if part not in unique:
-            unique.append(part[:360])
-    return unique
-
-def build_quiz_questions(documents):
-    candidates=[]
-    for document in documents:
-        text=extract_document_text(document['absolute_path'])
-        for index, sentence in enumerate(quiz_candidates(text)):
-            candidates.append({'text':sentence,'title':document['title'],'document_id':document['id'],'locator':f'Đoạn {index+1}'})
-    if not candidates:
-        return []
-    # A small local-RAG generator keeps the demo usable even when no external AI process is running.
-    stopwords={'the','and','with','from','this','that','được','trong','của','cho','và','là','các','một','những','theo','này'}
-    questions=[]
-    for index, item in enumerate(candidates[:30]):
-        words=re.findall(r'[A-Za-zÀ-ỹ0-9][A-Za-zÀ-ỹ0-9_-]{3,}',item['text'])
-        keyword=next((word for word in words if word.lower() not in stopwords), 'nội dung chính')
-        pool=[]
-        for candidate in candidates:
-            value=candidate['text'][:260]
-            if value not in pool: pool.append(value)
-            if len(pool)>=4: break
-        while len(pool)<4:
-            pool.append(f'Tài liệu không đề cập đến lựa chọn này ({len(pool)+1}).')
-        correct=item['text'][:260]
-        if correct in pool: pool.remove(correct)
-        pool.insert(0,correct)
-        correct_index=index % 4
-        correct_value=pool[0]
-        pool[0],pool[correct_index]=pool[correct_index],pool[0]
-        questions.append({'question':f'Theo tài liệu, phát biểu nào sau đây đúng về “{keyword}”?','options':pool,'correct_index':correct_index,'explanation':f'Đáp án được trích từ tài liệu “{item["title"]}”, {item["locator"]}: {correct_value}','document_id':item['document_id'],'source_title':item['title'],'source_locator':item['locator']})
-    return questions
+def build_quiz_questions(documents, question_count=10):
+    sources = [{**document, 'text': extract_document_text(document['absolute_path'])} for document in documents]
+    return quizzes.generate(sources, question_count, get_engine())
 
 def public_quiz_payload(payload, quiz_id=None, created_at=None):
     """Return only quiz fields the client needs before submitting answers."""
     questions=[]
     for question in payload.get('questions',[]):
         questions.append({key:question[key] for key in (
-            'id','question','options','document_id','source_title','source_locator'
+            'id','question','options','document_id','source_title','difficulty'
         ) if key in question})
     result={key:payload[key] for key in ('kind','title','document_ids','question_count') if key in payload}
     result['questions']=questions
@@ -1428,6 +1391,8 @@ class H(BaseHTTPRequestHandler):
    u=require_user(self)
    if not u:return
    x=json_body(data)
+   try: question_count=quizzes.validate_count(x.get('question_count',10) if isinstance(x,dict) else None)
+   except ValueError as error:return self.json({'error':str(error)},400)
    raw_ids=x.get('document_ids',[]) if isinstance(x,dict) else []
    if not isinstance(raw_ids,list) or not raw_ids or len(raw_ids)>20:
     return self.json({'error':'Hãy chọn từ 1 đến 20 tài liệu để tạo Quiz'},400)
@@ -1445,7 +1410,10 @@ class H(BaseHTTPRequestHandler):
      row=by_id[document_id]
      absolute_path=row['storage_path'] if os.path.isabs(row['storage_path']) else os.path.join(ROOT,row['storage_path'])
      docs.append({'id':row['id'],'title':row['title'],'absolute_path':absolute_path})
-    questions=build_quiz_questions(docs)
+    try: questions=build_quiz_questions(docs,question_count)
+    except quizzes.QuizGenerationError as error:return self.json({'error':str(error),'code':'quiz_quality_failed'},422)
+    except TutorEngineError:return self.json({'error':'AI chưa sẵn sàng tạo đủ câu hỏi chất lượng. Vui lòng thử lại sau.','code':'quiz_provider_unavailable','retryable':True},503)
+    except DocumentTextError:return self.json({'error':'Không đọc được nội dung chữ trong tài liệu.'},422)
     if not questions:return self.json({'error':'Không đọc được nội dung tài liệu để tạo Quiz. Hãy dùng PDF/Word có text hoặc file TXT/MD.'},422)
     title='Quiz Card: '+', '.join(row['title'] for row in rows[:2])
     for index, question in enumerate(questions): question['id']=f'q{index+1}'
@@ -1454,7 +1422,7 @@ class H(BaseHTTPRequestHandler):
     quiz_id=c.execute('INSERT INTO chat_sessions(user_id,document_id,title) VALUES(?,?,?)',(u['id'],document_ids[0],session_title)).lastrowid
     c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(quiz_id,'assistant',json.dumps(quiz_payload,ensure_ascii=False)))
     c.commit()
-   public_questions=[{key:value for key,value in question.items() if key!='correct_index' and key not in ('explanation',)} for question in questions]
+   public_questions=[{key:value for key,value in question.items() if key!='correct_index' and key not in ('explanation','source_locator')} for question in questions]
    return self.json({'id':quiz_id,'title':title,'document_ids':document_ids,'question_count':len(questions),'questions':public_questions},201)
   m=re.fullmatch(r'/api/quizzes/(\d+)/submit',path)
   if m:

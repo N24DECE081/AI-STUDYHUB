@@ -1,16 +1,26 @@
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import { createPortal } from "react-dom";
 
 const optionLetter = (index) => String.fromCharCode(65 + index);
 
 export default function QuizFlashCard({ quiz, answers, result, currentIndex, loading, onAnswer, onNavigate, onSubmit }) {
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const dialogRef = useRef(null);
+  useEffect(() => {
+    if (!showSubmitConfirm) return;
+    const previousFocus = document.activeElement;
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    return () => { dialog?.close(); previousFocus?.focus(); };
+  }, [showSubmitConfirm]);
   const question = quiz.questions[currentIndex];
   const selectedAnswer = answers[question.id];
   const itemResult = result?.items?.find((item) => item.id === question.id);
   const isLastQuestion = currentIndex === quiz.questions.length - 1;
   const hasAnsweredAll = quiz.questions.every((item) => answers[item.id] !== undefined);
-  const unansweredCount = quiz.questions.length - Object.keys(answers).length;
+  const unansweredCount = quiz.questions.filter((item) => answers[item.id] === undefined).length;
 
   const requestSubmit = () => {
     if (hasAnsweredAll) onSubmit();
@@ -40,6 +50,7 @@ export default function QuizFlashCard({ quiz, answers, result, currentIndex, loa
         <div className="quiz-flashcard__question">
           <span className="quiz-flashcard__badge">?</span>
           <h3>{question.question}</h3>
+          {question.difficulty && <small>{{understand: "Hiểu bản chất", apply: "Vận dụng", analyze: "Phân tích"}[question.difficulty]}</small>}
         </div>
         <div className="quiz-options">
           {question.options.map((option, optionIndex) => {
@@ -47,7 +58,7 @@ export default function QuizFlashCard({ quiz, answers, result, currentIndex, loa
             const optionResultClass = itemResult ? (optionIndex === itemResult.correct_index ? " is-correct" : (isSelected && !itemResult.correct ? " is-wrong" : "")) : "";
             return (
               <label className={`quiz-option${isSelected ? " is-selected" : ""}${optionResultClass}`} key={optionIndex}>
-                <input type="radio" name={`question-${question.id}`} checked={isSelected} disabled={Boolean(result)} onChange={() => onAnswer(question.id, optionIndex)} />
+                <input type="radio" name={`question-${question.id}`} checked={isSelected} disabled={Boolean(result) || loading} onChange={() => onAnswer(question.id, optionIndex)} />
                 <b>{optionLetter(optionIndex)}</b><span>{option}</span>
               </label>
             );
@@ -58,27 +69,21 @@ export default function QuizFlashCard({ quiz, answers, result, currentIndex, loa
 
       <footer className="quiz-flashcard-actions">
         <button type="button" className="btn btn-ghost" disabled={currentIndex === 0} onClick={() => onNavigate(currentIndex - 1)}>← Lùi lại</button>
-        {!isLastQuestion ? (
-          <button type="button" className="btn btn-primary" disabled={!result && selectedAnswer === undefined} onClick={() => onNavigate(currentIndex + 1)}>Tiếp tục →</button>
-        ) : !result ? (
-          <button type="button" className="btn btn-primary" disabled={loading} onClick={requestSubmit}>{loading ? "Đang chấm bài…" : "Nộp bài & xem giải thích"}</button>
-        ) : (
-          <button type="button" className="btn btn-primary" onClick={() => onNavigate(0)}>Xem lại từ đầu ↺</button>
-        )}
+        {!isLastQuestion && <button type="button" className="btn btn-ghost" onClick={() => onNavigate(currentIndex + 1)}>Tiếp tục →</button>}
+        {!result ? <button type="button" className="btn btn-primary" disabled={loading} onClick={requestSubmit}>{loading ? "Đang chấm bài…" : "Nộp bài & xem giải thích"}</button>
+          : <button type="button" className="btn btn-primary" onClick={() => onNavigate(0)}>Xem lại từ đầu ↺</button>}
       </footer>
 
-      {showSubmitConfirm && (
-        <div className="quiz-submit-backdrop" role="presentation" onMouseDown={() => setShowSubmitConfirm(false)}>
-          <div className="quiz-submit-dialog" role="alertdialog" aria-modal="true" aria-labelledby="quiz-submit-title" onMouseDown={(event) => event.stopPropagation()}>
+      {showSubmitConfirm && createPortal(
+          <dialog ref={dialogRef} className="quiz-submit-dialog" role="alertdialog" aria-modal="true" aria-labelledby="quiz-submit-title" aria-describedby="quiz-submit-description" onCancel={() => setShowSubmitConfirm(false)}>
             <span className="quiz-submit-dialog__icon">!</span>
             <h3 id="quiz-submit-title">Bạn chưa hoàn thành bài Quiz</h3>
-            <p>Bạn còn <strong>{unansweredCount} câu chưa trả lời</strong>. Các câu này sẽ được tính là chưa đúng nếu bạn nộp bài ngay.</p>
+            <p id="quiz-submit-description">Bạn còn <strong>{unansweredCount} câu chưa trả lời</strong>. Các câu này sẽ được tính là chưa đúng nếu bạn nộp bài ngay.</p>
             <div className="quiz-submit-dialog__actions">
               <button type="button" className="btn btn-ghost" onClick={() => setShowSubmitConfirm(false)}>Không, làm tiếp</button>
               <button type="button" className="btn btn-primary" onClick={() => { setShowSubmitConfirm(false); onSubmit(); }}>Có, nộp bài</button>
             </div>
-          </div>
-        </div>
+          </dialog>, document.body
       )}
     </div>
   );

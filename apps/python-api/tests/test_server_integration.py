@@ -511,8 +511,18 @@ class ServerIntegrationTest(unittest.TestCase):
         self.assertEqual(stored.parent.resolve(), (Path(self.tmp.name) / 'uploads').resolve())
         self.addCleanup(lambda path=stored: path.unlink(missing_ok=True))
         status,_,created=self.request('/api/quizzes/generate','POST',{'document_ids':[uploaded['document_id']]},{'Cookie':student})
-        self.assertEqual(status,201,created)
-        quiz_id=created['id']
+        self.assertEqual(status,503,created)  # Offline mode must not invent a low-quality AI quiz.
+        for count in (0, -1, 121, 1.5, True, '10', None):
+            status,_,invalid=self.request('/api/quizzes/generate','POST',{'document_ids':[uploaded['document_id']], 'question_count':count},{'Cookie':student})
+            self.assertEqual(status,400,invalid)
+        # Seed a generated quiz to independently verify read/submit authorization and answer secrecy.
+        with sqlite3.connect(Path(self.tmp.name) / 'integration.db') as conn:
+            user_id=conn.execute("SELECT id FROM users WHERE email='student@studyhub.local'").fetchone()[0]
+            quiz_id=conn.execute("INSERT INTO chat_sessions(user_id,title) VALUES(?,?)",(user_id,'QUIZ_CARD:fixture')).lastrowid
+            payload={'kind':'quiz','title':'Fixture','document_ids':[uploaded['document_id']],'question_count':1,'questions':[
+                {'id':'q1','question':'Which constraint prevents orphan records?', 'options':['Foreign key','Index','View','Sort'],
+                 'document_id':uploaded['document_id'],'correct_index':0,'explanation':'Foreign keys preserve referential integrity.', 'source_locator':'Evidence', 'source_title':'Database'}]}
+            conn.execute("INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)",(quiz_id,'assistant',json.dumps(payload)))
         status,_,unauthenticated=self.request(f'/api/quizzes/{quiz_id}')
         self.assertEqual(status,401,unauthenticated)
         status,_,other_user=self.request(f'/api/quizzes/{quiz_id}',headers={'Cookie':teacher})
