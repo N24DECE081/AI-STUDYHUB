@@ -12,7 +12,7 @@ Trạng thái bên dưới phân biệt code đã tích hợp với dịch vụ 
 
 ## Cấu hình model đang thực sự hoạt động
 
-Python API hỗ trợ tách model chat và model tác vụ. Cấu hình miễn phí khuyến nghị dùng Groq với chuỗi model dự phòng. Sao chép các giá trị cần thiết từ `apps/python-api/.env.ai.example` sang `apps/python-api/.env` và không commit API key:
+Python API hỗ trợ tách model chat và model tác vụ. Cấu hình miễn phí khuyến nghị dùng Groq với chuỗi model dự phòng. Sao chép `apps/python-api/.env.ai.example` thành `apps/python-api/.env.ai.local`, điền key thật vào file local này và không commit API key:
 
 ```dotenv
 STUDYHUB_AI_PROVIDER=groq
@@ -22,15 +22,25 @@ STUDYHUB_AI_MODEL=openai/gpt-oss-120b
 STUDYHUB_AI_TASK_MODEL=openai/gpt-oss-20b
 STUDYHUB_AI_FALLBACK_MODELS=qwen/qwen3.8-27b,openai/gpt-oss-20b
 STUDYHUB_AI_TASK_FALLBACK_MODELS=qwen/qwen3.8-27b,openai/gpt-oss-120b
+STUDYHUB_AI_TIMEOUT_SECONDS=45
+STUDYHUB_AI_MAX_RETRIES=2
+STUDYHUB_AI_RETRY_BASE_SECONDS=0.5
+STUDYHUB_AI_MAX_INPUT_TOKENS=12000
+STUDYHUB_AI_MAX_OUTPUT_TOKENS=1200
+STUDYHUB_AI_TASK_MAX_OUTPUT_TOKENS=2000
 ```
 
-Nova chỉ đổi sang model tiếp theo khi model hiện tại không tồn tại, hết quota/rate limit hoặc provider lỗi. Lỗi xác thực 401 không kích hoạt failover vì mọi model dùng chung key. Khi tất cả model provider lỗi, engine offline tiếp tục trả lời từ tài liệu của người học.
+Nova retry cùng model với backoff khi gặp timeout, rate limit hoặc lỗi tạm thời; sau đó mới đổi sang model dự phòng. Lỗi xác thực 401 không kích hoạt failover vì mọi model dùng chung key. Khi tất cả model provider lỗi, engine offline tiếp tục trả lời từ tài liệu của người học.
 
 ## Kiểm tra trạng thái runtime
 
 1. Khởi động backend và gọi `GET /api/ai-tutor/engine` để xác nhận provider/model thật đang dùng.
-2. Upload tài liệu qua ứng dụng và hỏi một nội dung có trong tài liệu để kiểm tra local-RAG.
-3. Gọi `GET /api/ai-tutor/memory` sau một số lượt học để kiểm tra hồ sơ L3 của tài khoản hiện tại.
+2. Gọi `GET /api/ai-tutor/health` để chủ động kiểm tra provider bằng endpoint `/models` mà không tạo completion.
+3. Admin gọi `GET /api/ai-tutor/metrics` để xem số request, retry, failover, token, latency, lỗi và chi phí ước tính.
+4. Upload tài liệu qua ứng dụng và hỏi một nội dung có trong tài liệu để kiểm tra local-RAG.
+5. Gọi `GET /api/ai-tutor/memory` sau một số lượt học để kiểm tra hồ sơ L3 của tài khoản hiện tại.
+
+Metrics hiện lưu trong bộ nhớ tiến trình và sẽ reset khi backend khởi động lại. Muốn có chi phí ước tính, cấu hình `STUDYHUB_AI_INPUT_COST_PER_1M`, `STUDYHUB_AI_OUTPUT_COST_PER_1M` hoặc `STUDYHUB_AI_MODEL_PRICING_JSON` theo bảng giá provider hiện hành.
 
 ## Giới hạn và trạng thái deploy
 

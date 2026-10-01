@@ -1,9 +1,9 @@
 """Runtime configuration for the AI Tutor engine.
 
 The provider key lives in the backend environment only (never in the React
-client). `.env` files next to the API and at the repo root are loaded on start
-so a key dropped into `apps/python-api/.env` takes effect without exporting
-variables by hand.
+client). `.env`, the Git-ignored `.env.ai.local`, and the repo-root `.env` are
+loaded on start so local secrets take effect without exporting variables by
+hand.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parents[3]
 REPO_ROOT = APP_ROOT.parent.parent
-ENV_FILES = (APP_ROOT / '.env', REPO_ROOT / '.env')
+ENV_FILES = (APP_ROOT / '.env', APP_ROOT / '.env.ai.local', REPO_ROOT / '.env')
 SETTINGS_ROOT = APP_ROOT / 'data' / 'settings'
 MODEL_CATALOG_PATH = SETTINGS_ROOT / 'model_catalog.json'
 SKILL_ROOT = APP_ROOT / 'skills'
@@ -38,6 +38,15 @@ PROVIDER_DEFAULTS = {
     'ollama': {'base_url': 'http://127.0.0.1:11434/v1', 'model': 'llama3.1', 'keys': (), 'keyless': True},
     'lmstudio': {'base_url': 'http://127.0.0.1:1234/v1', 'model': 'local-model', 'keys': (), 'keyless': True},
     'custom': {'base_url': 'http://127.0.0.1:8000/v1', 'model': 'local-model', 'keys': (), 'keyless': True},
+}
+
+RUNTIME_DEFAULTS = {
+    'timeout_seconds': 45,
+    'max_retries': 2,
+    'retry_base_seconds': 0.5,
+    'max_input_tokens': 12000,
+    'max_output_tokens': 1200,
+    'task_max_output_tokens': 2000,
 }
 
 
@@ -69,7 +78,7 @@ def dotenv_disabled(environ=None) -> bool:
 
 
 def load_env(paths=ENV_FILES, *, environ=None, override: bool = False) -> dict[str, str]:
-    """Load the first `.env` found; real environment variables always win.
+    """Load local env files in order; real and earlier variables win.
 
     Handing explicit `paths` always reads them; the default lookup is skipped
     when `STUDYHUB_NO_DOTENV` is set so tests never pick up a developer's real
@@ -87,7 +96,6 @@ def load_env(paths=ENV_FILES, *, environ=None, override: bool = False) -> dict[s
             if override or not environ.get(key):
                 environ[key] = value
                 loaded[key] = value
-        break
     return loaded
 
 
@@ -115,6 +123,69 @@ def model_list(value) -> list[str]:
         if name and name not in result:
             result.append(name)
     return result
+
+
+def _bounded_int(value, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def _bounded_float(value, default: float, minimum: float, maximum: float) -> float:
+    try:
+        parsed = float(str(value).strip())
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def runtime_settings(environ=None) -> dict:
+    """Bounded operational settings for provider calls."""
+    environ = os.environ if environ is None else environ
+    defaults = RUNTIME_DEFAULTS
+    return {
+        'timeout_seconds': _bounded_int(environ.get('STUDYHUB_AI_TIMEOUT_SECONDS'),
+                                        defaults['timeout_seconds'], 2, 300),
+        'max_retries': _bounded_int(environ.get('STUDYHUB_AI_MAX_RETRIES'),
+                                    defaults['max_retries'], 0, 5),
+        'retry_base_seconds': _bounded_float(environ.get('STUDYHUB_AI_RETRY_BASE_SECONDS'),
+                                             defaults['retry_base_seconds'], 0.0, 10.0),
+        'max_input_tokens': _bounded_int(environ.get('STUDYHUB_AI_MAX_INPUT_TOKENS'),
+                                         defaults['max_input_tokens'], 512, 200000),
+        'max_output_tokens': _bounded_int(environ.get('STUDYHUB_AI_MAX_OUTPUT_TOKENS'),
+                                          defaults['max_output_tokens'], 64, 32000),
+        'task_max_output_tokens': _bounded_int(environ.get('STUDYHUB_AI_TASK_MAX_OUTPUT_TOKENS'),
+                                               defaults['task_max_output_tokens'], 64, 32000),
+    }
+
+
+def pricing_settings(environ=None) -> dict:
+    """Optional USD prices per one million tokens, globally or per model."""
+    environ = os.environ if environ is None else environ
+    default = {
+        'input_per_1m': _bounded_float(environ.get('STUDYHUB_AI_INPUT_COST_PER_1M'), 0.0, 0.0, 10000.0),
+        'output_per_1m': _bounded_float(environ.get('STUDYHUB_AI_OUTPUT_COST_PER_1M'), 0.0, 0.0, 10000.0),
+    }
+    models: dict[str, dict[str, float]] = {}
+    try:
+        raw_models = json.loads(environ.get('STUDYHUB_AI_MODEL_PRICING_JSON') or '{}')
+    except (json.JSONDecodeError, TypeError):
+        raw_models = {}
+    if isinstance(raw_models, dict):
+        for model, prices in raw_models.items():
+            if not isinstance(prices, dict):
+                continue
+            name = str(model).strip()
+            if name:
+                models[name] = {
+                    'input_per_1m': _bounded_float(prices.get('input_per_1m'),
+                                                    default['input_per_1m'], 0.0, 10000.0),
+                    'output_per_1m': _bounded_float(prices.get('output_per_1m'),
+                                                     default['output_per_1m'], 0.0, 10000.0),
+                }
+    return {'default': default, 'models': models}
 
 
 def model_catalog(path: Path = MODEL_CATALOG_PATH) -> dict:
@@ -212,7 +283,8 @@ def provider_settings(environ=None) -> dict | None:
         return None
     return {'provider': name, 'api_key': api_key, 'base_url': base_url,
             'model': model, 'task_model': task_model, 'fallback_models': fallback_models,
-            'task_fallback_models': task_fallback_models}
+            'task_fallback_models': task_fallback_models,
+            **runtime_settings(environ), 'pricing': pricing_settings(environ)}
 
 
 def engine_status(environ=None) -> dict:
@@ -221,10 +293,15 @@ def engine_status(environ=None) -> dict:
     if not settings:
         return {'engine': 'local', 'provider': None, 'model': None,
                 'label': 'Nova offline (bám theo tài liệu của bạn)',
-                'hint': 'Đặt API key vào apps/python-api/.env rồi chạy lại backend để Nova dùng mô hình AI.'}
+                'hint': 'Đặt API key vào apps/python-api/.env.ai.local rồi chạy lại backend để Nova dùng mô hình AI.'}
     models = model_list([settings['model'], *settings['fallback_models']])
     return {'engine': 'provider', 'provider': settings['provider'], 'model': settings['model'], 'models': models,
             'task_model': settings['task_model'], 'fallback_models': settings['fallback_models'],
             'task_fallback_models': settings['task_fallback_models'],
+            'timeout_seconds': settings['timeout_seconds'], 'max_retries': settings['max_retries'],
+            'max_input_tokens': settings['max_input_tokens'],
+            'max_output_tokens': settings['max_output_tokens'],
+            'task_max_output_tokens': settings['task_max_output_tokens'],
+            'cost_tracking_configured': any(settings['pricing']['default'].values()) or bool(settings['pricing']['models']),
             'label': f"Nova AI · {settings['provider']} · {settings['model']}",
             'hint': ''}

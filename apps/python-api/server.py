@@ -1221,7 +1221,8 @@ class H(BaseHTTPRequestHandler):
    u=require_user(self)
    if not u:return
    status=tutor_config.engine_status()
-   health=tutor_engine.PROVIDER_HEALTH
+   health=tutor_engine.provider_health_snapshot()
+   status['health']=health
    if status.get('engine')=='provider' and not health.get('ok',True):
     # Mô hình đang lỗi (hết quota, key sai, mạng): Nova tự trả lời từ tài liệu.
     reason=health.get('reason') or 'không rõ nguyên nhân'
@@ -1230,6 +1231,23 @@ class H(BaseHTTPRequestHandler):
     status['label']=f'{status["label"]} — tạm lỗi: {reason}'
     status['hint']='Nova đang trả lời từ tài liệu của bạn cho tới khi mô hình hoạt động lại.'
    return self.json(status,200)
+  if path=='/api/ai-tutor/health':
+   u=require_user(self)
+   if not u:return
+   status=tutor_config.engine_status()
+   if status.get('engine')!='provider':
+    return self.json({'ok':True,'engine':'local','provider_configured':False,
+                      'message':'Nova is running offline; no provider is configured.'},200)
+   result=get_engine().health_check()
+   return self.json({'engine':'provider','provider':status.get('provider'),**result},
+                    200 if result.get('ok') else 503)
+  if path=='/api/ai-tutor/metrics':
+   u=require_user(self)
+   if not u:return
+   if u['role']!='admin':
+    return self.json({'error':'Only admins can view AI runtime metrics'},403)
+   return self.json({'health':tutor_engine.provider_health_snapshot(),
+                     'metrics':tutor_engine.provider_metrics_snapshot()},200)
   if path=='/api/ai-tutor/assessment':
    u=require_user(self)
    if not u:return
@@ -1791,7 +1809,7 @@ class H(BaseHTTPRequestHandler):
                           learner_profile=profile_summary,depth=depth,model=model_override)
    except TutorEngineError as error:
     return self.json({'error':f'AI Tutor tạm thời không trả lời được: {error}','retryable':True},502)
-   health=tutor_engine.PROVIDER_HEALTH
+   health=tutor_engine.provider_health_snapshot()
    if retrieval_tier=='miss' and getattr(engine,'uses_model',False) and health.get('ok',True):
     provider=tutor_config.engine_status().get('provider') or 'external-ai'
     cache_id=external_cache_store(message,answer,query_keywords,provider)

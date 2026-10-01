@@ -9,12 +9,17 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
 import math
+import random
 import re
 import ssl
+import threading
+import time
 import urllib.error
 import urllib.request
 from collections import Counter
+from datetime import datetime, timezone
 
 from . import config
 
@@ -79,8 +84,94 @@ STOP_WORDS = {
 }
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 class EngineError(RuntimeError):
     """Raised when the configured provider cannot produce a valid answer."""
+
+    def __init__(self, message: str, *, code: int | None = None, retry_after: float | None = None):
+        super().__init__(message)
+        self.code = code
+        self.retry_after = retry_after
+
+
+_RUNTIME_LOCK = threading.Lock()
+PROVIDER_HEALTH = {
+    'ok': True, 'reason': '', 'code': None, 'last_checked_at': None,
+    'latency_ms': None, 'consecutive_failures': 0,
+}
+PROVIDER_METRICS = {
+    'requests': 0, 'attempts': 0, 'successful_requests': 0, 'failed_requests': 0,
+    'retries': 0, 'failovers': 0, 'prompt_tokens': 0, 'completion_tokens': 0,
+    'total_tokens': 0, 'estimated_cost_usd': 0.0, 'total_latency_ms': 0.0,
+    'last_latency_ms': None, 'last_model': None, 'last_error': '', 'updated_at': None,
+    'health_checks': 0,
+}
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def reset_provider_runtime_state() -> None:
+    """Reset process-local provider state; primarily useful for isolated tests."""
+    with _RUNTIME_LOCK:
+        PROVIDER_HEALTH.clear()
+        PROVIDER_HEALTH.update({
+            'ok': True, 'reason': '', 'code': None, 'last_checked_at': None,
+            'latency_ms': None, 'consecutive_failures': 0,
+        })
+        PROVIDER_METRICS.clear()
+        PROVIDER_METRICS.update({
+            'requests': 0, 'attempts': 0, 'successful_requests': 0, 'failed_requests': 0,
+            'retries': 0, 'failovers': 0, 'prompt_tokens': 0, 'completion_tokens': 0,
+            'total_tokens': 0, 'estimated_cost_usd': 0.0, 'total_latency_ms': 0.0,
+            'last_latency_ms': None, 'last_model': None, 'last_error': '', 'updated_at': None,
+            'health_checks': 0,
+        })
+
+
+def provider_metrics_snapshot() -> dict:
+    """Return client-safe process-local telemetry without credentials or prompts."""
+    with _RUNTIME_LOCK:
+        result = dict(PROVIDER_METRICS)
+    successes = result['successful_requests']
+    result['average_latency_ms'] = round(result['total_latency_ms'] / successes, 2) if successes else None
+    result['total_latency_ms'] = round(result['total_latency_ms'], 2)
+    result['estimated_cost_usd'] = round(result['estimated_cost_usd'], 8)
+    return result
+
+
+def provider_health_snapshot() -> dict:
+    with _RUNTIME_LOCK:
+        return dict(PROVIDER_HEALTH)
+
+
+def _mark_provider_healthy(latency_ms: float | None = None) -> None:
+    with _RUNTIME_LOCK:
+        measured_latency = (round(latency_ms, 2) if latency_ms is not None
+                            else PROVIDER_HEALTH.get('latency_ms'))
+        PROVIDER_HEALTH.update({
+            'ok': True, 'reason': '', 'code': None, 'last_checked_at': _utc_now(),
+            'latency_ms': measured_latency, 'consecutive_failures': 0,
+        })
+
+
+def _mark_provider_failed(error: BaseException, latency_ms: float | None = None) -> None:
+    if getattr(error, '_studyhub_health_recorded', False):
+        return
+    with _RUNTIME_LOCK:
+        PROVIDER_HEALTH.update({
+            'ok': False, 'reason': provider_failure_reason(error),
+            'code': provider_failure_code(error), 'last_checked_at': _utc_now(),
+            'latency_ms': round(latency_ms, 2) if latency_ms is not None else None,
+            'consecutive_failures': int(PROVIDER_HEALTH.get('consecutive_failures') or 0) + 1,
+        })
+    try:
+        setattr(error, '_studyhub_health_recorded', True)
+    except Exception:  # noqa: BLE001 - health reporting must never hide the original error
+        pass
 
 
 def tokenize(text: str) -> list[str]:
@@ -1126,7 +1217,10 @@ class ProviderEngine:
 
     def __init__(self, *, base_url: str, api_key: str, model: str,
                  task_model: str | None = None, fallback_models=None,
-                 task_fallback_models=None, timeout: int = 45):
+                 task_fallback_models=None, timeout: int = 45, max_retries: int = 2,
+                 retry_base_seconds: float = 0.5, max_input_tokens: int = 12000,
+                 max_output_tokens: int = 1200, task_max_output_tokens: int = 2000,
+                 pricing=None):
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.model = model
@@ -1134,8 +1228,15 @@ class ProviderEngine:
         self.fallback_models = self._unique_models(fallback_models)
         self.task_fallback_models = self._unique_models(task_fallback_models)
         self.timeout = timeout
+        self.max_retries = max(0, int(max_retries))
+        self.retry_base_seconds = max(0.0, float(retry_base_seconds))
+        self.max_input_tokens = max(512, int(max_input_tokens))
+        self.max_output_tokens = max(64, int(max_output_tokens))
+        self.task_max_output_tokens = max(64, int(task_max_output_tokens))
+        self.pricing = pricing or {'default': {'input_per_1m': 0.0, 'output_per_1m': 0.0}, 'models': {}}
         self.last_model = None
         self.last_failovers = []
+        self._last_usage = {}
 
     @staticmethod
     def _unique_models(models) -> list[str]:
@@ -1148,13 +1249,79 @@ class ProviderEngine:
 
     @staticmethod
     def _can_try_another_model(error: BaseException) -> bool:
-        status = re.search(r'error (\d{3})', str(error))
-        code = int(status.group(1)) if status else None
+        code = provider_failure_code(error)
         return code in (404, 408, 409, 429) or bool(code and code >= 500)
+
+    @staticmethod
+    def _can_retry_same_model(error: BaseException) -> bool:
+        code = provider_failure_code(error)
+        return code is None or code in (408, 409, 425, 429) or bool(code and code >= 500)
+
+    @staticmethod
+    def _estimate_tokens(text: str) -> int:
+        return max(1, math.ceil(len(text or '') / 4))
+
+    def _fit_messages(self, messages: list[dict]) -> list[dict]:
+        """Bound prompt size while retaining instructions and the newest user turn."""
+        fitted = [{'role': item.get('role', 'user'), 'content': str(item.get('content') or '')}
+                  for item in messages]
+        budget_chars = self.max_input_tokens * 4
+        while (len(fitted) > 2
+               and sum(self._estimate_tokens(item['content']) for item in fitted) > self.max_input_tokens):
+            fitted.pop(1)
+        total_tokens = sum(self._estimate_tokens(item['content']) for item in fitted)
+        if total_tokens <= self.max_input_tokens:
+            return fitted
+        system_budget = min(len(fitted[0]['content']), max(1024, budget_chars // 2))
+        fitted[0]['content'] = fitted[0]['content'][:system_budget]
+        remaining = max(256, budget_chars - len(fitted[0]['content']))
+        for item in fitted[1:-1]:
+            item['content'] = ''
+        fitted[-1]['content'] = fitted[-1]['content'][-remaining:]
+        return [item for item in fitted if item['content']]
+
+    def _prices_for(self, model: str) -> dict:
+        models = self.pricing.get('models') or {}
+        return models.get(model) or self.pricing.get('default') or {}
+
+    def _record_request(self, *, success: bool, attempts: int, retries: int, failovers: int,
+                        latency_ms: float, model: str | None, error: BaseException | None = None) -> None:
+        usage = self._last_usage if success else {}
+        prompt_tokens = int(usage.get('prompt_tokens') or 0)
+        completion_tokens = int(usage.get('completion_tokens') or 0)
+        total_tokens = int(usage.get('total_tokens') or (prompt_tokens + completion_tokens))
+        prices = self._prices_for(model or '')
+        estimated_cost = ((prompt_tokens * float(prices.get('input_per_1m') or 0.0)
+                           + completion_tokens * float(prices.get('output_per_1m') or 0.0)) / 1_000_000)
+        with _RUNTIME_LOCK:
+            PROVIDER_METRICS['requests'] += 1
+            PROVIDER_METRICS['attempts'] += attempts
+            PROVIDER_METRICS['retries'] += retries
+            PROVIDER_METRICS['failovers'] += failovers
+            PROVIDER_METRICS['successful_requests' if success else 'failed_requests'] += 1
+            PROVIDER_METRICS['prompt_tokens'] += prompt_tokens
+            PROVIDER_METRICS['completion_tokens'] += completion_tokens
+            PROVIDER_METRICS['total_tokens'] += total_tokens
+            PROVIDER_METRICS['estimated_cost_usd'] += estimated_cost
+            if success:
+                PROVIDER_METRICS['total_latency_ms'] += latency_ms
+            PROVIDER_METRICS['last_latency_ms'] = round(latency_ms, 2)
+            PROVIDER_METRICS['last_model'] = model
+            PROVIDER_METRICS['last_error'] = provider_failure_reason(error) if error else ''
+            PROVIDER_METRICS['updated_at'] = _utc_now()
+
+    def _retry_delay(self, retry_index: int, error: BaseException) -> float:
+        retry_after = getattr(error, 'retry_after', None)
+        if retry_after is not None:
+            return min(30.0, max(0.0, float(retry_after)))
+        exponential = self.retry_base_seconds * (2 ** retry_index)
+        return min(10.0, exponential + random.uniform(0.0, exponential * 0.25))
 
     def _chat_once(self, messages: list[dict], *, json_mode: bool, model: str) -> str:
         """Make one provider request; model failover is handled by `_chat`."""
-        body = {'model': model, 'messages': messages, 'temperature': 0.2}
+        max_tokens = self.task_max_output_tokens if json_mode else self.max_output_tokens
+        body = {'model': model, 'messages': self._fit_messages(messages),
+                'temperature': 0.2, 'max_tokens': max_tokens}
         if json_mode:
             body['response_format'] = {'type': 'json_object'}
         headers = {
@@ -1179,12 +1346,19 @@ class ProviderEngine:
                 detail = error.read().decode('utf-8', 'ignore')[:300]
             except Exception:  # noqa: BLE001 - body is best effort only
                 detail = ''
-            raise EngineError(f'AI provider error {error.code}: {detail or error.reason}') from error
+            retry_after = None
+            try:
+                retry_after = float(error.headers.get('Retry-After')) if error.headers.get('Retry-After') else None
+            except (TypeError, ValueError, AttributeError):
+                retry_after = None
+            raise EngineError(f'AI provider error {error.code}: {detail or error.reason}',
+                              code=error.code, retry_after=retry_after) from error
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
             raise EngineError(f'AI provider unavailable: {error}') from error
         choices = payload.get('choices') or []
         if not choices:
             raise EngineError('AI provider returned an empty response')
+        self._last_usage = payload.get('usage') if isinstance(payload.get('usage'), dict) else {}
         return (choices[0].get('message') or {}).get('content') or ''
 
     def _chat(self, messages: list[dict], *, json_mode: bool = False,
@@ -1194,17 +1368,82 @@ class ProviderEngine:
         candidates = self._unique_models([primary, *fallbacks])
         last_error: EngineError | None = None
         self.last_failovers = []
+        self._last_usage = {}
+        request_started = time.perf_counter()
+        attempts = retries = failovers = 0
         for index, candidate in enumerate(candidates):
-            try:
-                result = self._chat_once(messages, json_mode=json_mode, model=candidate)
-                self.last_model = candidate
-                return result
-            except EngineError as error:
-                last_error = error
-                self.last_failovers.append({'model': candidate, 'reason': provider_failure_reason(error)})
-                if index == len(candidates) - 1 or not self._can_try_another_model(error):
-                    raise
+            candidate_attempts = 0
+            for retry_index in range(self.max_retries + 1):
+                candidate_attempts += 1
+                attempts += 1
+                try:
+                    result = self._chat_once(messages, json_mode=json_mode, model=candidate)
+                    self.last_model = candidate
+                    latency_ms = (time.perf_counter() - request_started) * 1000
+                    self._record_request(success=True, attempts=attempts, retries=retries,
+                                         failovers=failovers, latency_ms=latency_ms, model=candidate)
+                    _mark_provider_healthy(latency_ms)
+                    return result
+                except EngineError as error:
+                    last_error = error
+                    if retry_index < self.max_retries and self._can_retry_same_model(error):
+                        retries += 1
+                        delay = self._retry_delay(retry_index, error)
+                        if delay:
+                            time.sleep(delay)
+                        continue
+                    break
+            self.last_failovers.append({
+                'model': candidate, 'reason': provider_failure_reason(last_error),
+                'attempts': candidate_attempts,
+            })
+            if index == len(candidates) - 1 or not self._can_try_another_model(last_error):
+                latency_ms = (time.perf_counter() - request_started) * 1000
+                self._record_request(success=False, attempts=attempts, retries=retries,
+                                     failovers=failovers, latency_ms=latency_ms,
+                                     model=candidate, error=last_error)
+                _mark_provider_failed(last_error, latency_ms)
+                LOGGER.warning('AI provider request failed model=%s reason=%s attempts=%s',
+                               candidate, provider_failure_reason(last_error), attempts)
+                raise last_error
+            failovers += 1
         raise last_error or EngineError('AI provider returned no usable model')
+
+    def health_check(self) -> dict:
+        """Actively verify the OpenAI-compatible provider without spending tokens."""
+        started = time.perf_counter()
+        headers = {'Accept': 'application/json', 'User-Agent': 'AI-StudyHub-Nova/1.0'}
+        if self.api_key:
+            headers['Authorization'] = f'Bearer {self.api_key}'
+        request = urllib.request.Request(f'{self.base_url}/models', headers=headers, method='GET')
+        try:
+            tls_context = ssl.create_default_context(cafile=certifi.where()) if certifi else None
+            with urllib.request.urlopen(request, timeout=self.timeout, context=tls_context) as response:
+                payload = json.loads(response.read().decode('utf-8') or '{}')
+            models = payload.get('data') if isinstance(payload, dict) else []
+            model_ids = [str(item.get('id')) for item in (models or []) if isinstance(item, dict) and item.get('id')]
+            latency_ms = (time.perf_counter() - started) * 1000
+            _mark_provider_healthy(latency_ms)
+            with _RUNTIME_LOCK:
+                PROVIDER_METRICS['health_checks'] += 1
+            return {
+                'ok': True, 'latency_ms': round(latency_ms, 2), 'model': self.model,
+                'model_available': None if not model_ids else self.model in model_ids,
+                'available_model_count': len(model_ids), 'checked_at': _utc_now(),
+            }
+        except urllib.error.HTTPError as error:
+            failure = EngineError(f'AI provider error {error.code}: {error.reason}', code=error.code)
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+            failure = EngineError(f'AI provider unavailable: {error}')
+        latency_ms = (time.perf_counter() - started) * 1000
+        _mark_provider_failed(failure, latency_ms)
+        with _RUNTIME_LOCK:
+            PROVIDER_METRICS['health_checks'] += 1
+        return {
+            'ok': False, 'latency_ms': round(latency_ms, 2),
+            'reason': provider_failure_reason(failure), 'code': provider_failure_code(failure),
+            'checked_at': _utc_now(),
+        }
 
     def answer(self, *, mode: str, question: str, context: str, history: list | None = None,
                learner_profile: str = '', depth: str = 'auto', model: str | None = None) -> str:
@@ -1281,10 +1520,6 @@ class ProviderEngine:
         return result
 
 
-# Sức khoẻ provider gần nhất, dùng để báo cho UI biết Nova đang phải trả lời offline.
-PROVIDER_HEALTH = {'ok': True, 'reason': '', 'code': None}
-
-
 def provider_failure_reason(error: BaseException) -> str:
     """Vietnamese explanation for a provider failure (quota, key, network)."""
     text = str(error)
@@ -1305,6 +1540,9 @@ def provider_failure_reason(error: BaseException) -> str:
 
 def provider_failure_code(error: BaseException) -> int | None:
     """HTTP status from a provider error, when the provider returned one."""
+    explicit = getattr(error, 'code', None)
+    if isinstance(explicit, int):
+        return explicit
     status = re.search(r'error (\d{3})', str(error))
     return int(status.group(1)) if status else None
 
@@ -1330,7 +1568,7 @@ class ResilientEngine:
 
     def _degrade(self, error: BaseException) -> str:
         reason = provider_failure_reason(error)
-        PROVIDER_HEALTH.update({'ok': False, 'reason': reason, 'code': provider_failure_code(error)})
+        _mark_provider_failed(error)
         return reason
 
     @staticmethod
@@ -1348,7 +1586,7 @@ class ResilientEngine:
             offline = self.fallback.answer(mode=mode, question=question, context=context, history=history,
                                            learner_profile=learner_profile, depth=depth, model=model)
             return self._notice(reason) + offline
-        PROVIDER_HEALTH.update({'ok': True, 'reason': '', 'code': None})
+        _mark_provider_healthy()
         return text
 
     def complete_json(self, *, task: str, payload: dict) -> dict:
@@ -1357,8 +1595,11 @@ class ResilientEngine:
         except EngineError as error:
             self._degrade(error)
             return self.fallback.complete_json(task=task, payload=payload)
-        PROVIDER_HEALTH.update({'ok': True, 'reason': '', 'code': None})
+        _mark_provider_healthy()
         return result
+
+    def health_check(self) -> dict:
+        return self.primary.health_check()
 
 
 def get_engine():
@@ -1374,5 +1615,12 @@ def get_engine():
             task_model=settings.get('task_model'),
             fallback_models=settings.get('fallback_models'),
             task_fallback_models=settings.get('task_fallback_models'),
+            timeout=settings.get('timeout_seconds', 45),
+            max_retries=settings.get('max_retries', 2),
+            retry_base_seconds=settings.get('retry_base_seconds', 0.5),
+            max_input_tokens=settings.get('max_input_tokens', 12000),
+            max_output_tokens=settings.get('max_output_tokens', 1200),
+            task_max_output_tokens=settings.get('task_max_output_tokens', 2000),
+            pricing=settings.get('pricing'),
         )
     )

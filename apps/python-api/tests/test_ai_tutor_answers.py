@@ -62,6 +62,16 @@ class MockProvider:
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 - http.server API
+                outer.requests.append({'path': self.path, 'method': 'GET',
+                                       'authorization': self.headers.get('Authorization')})
+                payload = json.dumps({'data': [{'id': 'mock-model'}]}).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
             def do_POST(self):  # noqa: N802 - http.server API
                 length = int(self.headers.get('Content-Length', 0))
                 raw = self.rfile.read(length)
@@ -80,7 +90,10 @@ class MockProvider:
                     self.end_headers()
                     self.wfile.write(detail)
                     return
-                payload = json.dumps({'choices': [{'message': {'content': outer.reply}}]}).encode()
+                payload = json.dumps({
+                    'choices': [{'message': {'content': outer.reply}}],
+                    'usage': {'prompt_tokens': 40, 'completion_tokens': 10, 'total_tokens': 50},
+                }).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(payload)))
@@ -259,8 +272,8 @@ class ProviderFallbackTests(unittest.TestCase):
     """Key hết quota / sai key thì Nova vẫn phải trả lời được từ tài liệu."""
 
     def setUp(self):
-        engine.PROVIDER_HEALTH.update({'ok': True, 'reason': '', 'code': None})
-        self.addCleanup(engine.PROVIDER_HEALTH.update, {'ok': True, 'reason': '', 'code': None})
+        engine.reset_provider_runtime_state()
+        self.addCleanup(engine.reset_provider_runtime_state)
 
     def test_reason_mapping(self):
         cases = {
@@ -302,12 +315,63 @@ class ProviderFallbackTests(unittest.TestCase):
     def test_rate_limit_tries_the_next_model(self):
         provider = engine.ProviderEngine(
             base_url='http://mock-provider/v1', api_key='test-key-not-real', model='primary',
-            fallback_models=['backup-one', 'backup-two'])
+            fallback_models=['backup-one', 'backup-two'], max_retries=0)
         with mock.patch.object(provider, '_chat_once', side_effect=[
                 engine.EngineError('AI provider error 429: rate limit'), 'backup answer']) as call:
             answer = provider._chat([{'role': 'user', 'content': 'hello'}])
         self.assertEqual(answer, 'backup answer')
         self.assertEqual(call.call_args_list[1].kwargs['model'], 'backup-one')
+        self.assertEqual(engine.provider_metrics_snapshot()['failovers'], 1)
+
+    def test_transient_failure_retries_same_model_before_fallback(self):
+        provider = engine.ProviderEngine(
+            base_url='http://mock-provider/v1', api_key='test-key-not-real', model='primary',
+            fallback_models=['backup'], max_retries=1, retry_base_seconds=0)
+        with mock.patch.object(provider, '_chat_once', side_effect=[
+                engine.EngineError('AI provider error 503: unavailable', code=503), 'recovered']) as call:
+            answer = provider._chat([{'role': 'user', 'content': 'hello'}])
+        self.assertEqual(answer, 'recovered')
+        self.assertEqual([item.kwargs['model'] for item in call.call_args_list], ['primary', 'primary'])
+        metrics = engine.provider_metrics_snapshot()
+        self.assertEqual(metrics['retries'], 1)
+        self.assertEqual(metrics['failovers'], 0)
+
+    def test_token_budget_usage_and_cost_are_recorded(self):
+        provider = engine.ProviderEngine(
+            base_url='http://mock-provider/v1', api_key='test-key-not-real', model='primary',
+            max_input_tokens=512, max_output_tokens=321,
+            pricing={'default': {'input_per_1m': 1.0, 'output_per_1m': 2.0}, 'models': {}})
+        response = type('Response', (), {
+            '__enter__': lambda self: self,
+            '__exit__': lambda self, *_args: False,
+            'read': lambda self: json.dumps({
+                'choices': [{'message': {'content': 'ok'}}],
+                'usage': {'prompt_tokens': 100, 'completion_tokens': 20, 'total_tokens': 120},
+            }).encode(),
+        })()
+        with mock.patch.object(engine.urllib.request, 'urlopen', return_value=response) as urlopen:
+            self.assertEqual(provider._chat([{'role': 'user', 'content': 'x' * 4000}]), 'ok')
+        sent = json.loads(urlopen.call_args.args[0].data)
+        self.assertEqual(sent['max_tokens'], 321)
+        self.assertLessEqual(sum(provider._estimate_tokens(item['content']) for item in sent['messages']), 512)
+        metrics = engine.provider_metrics_snapshot()
+        self.assertEqual(metrics['total_tokens'], 120)
+        self.assertAlmostEqual(metrics['estimated_cost_usd'], 0.00014)
+
+    def test_health_check_uses_models_endpoint(self):
+        provider = engine.ProviderEngine(base_url='http://mock-provider/v1',
+                                         api_key='test-key-not-real', model='primary')
+        response = type('Response', (), {
+            '__enter__': lambda self: self,
+            '__exit__': lambda self, *_args: False,
+            'read': lambda self: b'{"data":[{"id":"primary"}]}',
+        })()
+        with mock.patch.object(engine.urllib.request, 'urlopen', return_value=response) as urlopen:
+            result = provider.health_check()
+        self.assertTrue(result['ok'])
+        self.assertTrue(result['model_available'])
+        self.assertEqual(urlopen.call_args.args[0].full_url, 'http://mock-provider/v1/models')
+        self.assertEqual(engine.provider_metrics_snapshot()['health_checks'], 1)
 
     def test_bad_key_does_not_waste_calls_on_backup_models(self):
         provider = engine.ProviderEngine(
@@ -429,7 +493,22 @@ class ProviderWiringTests(unittest.TestCase):
         self.assertEqual(status, 200, body)
         self.assertEqual(body['engine'], 'provider')
         self.assertEqual(body['model'], 'mock-model')
+        self.assertEqual(body['max_output_tokens'], 1200)
+        self.assertIn('health', body)
         self.assertNotIn('test-key-not-real', json.dumps(body))
+
+    def test_provider_health_endpoint_checks_models_without_a_completion(self):
+        self.mock.requests.clear()
+        status, _, body = self._call('/api/ai-tutor/health', cookie=self.cookie)
+        self.assertEqual(status, 200, body)
+        self.assertTrue(body['ok'])
+        self.assertEqual(body['provider'], 'openai')
+        self.assertTrue(any(item.get('method') == 'GET' and item['path'] == '/v1/models'
+                            for item in self.mock.requests))
+
+    def test_metrics_endpoint_is_admin_only(self):
+        status, _, body = self._call('/api/ai-tutor/metrics', cookie=self.cookie)
+        self.assertEqual(status, 403, body)
 
     def test_chat_calls_the_provider_with_question_and_document_context(self):
         self.mock.requests.clear()
@@ -486,6 +565,17 @@ class ProviderWiringTests(unittest.TestCase):
 
 
 class EnvConfigTests(unittest.TestCase):
+    def test_env_and_ai_local_are_merged_with_earlier_values_winning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            general = Path(tmp) / '.env'
+            ai_local = Path(tmp) / '.env.ai.local'
+            general.write_text('STUDYHUB_AI_PROVIDER=groq\nSTUDYHUB_AI_MODEL=general-model\n')
+            ai_local.write_text('GROQ_API_KEY=local-secret\nSTUDYHUB_AI_MODEL=local-model\n')
+            environ = {}
+            config.load_env([general, ai_local], environ=environ)
+            self.assertEqual(environ['GROQ_API_KEY'], 'local-secret')
+            self.assertEqual(environ['STUDYHUB_AI_MODEL'], 'general-model')
+
     def test_env_file_is_loaded_and_real_environment_wins(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / '.env'
@@ -503,6 +593,19 @@ class EnvConfigTests(unittest.TestCase):
         self.assertIsNotNone(settings)
         self.assertEqual(settings['provider'], 'deepseek')
         self.assertEqual(settings['base_url'], 'https://api.deepseek.com/v1')
+
+    def test_runtime_limits_and_pricing_are_bounded_and_exposed(self):
+        environ = {
+            'STUDYHUB_AI_PROVIDER': 'openai', 'STUDYHUB_AI_API_KEY': 'k',
+            'STUDYHUB_AI_TIMEOUT_SECONDS': '1', 'STUDYHUB_AI_MAX_RETRIES': '99',
+            'STUDYHUB_AI_MAX_OUTPUT_TOKENS': '32',
+            'STUDYHUB_AI_INPUT_COST_PER_1M': '0.15',
+        }
+        settings = config.provider_settings(environ)
+        self.assertEqual(settings['timeout_seconds'], 2)
+        self.assertEqual(settings['max_retries'], 5)
+        self.assertEqual(settings['max_output_tokens'], 64)
+        self.assertEqual(settings['pricing']['default']['input_per_1m'], 0.15)
 
     def test_suite_runs_with_the_dotenv_lookup_disabled(self):
         """Có .env thật trên máy thì test vẫn phải chạy offline, không gọi model thật."""
