@@ -24,16 +24,34 @@ from backend.app.security.oauth import OAuthError, authorization_url as oauth_au
 from backend.app.ai_tutor import (
     EngineError as TutorEngineError,
     GradingError as TutorGradingError,
+    LocalEngine,
     RoadmapError as TutorRoadmapError,
     adapt as adapt_roadmap,
     build_assessment_questions,
     build_exercises,
     build_roadmap,
+    build_standard_roadmap,
     get_engine,
     grade_exercise,
     start_assessment,
     summarize_answers,
 )
+from backend.app.entitlements.service import (
+    EntitlementError,
+    allow_metadata_preview,
+    assert_card_capacity,
+    assert_document_capacity,
+    assert_quiz_capacity,
+    basic_quiz,
+    finalize as finalize_quota,
+    release as release_quota,
+    require_feature,
+    reserve as reserve_quota,
+    snapshot as entitlement_snapshot,
+    resolve as resolve_entitlement,
+    unavailable as entitlement_unavailable,
+)
+from backend.app.quizzes.basic import topics as basic_quiz_topics
 from backend.app.ai_tutor import config as tutor_config
 from backend.app.ai_tutor import engine as tutor_engine
 from backend.app.ai_tutor import repository as tutor_store
@@ -68,7 +86,7 @@ if not os.path.isdir(WEB):
  WEB=os.path.normpath(os.path.join(ROOT,'..','..','archive','web'))
 configured_upload_dir=os.environ.get('STUDYHUB_UPLOAD_DIR','').strip()
 UP=os.path.abspath(configured_upload_dir) if configured_upload_dir else os.path.join(ROOT,'uploads')
-MAX_UPLOAD_BYTES=20 * 1024 * 1024
+MAX_UPLOAD_BYTES=50 * 1024 * 1024
 UPLOAD_MULTIPART_OVERHEAD_BYTES=1024 * 1024
 def positive_int_env(name, default):
  try: return max(1, int(os.environ.get(name, default)))
@@ -115,11 +133,9 @@ def init_db():
  database.initialize()
  with database.connect() as connection:
   has_users=connection.execute('SELECT 1 FROM users LIMIT 1').fetchone()
- if not has_users:
-  production=os.environ.get('STUDYHUB_ENV','development').strip().lower() in ('production','prod')
-  # Public deployments must never receive the well-known demo passwords.
-  # Keep the public catalog/plans seed while omitting demo accounts.
-  seed_database(database,include_demo_users=not production)
+ production=os.environ.get('STUDYHUB_ENV','development').strip().lower() in ('production','prod')
+ # Always run the idempotent platform seed so obsolete learning fixtures are removed.
+ seed_database(database,include_demo_users=not production and not has_users)
 
 def cookie_value(handler, name):
     raw = handler.headers.get('Cookie', '')
@@ -153,6 +169,8 @@ def session_cookie(token, max_age=7 * 24 * 60 * 60):
     return f'{SESSION_COOKIE}={token}; Path=/; Max-Age={max_age}; HttpOnly; {policy}'
 
 OAUTH_STATE_COOKIE='studyhub_oauth_state'
+_OAUTH_PENDING_STATES = {}
+_OAUTH_LOCK = threading.Lock()
 
 def oauth_state_cookie(value, max_age=600):
     secure = os.environ.get('STUDYHUB_SECURE_COOKIES', '').lower() in ('1', 'true', 'yes')
@@ -554,6 +572,7 @@ def public_roadmap(row, exercises, progress):
             lesson['exercise_ids']=by_lesson.get(str(lesson.get('key')),[])
     return {
         'roadmap_id': str(row.get('id')),
+        'roadmap_kind': payload.get('roadmap_kind') or 'personalized',
         'title': payload.get('title') or row.get('title'),
         'summary': payload.get('summary') or row.get('summary') or '',
         'subject': payload.get('subject') or row.get('subject'),
@@ -819,7 +838,7 @@ def public_quiz_payload(payload, quiz_id=None, created_at=None):
         questions.append({key:question[key] for key in (
             'id','question','options','document_id','source_title','source_locator'
         ) if key in question})
-    result={key:payload[key] for key in ('kind','title','document_ids','question_count') if key in payload}
+    result={key:payload[key] for key in ('kind','title','document_ids','question_count','sample','sample_notice','topic') if key in payload}
     result['questions']=questions
     if quiz_id is not None: result['id']=quiz_id
     if created_at is not None: result['created_at']=created_at
@@ -907,6 +926,24 @@ def quiz_progress_analytics(connection, user_id, now=None):
     today_start=datetime(today.year,today.month,today.day,tzinfo=VIETNAM_TZ)
     today_metrics=metrics([item for item in attempts if today_start<=item['at']<today_start+timedelta(days=1)])
     return {'summary':summary,'today':today_metrics,'ranges':{'day':day,'week':week,'month':month}}
+
+def entitlement_http(handler, error):
+    return handler.json(error.payload, error.status, error.headers)
+
+def tutor_fingerprint(payload):
+    return {
+        'message': payload.get('message') or payload.get('question') or '',
+        'mode': payload.get('mode') or '',
+        'file_ids': payload.get('file_ids') or [],
+        'document_id': payload.get('document_id'),
+        'depth': payload.get('depth') or '',
+        'model': payload.get('model') or '',
+    }
+
+def request_key_from(handler, payload):
+    header = handler.headers.get('Idempotency-Key') or handler.headers.get('X-Idempotency-Key') or ''
+    body_key = payload.get('idempotency_key') if isinstance(payload, dict) else ''
+    return header or body_key or secrets.token_hex(16)
 
 def subscription_effective_at(billing_cycle='month', now=None):
     """Calculate a calendar-month/year boundary without database-specific SQL."""
@@ -1006,7 +1043,7 @@ class H(BaseHTTPRequestHandler):
     )
     self.send_header(
         'Access-Control-Allow-Headers',
-        'Content-Type, Authorization'
+        'Content-Type, Authorization, Idempotency-Key'
     )
 
     self.end_headers()
@@ -1027,6 +1064,11 @@ class H(BaseHTTPRequestHandler):
   oauth_start=re.fullmatch(r'/api/auth/oauth/(google|facebook)',path)
   if oauth_start:
    provider=oauth_start.group(1); state=secrets.token_urlsafe(32)
+   with _OAUTH_LOCK:
+    now_t=time.time()
+    for s,item in list(_OAUTH_PENDING_STATES.items()):
+     if now_t-item.get('time',0)>900: _OAUTH_PENDING_STATES.pop(s,None)
+    _OAUTH_PENDING_STATES[state]={'provider':provider,'time':now_t}
    try:location=oauth_authorization_url(provider,state)
    except OAuthError as error:return self.json({'error':str(error)},503)
    return self.redirect(location,[oauth_state_cookie(f'{provider}:{state}')])
@@ -1034,9 +1076,15 @@ class H(BaseHTTPRequestHandler):
   if oauth_callback:
    provider=oauth_callback.group(1); query=parse_qs(p.query); state=query.get('state',[''])[0]; code=query.get('code',[''])[0]
    stored=cookie_value(self,OAUTH_STATE_COOKIE) or ''; clear_state=oauth_state_cookie('',0)
+   matched_pending=False
+   with _OAUTH_LOCK:
+    if state and state in _OAUTH_PENDING_STATES:
+     item=_OAUTH_PENDING_STATES.pop(state)
+     if item.get('provider')==provider and time.time()-item.get('time',0)<=900:
+      matched_pending=True
    if query.get('error'):
     return self.redirect(f'{oauth_frontend_url()}/?oauth_error=access_denied',[clear_state])
-   if not state or not secrets.compare_digest(stored,f'{provider}:{state}'):
+   if not state or (not matched_pending and not secrets.compare_digest(stored,f'{provider}:{state}')):
     return self.redirect(f'{oauth_frontend_url()}/?oauth_error=invalid_state',[clear_state])
    if not code:
     return self.redirect(f'{oauth_frontend_url()}/?oauth_error=missing_code',[clear_state])
@@ -1062,16 +1110,19 @@ class H(BaseHTTPRequestHandler):
      if not u:return
      c=db(); rows=[dict(r) for r in c.execute('SELECT * FROM subjects WHERE created_by=? ORDER BY name',(u['id'],))]; c.close(); return self.json(rows)
     c=db(); rows=[dict(r) for r in c.execute('SELECT * FROM subjects ORDER BY name')]; c.close(); return self.json(rows)
-  if path=='/api/subscription':
+  if path in ('/api/subscription','/api/me/entitlements'):
    u=require_user(self)
    if not u:return
-   with db() as c:
-    active=c.execute('SELECT s.status,p.name FROM subscriptions s JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? AND s.status=? ORDER BY s.id DESC LIMIT 1',(u['id'],'active')).fetchone()
-    scheduled=c.execute('SELECT p.name,sc.billing_cycle,sc.effective_at FROM subscription_changes sc JOIN plans p ON p.id=sc.target_plan_id WHERE sc.user_id=? AND sc.status=? ORDER BY sc.id DESC LIMIT 1',(u['id'],'scheduled')).fetchone()
-   codes={'free':'free','standard':'plus','plus':'plus','premium':'pro','pro':'pro'}
-   current=dict(active) if active else {'name':'Free','status':'active'}
-   change={'plan':codes.get(str(scheduled['name']).lower(),'free'),'billing_cycle':scheduled['billing_cycle'],'effective_at':scheduled['effective_at']} if scheduled else None
-   return self.json({'plan':codes.get(str(current['name']).lower(),'free'),'status':current['status'],'billing_cycle':'month','scheduled_change':change})
+   try:
+    with db() as c:
+     view=entitlement_snapshot(c,u['id'])
+   except EntitlementError as error:
+    return entitlement_http(self,error)
+   return self.json(view)
+  if path=='/api/quizzes/basic/topics':
+   u=require_user(self)
+   if not u:return
+   return self.json({'items':basic_quiz_topics(),'sample':True})
   if path=='/api/documents':
    u=require_user(self)
    if not u:return
@@ -1290,6 +1341,14 @@ class H(BaseHTTPRequestHandler):
    with db() as c:
     deleted=c.execute('DELETE FROM flashcard_decks WHERE id=? AND user_id=?',(unquote(match.group(1)),u['id'])).rowcount;c.commit()
    return self.json({'ok':True} if deleted else {'error':'Bộ thẻ không tồn tại'},200 if deleted else 404)
+  match=re.fullmatch(r'/api/quizzes/(\d+)',path)
+  if match:
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    deleted=c.execute("DELETE FROM chat_sessions WHERE id=? AND user_id=? AND title LIKE 'QUIZ_CARD:%'",(match.group(1),u['id'])).rowcount
+    c.commit()
+   return self.json({'ok':True,'resource':'quizzes'} if deleted else {'error':'Quiz không tồn tại'},200 if deleted else 404)
   if path=='/api/ai-tutor/conversations':
    user=require_user(self)
    if not user:return
@@ -1345,6 +1404,13 @@ class H(BaseHTTPRequestHandler):
    p=urlparse(self.path); path=p.path; data=self.body()
   except ValueError:
    return self.json({'error':'Content-Length không hợp lệ'},400)
+  placeholders={'/api/mock-exam':'mock_exam','/api/knowledge-gap':'knowledge_gap_analysis',
+   '/api/thesis-cv-advisor':'thesis_cv_advisor','/api/offline-export':'offline_export',
+   '/api/nova-voice':'nova_voice'}
+  if path in placeholders:
+   u=require_user(self)
+   if not u:return
+   return entitlement_http(self,entitlement_unavailable(placeholders[path]))
   if path in ('/api/flashcards/preview','/api/documents/preview'):
    u=require_user(self)
    if not u:return
@@ -1371,6 +1437,15 @@ class H(BaseHTTPRequestHandler):
     if not extracted.strip():raise DocumentTextError('empty')
    except Exception:
     return self.json({'error':'Không đọc được nội dung chữ trong tài liệu'},422)
+   try:
+    with db() as c:
+     if path=='/api/flashcards/preview':
+      require_feature(c,u['id'],'flashcard_ai_preview')
+     else:
+      require_feature(c,u['id'],'document_metadata_preview')
+      allow_metadata_preview(u['id'])
+   except EntitlementError as error:
+    return entitlement_http(self,error)
    suggest = flashcards.document_suggestion if path=='/api/documents/preview' else flashcards.suggest
    return self.json(suggest(extracted,filename,get_engine()))
   if path=='/api/flashcards':
@@ -1378,12 +1453,18 @@ class H(BaseHTTPRequestHandler):
    if not u:return
    try:deck=flashcards.normalize_deck(json_body(data))
    except ValueError as error:return self.json({'error':str(error)},400)
-   with db() as c:
-    existing=c.execute('SELECT id FROM flashcard_decks WHERE id=? AND user_id=?',(deck['id'],u['id'])).fetchone()
-    payload=json.dumps(deck,ensure_ascii=False)
-    if existing:c.execute('UPDATE flashcard_decks SET payload=? WHERE id=? AND user_id=?',(payload,deck['id'],u['id']))
-    else:c.execute('INSERT INTO flashcard_decks(id,user_id,payload) VALUES(?,?,?)',(deck['id'],u['id'],payload))
-    c.commit()
+   existing=None
+   try:
+    with db() as c:
+     require_feature(c,u['id'],'manual_flashcards')
+     assert_card_capacity(c,u['id'],deck['id'],len(deck['cards']))
+     existing=c.execute('SELECT id FROM flashcard_decks WHERE id=? AND user_id=?',(deck['id'],u['id'])).fetchone()
+     payload=json.dumps(deck,ensure_ascii=False)
+     if existing:c.execute('UPDATE flashcard_decks SET payload=? WHERE id=? AND user_id=?',(payload,deck['id'],u['id']))
+     else:c.execute('INSERT INTO flashcard_decks(id,user_id,payload) VALUES(?,?,?)',(deck['id'],u['id'],payload))
+     c.commit()
+   except EntitlementError as error:
+    return entitlement_http(self,error)
    return self.json(deck,200 if existing else 201)
   match=re.fullmatch(r'/api/flashcards/([^/]+)/review',path)
   if match:
@@ -1402,10 +1483,34 @@ class H(BaseHTTPRequestHandler):
     c.execute('UPDATE flashcard_decks SET payload=? WHERE id=? AND user_id=?',(json.dumps(deck,ensure_ascii=False),deck['id'],u['id']))
     streak=update_streak(c,u['id'],record=True);c.commit()
    return self.json({'deck':deck,'streak':streak})
+  if path=='/api/quizzes/basic':
+   u=require_user(self)
+   if not u:return
+   x=json_body(data)
+   if not isinstance(x,dict): return self.json({'error':'Dữ liệu đề không hợp lệ'},400)
+   quiz_payload=basic_quiz(x.get('topic'))
+   title=quiz_payload['title']
+   try:
+    with db() as c:
+     require_feature(c,u['id'],'basic_quiz')
+     assert_quiz_capacity(c,u['id'])
+     session_title='QUIZ_CARD:'+json.dumps({'title':title,'document_ids':[],'sample':True},ensure_ascii=False)
+     quiz_id=c.execute('INSERT INTO chat_sessions(user_id,title) VALUES(?,?)',(u['id'],session_title)).lastrowid
+     c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(quiz_id,'assistant',json.dumps(quiz_payload,ensure_ascii=False)))
+     c.commit()
+   except EntitlementError as error:
+    return entitlement_http(self,error)
+   public_questions=[{key:value for key,value in question.items() if key not in ('correct_index','explanation')} for question in quiz_payload['questions']]
+   return self.json({'id':quiz_id,'title':title,'sample':True,'sample_notice':quiz_payload['sample_notice'],'topic':quiz_payload['topic'],'document_ids':[],'question_count':len(public_questions),'questions':public_questions},201)
   if path=='/api/quizzes/generate':
    u=require_user(self)
    if not u:return
    x=json_body(data)
+   try:
+    with db() as c:
+     require_feature(c,u['id'],'document_quiz_generate')
+   except EntitlementError as error:
+    return entitlement_http(self,error)
    raw_ids=x.get('document_ids',[]) if isinstance(x,dict) else []
    if not isinstance(raw_ids,list) or not raw_ids or len(raw_ids)>20:
     return self.json({'error':'Hãy chọn từ 1 đến 20 tài liệu để tạo Quiz'},400)
@@ -1418,6 +1523,10 @@ class H(BaseHTTPRequestHandler):
       WHERE d.uploaded_by=? AND d.id IN ({placeholders})''',[u['id'],*document_ids]).fetchall()
     by_id={row['id']:row for row in rows}
     if len(by_id)!=len(document_ids): return self.json({'error':'Một hoặc nhiều tài liệu không tồn tại'},404)
+    try:
+     assert_quiz_capacity(c,u['id'])
+    except EntitlementError as error:
+     return entitlement_http(self,error)
     docs=[]
     for document_id in document_ids:
      row=by_id[document_id]
@@ -1575,25 +1684,27 @@ class H(BaseHTTPRequestHandler):
     by_code={code:next((plan for plan in plans if str(plan['name']).lower() in aliases),None) for code,aliases in names.items()}
     target=by_code[target_code]
     if not target:return self.json({'error':'selected plan is unavailable'},400)
-    active=c.execute('SELECT s.id,p.name FROM subscriptions s JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? AND s.status=? ORDER BY s.id DESC LIMIT 1',(u['id'],'active')).fetchone()
-    current_code=next((code for code,aliases in names.items() if active and str(active['name']).lower() in aliases),'free')
+    resolved=resolve_entitlement(c,u['id'])
+    current_code=resolved['plan']
     if current_code==target_code:return self.json({'error':'this is already your current plan'},409)
-    c.execute('UPDATE subscription_changes SET status=? WHERE user_id=? AND status=?',('cancelled',u['id'],'scheduled'))
     if ranks[target_code] < ranks[current_code]:
-     effective_at=subscription_effective_at(cycle)
+     c.execute('UPDATE subscription_changes SET status=? WHERE user_id=? AND status=?',('cancelled',u['id'],'scheduled'))
+     effective_at=(datetime.fromisoformat(resolved['expires_at']).astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+                   if resolved['expires_at'] else subscription_effective_at(cycle))
      c.execute('INSERT INTO subscription_changes(user_id,target_plan_id,billing_cycle,status,effective_at) VALUES(?,?,?,?,?)',(u['id'],target['id'],cycle,'scheduled',effective_at))
      c.commit()
      return self.json({'plan':current_code,'status':'active','scheduled_change':{'plan':target_code,'billing_cycle':cycle,'effective_at':effective_at},'change_type':'downgrade_scheduled'})
-   return self.json({'error':'Cổng thanh toán chưa được tích hợp. Yêu cầu demo không thu tiền và không kích hoạt gói trả phí.','mode':'demo','payment_status':'not_configured'},501)
+   return self.json({'error':'Cổng thanh toán chưa được tích hợp. Yêu cầu demo không thu tiền và không kích hoạt gói trả phí.','code':'payment_unavailable','mode':'demo','payment_status':'not_configured'},501)
   if path=='/api/subscription/cancel':
    u=require_user(self)
    if not u:return
    with db() as c:
     free=c.execute('SELECT id FROM plans WHERE lower(name)=? AND status=?',('free','active')).fetchone()
-    active=c.execute('SELECT s.id,p.name FROM subscriptions s JOIN plans p ON p.id=s.plan_id WHERE s.user_id=? AND s.status=? ORDER BY s.id DESC LIMIT 1',(u['id'],'active')).fetchone()
-    if not active or str(active['name']).lower()=='free':return self.json({'error':'no paid subscription to cancel'},409)
+    resolved=resolve_entitlement(c,u['id'])
+    if resolved['plan']=='free':return self.json({'error':'no paid subscription to cancel'},409)
     c.execute('UPDATE subscription_changes SET status=? WHERE user_id=? AND status=?',('cancelled',u['id'],'scheduled'))
-    effective_at=subscription_effective_at('month')
+    effective_at=(datetime.fromisoformat(resolved['expires_at']).astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+                  if resolved['expires_at'] else subscription_effective_at('month'))
     c.execute('INSERT INTO subscription_changes(user_id,target_plan_id,billing_cycle,status,effective_at) VALUES(?,?,?,?,?)',(u['id'],free['id'],'month','scheduled',effective_at)); c.commit()
    return self.json({'ok':True,'change_type':'cancellation_scheduled','scheduled_change':{'plan':'free','effective_at':effective_at}})
   if path=='/api/courses':
@@ -1688,29 +1799,41 @@ class H(BaseHTTPRequestHandler):
      if not rows:return self.json({'error':'document not found'},404)
     else:
      rows=c.execute('SELECT id,title,description,storage_path FROM documents WHERE uploaded_by=? ORDER BY created_at DESC',(u['id'],)).fetchall()
-    tokens=[token.lower() for token in re.findall(r'\w+',question) if len(token)>2]
-    matches=[]
-    for row in rows:
-     text=document_text(row,c)
-     haystack=(row['title']+' '+(row['description'] or '')+' '+text).lower()
-     score=sum(haystack.count(token) for token in tokens)
-     if score: matches.append((score,row,text))
-    matches.sort(key=lambda item:item[0],reverse=True)
-    selected=matches[:3]
-    if selected:
-     excerpts=[]
-     for _,row,text in selected:
-      source=text or row['description'] or row['title']
-      excerpts.append(f"{row['title']}: {source[:700].strip()}")
-     answer='\n\n'.join(excerpts)
-     sources=[{'id':row['id'],'title':row['title']} for _,row,_ in selected]
-    else:
-     answer='Chưa tìm thấy đoạn nội dung phù hợp trong tài liệu đã lưu. Hãy thử câu hỏi cụ thể hơn hoặc chọn một tài liệu text.'
-     sources=[]
-    session_id=c.execute('INSERT INTO chat_sessions(user_id,document_id,title) VALUES(?,?,?)',(u['id'],document_id,'AI Tutor')).lastrowid
-    c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(session_id,'user',question))
-    c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(session_id,'assistant',answer)); c.commit()
-   return self.json({'answer':answer,'sources':sources,'session_id':session_id,'mode':'local-rag'},200)
+    try:
+     alias_reservation=reserve_quota(c,u['id'],'tutor_chat',tutor_fingerprint({'question':question,'document_id':document_id,'mode':'explain'}),request_key_from(self,x))
+    except EntitlementError as error:
+     return entitlement_http(self,error)
+    if alias_reservation.replay:
+     return self.json(alias_reservation.replay,200)
+    try:
+     tokens=[token.lower() for token in re.findall(r'\w+',question) if len(token)>2]
+     matches=[]
+     for row in rows:
+      text=document_text(row,c)
+      haystack=(row['title']+' '+(row['description'] or '')+' '+text).lower()
+      score=sum(haystack.count(token) for token in tokens)
+      if score: matches.append((score,row,text))
+     matches.sort(key=lambda item:item[0],reverse=True)
+     selected=matches[:3]
+     if selected:
+      excerpts=[]
+      for _,row,text in selected:
+       source=text or row['description'] or row['title']
+       excerpts.append(f"{row['title']}: {source[:700].strip()}")
+      answer='\n\n'.join(excerpts)
+      sources=[{'id':row['id'],'title':row['title']} for _,row,_ in selected]
+     else:
+      answer='Chưa tìm thấy đoạn nội dung phù hợp trong tài liệu đã lưu. Hãy thử câu hỏi cụ thể hơn hoặc chọn một tài liệu text.'
+      sources=[]
+     session_id=c.execute('INSERT INTO chat_sessions(user_id,document_id,title) VALUES(?,?,?)',(u['id'],document_id,'AI Tutor')).lastrowid
+     c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(session_id,'user',question))
+     c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(session_id,'assistant',answer))
+     alias_body={'answer':answer,'sources':sources,'session_id':session_id,'mode':'local-rag'}
+     finalize_quota(c,alias_reservation.id,alias_body)
+    except Exception:
+     release_quota(c,alias_reservation.id)
+     raise
+   return self.json(alias_body,200)
   if path=='/api/ai-tutor/chat':
    u=require_user(self)
    if not u:return
@@ -1749,29 +1872,39 @@ class H(BaseHTTPRequestHandler):
      context,sources,query_keywords=tutor_context(u['id'],file_ids,message,fallback=mode in ('summarize','generate_quiz'))
     except LookupError:
      return self.json({'error':'Tài liệu không tồn tại hoặc không thuộc tài khoản này'},404)
-    context,tool_sources,agent_trace=tutor_agent.run(message,context)
-    sources.extend(tool_sources)
-   engine=get_engine()
-   retrieval_tier='conversation' if preference_intent else ('documents' if context else 'miss')
-   cached_knowledge=None
-   if not context and not preference_intent:
-    cached_knowledge=external_cache_lookup(message,query_keywords)
-    if cached_knowledge:
-     context=f"Bộ nhớ kiến thức bên ngoài: {cached_knowledge['answer']}"
-     sources=[{'id':cached_knowledge['id'],'title':'Kho kiến thức bên ngoài','type':'external_cache'}]
-     retrieval_tier='external_cache'
-   with db() as c:
-    conversation=tutor_store.conversation_for(c,u['id'],conversation_key,mode=mode,title=message[:60])
-    conversation_id=int(conversation['id']); conversation_title=str(conversation['title'] or '')
-    history=tutor_store.history(c,conversation_id,8)
-    memory_profile=tutor_memory.profile(c,u['id'])
-    profile_summary=str(memory_profile.get('summary') or '')
-    if 'Chưa đủ dữ liệu' in profile_summary:
-     profile_summary=''
-   quiz=None; quiz_topic=''
-   if mode=='generate_quiz':
-    quiz,quiz_topic=chat_quiz(engine,message,context)
    try:
+    with db() as c:
+     if mode=='generate_quiz':
+      require_feature(c,u['id'],'quiz_from_chat')
+     tutor_reservation=reserve_quota(c,u['id'],'tutor_chat',tutor_fingerprint({'message':message,'mode':mode,'depth':depth,'file_ids':file_ids,'model':requested_model}),request_key_from(self,x))
+   except EntitlementError as error:
+    return entitlement_http(self,error)
+   if tutor_reservation.replay:
+    return self.json(tutor_reservation.replay,200)
+   try:
+    if not preference_intent:
+     context,tool_sources,agent_trace=tutor_agent.run(message,context)
+     sources.extend(tool_sources)
+    engine=get_engine()
+    retrieval_tier='conversation' if preference_intent else ('documents' if context else 'miss')
+    cached_knowledge=None
+    if not context and not preference_intent:
+     cached_knowledge=external_cache_lookup(message,query_keywords)
+     if cached_knowledge:
+      context=f"Bộ nhớ kiến thức bên ngoài: {cached_knowledge['answer']}"
+      sources=[{'id':cached_knowledge['id'],'title':'Kho kiến thức bên ngoài','type':'external_cache'}]
+      retrieval_tier='external_cache'
+    with db() as c:
+     conversation=tutor_store.conversation_for(c,u['id'],conversation_key,mode=mode,title=message[:60])
+     conversation_id=int(conversation['id']); conversation_title=str(conversation['title'] or '')
+     history=tutor_store.history(c,conversation_id,8)
+     memory_profile=tutor_memory.profile(c,u['id'])
+     profile_summary=str(memory_profile.get('summary') or '')
+     if 'Chưa đủ dữ liệu' in profile_summary:
+      profile_summary=''
+    quiz=None; quiz_topic=''
+    if mode=='generate_quiz':
+     quiz,quiz_topic=chat_quiz(engine,message,context)
     if preference_intent:
      answer=preference_intent['reply']
     elif quiz:
@@ -1786,7 +1919,13 @@ class H(BaseHTTPRequestHandler):
      answer=engine.answer(mode=mode,question=message,context=context,history=history,
                           learner_profile=profile_summary,depth=depth,model=model_override)
    except TutorEngineError as error:
+    with db() as c:
+     release_quota(c,tutor_reservation.id)
     return self.json({'error':f'AI Tutor tạm thời không trả lời được: {error}','retryable':True},502)
+   except Exception:
+    with db() as c:
+     release_quota(c,tutor_reservation.id)
+    raise
    health=tutor_engine.PROVIDER_HEALTH
    if retrieval_tier=='miss' and getattr(engine,'uses_model',False) and health.get('ok',True):
     provider=tutor_config.engine_status().get('provider') or 'external-ai'
@@ -1799,6 +1938,7 @@ class H(BaseHTTPRequestHandler):
    degraded=bool(getattr(engine,'name','')=='provider-resilient' and not health.get('ok',True))
    with db() as c:
     if not tutor_store.conversation_owned(c,conversation_id,u['id']):
+     release_quota(c,tutor_reservation.id)
      return self.json({'conversation_id':conversation_key,'role':'assistant','content':'',
        'discarded':True,'reason':'conversation_deleted'},200)
     tutor_store.add_message(c,conversation_id,'user',message,mode)
@@ -1810,16 +1950,17 @@ class H(BaseHTTPRequestHandler):
       advance_document_progress(c,u['id'],source.get('id'),60)
     if conversation_title in ('','Cuộc hội thoại mới'):
      tutor_store.rename_conversation(c,conversation_id,message[:60])
-    c.commit()
-   provider_engine=getattr(engine,'primary',None)
-   model_used=getattr(provider_engine,'last_model',None)
-   failovers=getattr(provider_engine,'last_failovers',[])
-   return self.json({'conversation_id':conversation_key,'message_id':str(message_id),'role':'assistant','content':answer,'sources':sources,'mode':mode,'depth':depth,
+    provider_engine=getattr(engine,'primary',None)
+    model_used=getattr(provider_engine,'last_model',None)
+    failovers=getattr(provider_engine,'last_failovers',[])
+    tutor_body={'conversation_id':conversation_key,'message_id':str(message_id),'role':'assistant','content':answer,'sources':sources,'mode':mode,'depth':depth,
      'model_requested':requested_model,'model_used':model_used,'model_failovers':failovers,
      'quiz':quiz,
      'retrieval':{'tier':retrieval_tier,'keywords':query_keywords},
      'agent_trace':agent_trace,
-     'engine_degraded':degraded,'engine_degraded_reason':health.get('reason','') if degraded else ''},200)
+     'engine_degraded':degraded,'engine_degraded_reason':health.get('reason','') if degraded else ''}
+    finalize_quota(c,tutor_reservation.id,tutor_body)
+   return self.json(tutor_body,200)
   if path=='/api/ai-tutor/assessment/start':
    u=require_user(self)
    if not u:return
@@ -1859,7 +2000,8 @@ class H(BaseHTTPRequestHandler):
    x=json_body(data)
    if not isinstance(x,dict): return self.json({'error':'Dữ liệu lộ trình không hợp lệ'},400)
    with db() as c:
-    assessment=tutor_store.latest_assessment(c,u['id'])
+     assessment=tutor_store.latest_assessment(c,u['id'])
+     plan=entitlement_snapshot(c,u['id'])['plan']
    subject=str(x.get('subject') or assessment.get('subject') or '').strip()
    goal=str(x.get('goal') or assessment.get('goal') or '').strip()
    if not subject or not goal:
@@ -1875,9 +2017,9 @@ class H(BaseHTTPRequestHandler):
      'strengths':x.get('strengths') if isinstance(x.get('strengths'),list) else assessment.get('strengths') or [],
      'weaknesses':x.get('weaknesses') if isinstance(x.get('weaknesses'),list) else assessment.get('weaknesses') or [],
      'topics':x.get('topics') if isinstance(x.get('topics'),list) else []}
-   engine=get_engine()
+   engine=LocalEngine() if plan=='free' else get_engine()
    try:
-    built=build_roadmap(payload,engine=engine)
+    built=build_standard_roadmap(payload) if plan=='free' else build_roadmap(payload,engine=engine)
     exercises=build_exercises(built,payload,engine=engine)
    except (TutorRoadmapError,TutorEngineError) as error:
     return self.json({'error':f'Không tạo được lộ trình: {error}','retryable':True},502)
@@ -1907,7 +2049,9 @@ class H(BaseHTTPRequestHandler):
     if not exercise or int(exercise.get('user_id') or 0)!=int(u['id']):
      return self.json({'error':'exercise not found'},404)
     roadmap_row=c.execute('SELECT * FROM tutor_roadmaps WHERE id=?',(exercise['roadmap_id'],)).fetchone()
-   engine=get_engine()
+   with db() as c:
+    plan=entitlement_snapshot(c,u['id'])['plan']
+   engine=LocalEngine() if plan=='free' else get_engine()
    try:
     result=grade_exercise(exercise,answer,answer_type=answer_type,engine=engine)
    except TutorGradingError as error:
@@ -1966,6 +2110,7 @@ class H(BaseHTTPRequestHandler):
    ext=extension.lstrip('.')
    mime={'.pdf':'application/pdf','.txt':'text/plain','.md':'text/markdown','.csv':'text/csv','.doc':'application/msword','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.ppt':'application/vnd.ms-powerpoint','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}.get(extension,'application/octet-stream')
    try:
+    assert_document_capacity(c,u['id'])
     with open(target,'wb') as fh: fh.write(content)
     extracted_text=extract_document_text(target)
     if not split_document_text(extracted_text):
@@ -1983,6 +2128,8 @@ class H(BaseHTTPRequestHandler):
     except OSError as cleanup_error: cleanup_errors.append(cleanup_error)
     c.close()
     if cleanup_errors: self.log_error('upload cleanup failed after %r: %r',error,cleanup_errors)
+    if isinstance(error,EntitlementError):
+     return entitlement_http(self,error)
     if isinstance(error,DocumentTextError):
      return self.json({'error':'Không đọc được nội dung chữ trong tài liệu. Hãy dùng PDF có text, DOCX, PPTX, TXT, MD hoặc CSV.'},422)
     return self.json({'error':'Không thể lưu tài liệu'},500)

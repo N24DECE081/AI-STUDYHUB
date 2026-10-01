@@ -1,4 +1,4 @@
-import './components/streak/streak.css';
+  import './components/streak/streak.css';
 import { getFlashcardDecks, saveFlashcardDeck, deleteFlashcardDeck } from './api';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
@@ -24,7 +24,7 @@ import {
   getProgress,
   getStudyTime,
   getStreak,
-  getSubscription,
+  getEntitlements,
   getSubjects,
   login,
   logout as apiLogout,
@@ -37,7 +37,8 @@ import {
 } from "./api";
 import AITutorPage from "./components/ai-tutor/AITutorPage";
 import QuizWorkspace from "./components/QuizWorkspace";
-import LearningRoadmapPage from "./components/LearningRoadmapPage";
+import RoadmapHub from "./components/roadmap/RoadmapHub";
+import MaterialUploader from "./components/roadmap/MaterialUploader";
 import PaymentCheckout from "./components/PaymentCheckout";
 import ProgressDashboard from "./components/progress/ProgressDashboard";
 import { EMPTY_PROGRESS_ANALYTICS } from "./components/progress/progressDefaults";
@@ -82,14 +83,14 @@ const PLANS = {
     excluded: [
       "Không giới hạn tài liệu & thẻ",
       "Tự động tạo Quiz/Thẻ từ tài liệu AI 1-click",
-      "Luyện thi Mock Exam phân tích 1-1",
-      "Nova AI Voice đọc tài liệu không giới hạn",
+      "Sắp có: Luyện thi Mock Exam phân tích 1-1",
+      "Sắp có: Nova AI Voice đọc tài liệu",
     ],
   },
   plus: {
     name: "Gói Pro Sinh Viên",
     price: "199.000đ",
-    subtitle: "199.000đ / tháng (hoặc 199đ tương đương)",
+    subtitle: "199.000đ / tháng",
     badge: "Phổ biến nhất",
     items: [
       "Không giới hạn tài liệu tải lên (PDF, DOC, MD)",
@@ -101,23 +102,23 @@ const PLANS = {
       "Lưu lịch sử ôn tập đồng bộ đa thiết bị",
     ],
     excluded: [
-      "Luyện thi Mock Exam chuyên sâu 1-1",
-      "Nova AI cố vấn đồ án tốt nghiệp & CV xin việc",
+      "Sắp có: Luyện thi Mock Exam chuyên sâu 1-1",
+      "Sắp có: Nova AI cố vấn đồ án tốt nghiệp & CV xin việc",
     ],
   },
   pro: {
     name: "Gói Master Thủ Khoa",
     price: "299.000đ",
-    subtitle: "299.000đ / tháng (hoặc 299đ tương đương)",
+    subtitle: "299.000đ / tháng",
     badge: "Vip Học Bổng",
     items: [
-      "Tất cả quyền lợi của Gói Pro 199đ",
-      "Phòng luyện thi Mock Exam mô phỏng đề thi thật đại học",
-      "Nova AI phân tích lỗ hổng kiến thức 1-1 & gợi ý khắc phục",
-      "Nova AI cố vấn chuyên sâu Đồ án tốt nghiệp & Review CV thực tập",
+      "Tất cả quyền lợi của Gói Pro Sinh Viên",
+      "Sắp có: Phòng luyện thi Mock Exam mô phỏng đề thi thật đại học",
+      "Sắp có: Nova AI phân tích lỗ hổng kiến thức 1-1 & gợi ý khắc phục",
+      "Sắp có: Nova AI cố vấn chuyên sâu Đồ án tốt nghiệp & Review CV thực tập",
       "Huy hiệu Thủ Khoa StudyHub độc quyền trên hồ sơ",
       "Hỗ trợ học tập ưu tiên 24/7 trực tiếp qua Zalo / Hotline VIP",
-      "Tải toàn bộ bộ thẻ và đề thi offline",
+      "Sắp có: Xuất bộ thẻ và đề thi offline",
     ],
     excluded: [],
   },
@@ -273,8 +274,7 @@ function Modal({ title, children, onClose, icon, subtitle, className = "" }) {
           <div className="checkout-banner">
             <strong>Thanh toán minh bạch</strong>
             <span>
-              Nâng gói áp dụng ngay ở môi trường demo · Hạ gói chỉ chuyển vào
-              cuối chu kỳ.
+              Nâng gói chưa khả dụng vì cổng thanh toán chưa tích hợp. Hạ gói chuyển vào cuối chu kỳ.
             </span>
             <div>
               <b>Chu kỳ tháng</b>
@@ -502,10 +502,7 @@ export default function App() {
   const [uploadSuggestionNote, setUploadSuggestionNote] = useState('');
   const [suggestedUploadTitle, setSuggestedUploadTitle] = useState('');
   useEffect(() => () => uploadSuggestionRequest.current?.abort(), [modal]);
-  const [subscription, setSubscription] = useState({
-    plan: "free",
-    status: "active",
-  });
+  const [subscription, setSubscription] = useState(null);
   const [pendingPlan, setPendingPlan] = useState(null);
   const [activeStudyDeck, setActiveStudyDeck] = useState(null);
   const [billingCycle] = useState("month");
@@ -556,7 +553,7 @@ export default function App() {
       setProgressAnalytics(EMPTY_PROGRESS_ANALYTICS);
       setStudyTime(EMPTY_STUDY_TIME);
       setStreak({ current_streak: 0, recovery_count: 0, last_activity_date: null });
-      setSubscription({ plan: "free", status: "active" });
+       setSubscription(null);
       setFilter("all");
       setSearch("");
       setSelectedDocument(null);
@@ -570,12 +567,6 @@ export default function App() {
   }, []);
   const saveSubscription = (next) => {
     setSubscription(next);
-    if (user) {
-      localStorage.setItem(
-        `studyhub-subscription:${user.id || user.email}`,
-        JSON.stringify(next),
-      );
-    }
   };
   const loadDocuments = async () => {
     try {
@@ -605,6 +596,12 @@ export default function App() {
     }
   };
   const userKey = user ? String(user.id || user.email || "") : "";
+  useEffect(() => {
+    if (!authReady || !userKey) return undefined;
+    const refresh = () => getEntitlements().then(setSubscription).catch(() => setSubscription(null));
+    window.addEventListener("studyhub:entitlements-changed", refresh);
+    return () => window.removeEventListener("studyhub:entitlements-changed", refresh);
+  }, [authReady, userKey]);
   useEffect(() => {
     if (!authReady || !userKey) return undefined;
     let active = true;
@@ -670,7 +667,7 @@ export default function App() {
         getProgress(),
         getStudyTime(),
         getStreak(),
-        getSubscription(),
+        getEntitlements(),
       ]);
       if (!active) return;
       if (documentsResult.status === "fulfilled") setDocuments(documentsResult.value);
@@ -683,7 +680,6 @@ export default function App() {
       if (streakResult.status === "fulfilled") setStreak(streakResult.value);
       if (subscriptionResult.status === "fulfilled") {
         setSubscription(subscriptionResult.value);
-        localStorage.setItem(`studyhub-subscription:${userKey}`, JSON.stringify(subscriptionResult.value));
       }
     };
     const timer = window.setTimeout(() => void refreshUserData(), 0);
@@ -908,7 +904,7 @@ export default function App() {
     setProgressAnalytics(EMPTY_PROGRESS_ANALYTICS);
     setStudyTime(EMPTY_STUDY_TIME);
     setStreak({ current_streak: 0, recovery_count: 0, last_activity_date: null });
-    setSubscription({ plan: "free", status: "active" });
+    setSubscription(null);
     setView("home");
     setModal(null);
     window.history.replaceState({}, "", "/");
@@ -964,7 +960,7 @@ export default function App() {
       setProgressAnalytics(EMPTY_PROGRESS_ANALYTICS);
       setStudyTime(EMPTY_STUDY_TIME);
       setSubjects([]);
-      setSubscription({ plan: "free", status: "active" });
+      setSubscription(null);
       const nextUser = result.user || result;
       saveUser(nextUser);
       if (nextUser.streak) setStreak(nextUser.streak);
@@ -996,7 +992,7 @@ export default function App() {
     const subjectCode = uploadSubject || subjectOptions[0]?.code || "";
     if (!subjectCode) return fail("Hãy chọn hoặc thêm môn học trước.");
     if (file.size === 0) return fail("File không được rỗng.");
-    if (file.size > 10 * 1024 * 1024) return fail("File tối đa 10MB.");
+    if (file.size > 50 * 1024 * 1024) return fail("File tối đa 50MB.");
     if (![".pdf", ".txt", ".md", ".csv", ".doc", ".docx", ".ppt", ".pptx"].includes(extension)) {
       return fail("Định dạng file chưa được hỗ trợ.");
     }
@@ -1044,7 +1040,7 @@ export default function App() {
     setUploadSuggestionNote(''); setSuggestedUploadTitle('');
     if (!uploadTitleEdited.current) setUploadTitle('');
     if (!uploadDescriptionEdited.current) setUploadDescription('');
-    if (!file.size || file.size > 10 * 1024 * 1024) {
+    if (!file.size || file.size > 50 * 1024 * 1024) {
       setUploadSuggestionBusy(false);
       setUploadSuggestionNote(!file.size ? 'File không được rỗng.' : 'File tối đa 10MB.');
       return;
@@ -1121,7 +1117,7 @@ export default function App() {
     catch (error) { notify(error.message); }
   };
   const requestPlan = (plan) => {
-    if (requireLogin() || plan === subscription.plan) return;
+    if (requireLogin() || plan === subscription?.plan) return;
     setPendingPlan(plan);
     setModal(plan === "free" ? "plan" : "payment");
   };
@@ -1131,12 +1127,12 @@ export default function App() {
         plan: pendingPlan,
         billingCycle,
       });
-      saveSubscription(result);
+      saveSubscription(await getEntitlements());
       setModal(null);
       notify(
         result.change_type === "downgrade_scheduled"
           ? "Đã lên lịch hạ gói vào cuối chu kỳ."
-          : `Đã kích hoạt gói ${PLANS[pendingPlan].name} trong môi trường demo.`,
+          : "Đã cập nhật gói.",
       );
     } catch (error) {
       notify(`Không thể xử lý yêu cầu: ${error.message}`);
@@ -1144,12 +1140,8 @@ export default function App() {
   };
   const cancelPlan = async () => {
     try {
-      const result = await cancelSubscription();
-      setSubscription((current) => ({
-        ...current,
-        status: "scheduled_change",
-        scheduled_change: result.scheduled_change,
-      }));
+      await cancelSubscription();
+      setSubscription(await getEntitlements());
       notify("Đã lên lịch hủy gia hạn vào cuối chu kỳ.");
     } catch (error) {
       notify(`Không thể hủy gia hạn: ${error.message}`);
@@ -1246,6 +1238,12 @@ export default function App() {
           )}
         </div>
       </header>
+      {user && subscription?.usage && <div className="entitlement-summary" aria-label="Quyền gói học tập">
+        <strong>{subscription.display_name}</strong>
+        <span>Nova AI Tutor: {subscription.usage.tutor_chat.limit == null ? "Không giới hạn" : `Còn ${subscription.usage.tutor_chat.remaining}/${subscription.usage.tutor_chat.limit} lượt hôm nay`}</span>
+        <span>Reset: {new Date(subscription.usage.tutor_chat.resets_at).toLocaleString("vi-VN")}</span>
+        {[["documents", "tài liệu"], ["flashcards", "thẻ"], ["quizzes", "đề"]].map(([key, label]) => <span key={key}>{subscription.usage[key].limit == null ? `Không giới hạn ${label}` : `${subscription.usage[key].used}/${subscription.usage[key].limit} ${label}`}</span>)}
+      </div>}
       <main className="main-shell">
         {view === "home" && (
           <>
@@ -1590,7 +1588,7 @@ export default function App() {
                 <PlusIcon aria-hidden="true" /> Tạo Bộ Thẻ Mới
               </button>
             </header>
-            <QuizWorkspace documents={documents} user={user} initialDocumentId={selectedDocument?.id} />
+            <QuizWorkspace documents={documents} user={user} initialDocumentId={selectedDocument?.id} entitlements={subscription} />
             {decksLoading ? <p role="status">Đang tải bộ thẻ…</p> : quizDecks.length ? (
               <div className="quiz-deck-grid reveal-stagger">
                 {quizDecks.map((deck) => (
@@ -1622,7 +1620,7 @@ export default function App() {
           </section>
         )}
         {view === "roadmap" && (
-          <LearningRoadmapPage
+          <RoadmapHub
             key={String(user?.id || user?.email || "guest")}
             documents={documents}
             progress={progress}
@@ -1631,6 +1629,7 @@ export default function App() {
             user={user}
             streak={streak}
             studyTime={studyTime}
+            onAskNova={() => go("tutor")}
           />
         )}
         {view === "dashboard" && (
@@ -1652,7 +1651,7 @@ export default function App() {
             <div className="page-header center-header">
               <div className="pricing-intro reveal">
                 <span className="eyebrow">MỞ KHÓA TOÀN BỘ SỨC MẠNH CỦA NOVA AI STUDY HUB</span>
-                <h1>Các Gói Nâng Cấp Học Tập<br /><strong>(0đ - 199đ - 299đ)</strong></h1>
+                <h1>Các Gói Nâng Cấp Học Tập<br /><strong>(0đ - 199.000đ - 299.000đ)</strong></h1>
                 <p className="muted">
                   Đầu tư cho kiến thức để đạt GPA 3.6+, săn học bổng và tự tin bước vào các tập đoàn công nghệ & doanh nghiệp hàng đầu.
                 </p>
@@ -1661,13 +1660,13 @@ export default function App() {
             <div className="price-grid reveal-stagger">
               {Object.entries(PLANS).map(([id, plan]) => (
                 <article
-                  className={`price-card pricing-card-${id} ${id === "plus" ? "featured" : ""} ${subscription.plan === id ? "active" : ""}`}
+                  className={`price-card pricing-card-${id} ${id === "plus" ? "featured" : ""} ${subscription?.plan === id ? "active" : ""}`}
                   key={id}
                 >
                   {id === "plus" && <span className="pricing-ribbon">Khuyến dùng cho sinh viên</span>}
                   <div className="price-card-topline">
                     <span className="plan-badge">{plan.badge}</span>
-                    {subscription.plan === id && <span className="current-plan"><CheckIcon aria-hidden="true" /> Gói hiện tại</span>}
+                    {subscription?.plan === id && <span className="current-plan"><CheckIcon aria-hidden="true" /> Gói hiện tại</span>}
                   </div>
                   <h3>{plan.name}</h3>
                   <div className="price-line">
@@ -1687,18 +1686,18 @@ export default function App() {
                     ))}
                   </ul>
                   <button
-                    className={`btn full ${subscription.plan === id ? "btn-ghost" : id === "free" ? "btn-outline" : "btn-primary"}`}
-                    disabled={subscription.plan === id}
+                    className={`btn full ${subscription?.plan === id ? "btn-ghost" : id === "free" ? "btn-outline" : "btn-primary"}`}
+                    disabled={subscription?.plan === id}
                     onClick={() => requestPlan(id)}
                   >
                     {id !== "free" && <BoltIcon aria-hidden="true" className="btn-icon" />}
-                    {subscription.plan === id
+                    {subscription?.plan === id
                       ? "Gói hiện tại"
                       : id === "free"
                         ? "Chuyển về Gói Khởi Động"
                         : id === "plus"
-                          ? "Nâng cấp Gói 199đ"
-                          : "Nâng cấp Gói 299đ"}
+                          ? "Nâng cấp Gói Pro Sinh Viên"
+                          : "Nâng cấp Gói Master Thủ Khoa"}
                   </button>
                 </article>
               ))}
@@ -1708,18 +1707,22 @@ export default function App() {
                 <div>
                   <span className="eyebrow">TRẠNG THÁI GÓI</span>
                   <h3>
-                    {PLANS[subscription.plan].name} ·{" "}
-                    {PLANS[subscription.plan].subtitle}
+                    {PLANS[subscription?.plan || "free"].name} ·{" "}
+                    {PLANS[subscription?.plan || "free"].subtitle}
                   </h3>
+                  {subscription?.usage && <p>
+                    Nova AI Tutor: {subscription.usage.tutor_chat.limit == null ? "Không giới hạn" : `Còn ${subscription.usage.tutor_chat.remaining}/10 lượt hôm nay`} · reset {new Date(subscription.usage.tutor_chat.resets_at).toLocaleString("vi-VN")}
+                    {[["documents", "tài liệu"], ["flashcards", "thẻ"], ["quizzes", "đề"]].map(([key, label]) => <span key={key}> · {subscription.usage[key].limit == null ? `Không giới hạn ${label}` : `${subscription.usage[key].used}/${subscription.usage[key].limit} ${label}`}</span>)}
+                  </p>}
                   <p>
-                    {subscription.status === "scheduled_change"
+                    {subscription?.status === "scheduled_change"
                       ? "Thay đổi gói đã được lên lịch cho cuối chu kỳ hiện tại."
                       : "Gói đang hoạt động. Mọi thay đổi đều cần xác nhận trước khi áp dụng."}
                   </p>
                 </div>
                 <button
                   className="btn btn-ghost"
-                  disabled={subscription.plan === "free"}
+                  disabled={subscription?.plan === "free"}
                   onClick={cancelPlan}
                 >
                   Hủy gia hạn
@@ -1782,7 +1785,8 @@ export default function App() {
           icon={<CloudArrowUpIcon />}
           onClose={() => setModal(null)}
         >
-          <form className="upload-form" onSubmit={submitUpload}>
+          <MaterialUploader onComplete={async () => { await loadDocumentsAndProgress(); notify("Đã tải tài liệu vào kho học liệu."); }} />
+          {modal === "legacy-upload" && <form className="upload-form" onSubmit={submitUpload}>
             {uploadSuggestionBusy && <p role="status">Đang đọc nội dung để gợi ý tên tài liệu…</p>}
             {!uploadSuggestionBusy && uploadSuggestionNote && <p role="status">{uploadSuggestionNote}</p>}
             {suggestedUploadTitle && suggestedUploadTitle !== uploadTitle && <p>Tên gợi ý: <strong>{suggestedUploadTitle}</strong> <button type="button" className="text-link" onClick={() => { uploadTitleEdited.current = false; setUploadTitle(suggestedUploadTitle); }}>Dùng tên gợi ý</button></p>}
@@ -1828,7 +1832,7 @@ export default function App() {
                 <strong>ENTER THE KNOWLEDGE VAULT</strong>
                 <p>{uploadFileName || "Kéo và thả tài liệu vào đây"}</p>
                 <button type="button" className="btn btn-outline" onClick={() => uploadInput.current?.click()}>Chọn tài liệu</button>
-                <small>PDF · DOCX · PPTX · TXT · MD · tối đa 10MB</small>
+                <small>PDF · DOCX · PPTX · TXT · tối đa 50MB</small>
                 <input
                   ref={uploadInput}
                   id="upload-file"
@@ -1878,7 +1882,7 @@ export default function App() {
               </button>
               <button className="btn btn-primary" disabled={uploadSuggestionBusy || ["validating", "uploading", "processing"].includes(uploadPhase)}>Tải lên & Xử lý</button>
             </footer>
-          </form>
+          </form>}
         </Modal>
       )}
       {deleteCandidate && (
@@ -1921,22 +1925,21 @@ export default function App() {
       )}
       {modal === "quiz-create" && (
         <Modal title={editingDeck ? "Chỉnh sửa bộ thẻ" : "Tạo bộ thẻ ghi nhớ mới"} onClose={() => { setModal(null); setEditingDeck(null); }}>
-          <FlashcardDeckForm key={editingDeck?.id || "new"} userKey={userKey} initialDeck={editingDeck} onCreate={submitQuizDeck} onCancel={() => { setModal(null); setEditingDeck(null); }} />
+          <FlashcardDeckForm key={editingDeck?.id || "new"} userKey={userKey} initialDeck={editingDeck} canPreview={subscription?.capabilities?.flashcard_ai_preview?.allowed === true} onCreate={submitQuizDeck} onCancel={() => { setModal(null); setEditingDeck(null); }} />
         </Modal>
       )}
       {modal === "plan" && (
         <Modal title="Xác nhận thay đổi gói" onClose={() => setModal(null)}>
           <p>
             Bạn đang yêu cầu chuyển từ{" "}
-            <strong>{PLANS[subscription.plan].name}</strong> sang{" "}
+            <strong>{PLANS[subscription?.plan || "free"].name}</strong> sang{" "}
             <strong>{PLANS[pendingPlan].name}</strong>.
           </p>
           <p className="muted">
-            Đây là luồng demo. StudyHub chưa kết nối cổng thanh toán, vì vậy
-            yêu cầu này không thu tiền và không kích hoạt quyền lợi gói trả phí.
+            Hạ gói sẽ có hiệu lực khi gói hiện tại hết hạn.
           </p>
           <button className="btn btn-primary full" onClick={confirmPlan}>
-            Gửi yêu cầu demo
+            Xác nhận hạ gói
           </button>
         </Modal>
       )}

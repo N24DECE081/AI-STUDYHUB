@@ -67,6 +67,16 @@ def _json_request(url, *, data=None, headers=None):
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        msg = "Google từ chối yêu cầu đăng nhập"
+        try:
+            err_data = json.loads(exc.read().decode("utf-8"))
+            detail = err_data.get("error_description") or err_data.get("error")
+            if detail:
+                msg = f"{msg}: {detail}"
+        except Exception:
+            pass
+        raise OAuthError(msg) from exc
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise OAuthError("Không thể xác thực với Google") from exc
     if not isinstance(payload, dict) or payload.get("error"):

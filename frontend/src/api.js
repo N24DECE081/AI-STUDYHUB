@@ -20,9 +20,9 @@ const publicAuthPaths = new Set([
 async function readError(response) {
   const text = await response.text();
   try {
-    return JSON.parse(text).error || text;
+    return JSON.parse(text);
   } catch {
-    return text || `HTTP ${response.status}`;
+    return { error: text || `HTTP ${response.status}` };
   }
 }
 
@@ -39,13 +39,21 @@ async function request(path, options = {}) {
     );
   }
   if (!response.ok) {
-    const message = await readError(response);
+    const detail = await readError(response);
     if (response.status === 401 && !publicAuthPaths.has(path)) {
       window.dispatchEvent(new Event("studyhub:session-expired"));
     }
-    throw new Error(message);
+    const error = new Error(detail.error || `HTTP ${response.status}`);
+    error.status = response.status;
+    error.code = detail.code;
+    error.detail = detail;
+    throw error;
   }
-  return response.json();
+  const result = await response.json();
+  if (options.method && /^(\/upload|\/documents\/|\/flashcards|\/quizzes|\/ai\/chat|\/ai-tutor\/chat|\/subscription)/.test(path)) {
+    window.dispatchEvent(new Event("studyhub:entitlements-changed"));
+  }
+  return result;
 }
 
 const postJson = (path, payload) =>
@@ -127,16 +135,16 @@ export const submitQuiz = (quizId, answers) =>
 
 export const getQuizHistory = () => request("/quizzes/history");
 
-export const askTutor = ({ documentId, question }) =>
+export const askTutor = ({ documentId, question, idempotencyKey = crypto.randomUUID() }) =>
   request("/ai/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
     body: JSON.stringify({ document_id: documentId, question }),
   });
-export const askAiTutor = ({ conversationId, message, mode, depth = "auto", model = "auto", fileIds = [] }) =>
+export const askAiTutor = ({ conversationId, message, mode, depth = "auto", model = "auto", fileIds = [], idempotencyKey = crypto.randomUUID() }) =>
   request("/ai-tutor/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
     body: JSON.stringify({
       conversation_id: conversationId,
       message,
@@ -147,6 +155,9 @@ export const askAiTutor = ({ conversationId, message, mode, depth = "auto", mode
     }),
   });
 export const getSubscription = () => request("/subscription");
+export const getEntitlements = () => request("/me/entitlements");
+export const getBasicQuizTopics = () => request("/quizzes/basic/topics");
+export const createBasicQuiz = (topic) => postJson("/quizzes/basic", { topic });
 export const checkoutSubscription = ({ plan, billingCycle }) =>
   request("/subscription/checkout", {
     method: "POST",

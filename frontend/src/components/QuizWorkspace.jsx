@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { createQuiz, getQuizHistory, submitQuiz } from "../api";
+import { createQuiz, createBasicQuiz, getBasicQuizTopics, getQuizHistory, submitQuiz } from "../api";
 import QuizFlashCard from "./QuizFlashCard";
 import QuizResultSummary from "./QuizResultSummary";
 
@@ -12,7 +12,7 @@ const fieldStyle = {
   color: "#172033",
 };
 
-export default function QuizWorkspace({ documents, user, initialDocumentId }) {
+export default function QuizWorkspace({ documents, user, initialDocumentId, entitlements }) {
   const [subjectFilter, setSubjectFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState(() => initialDocumentId ? [initialDocumentId] : []);
   const [quiz, setQuiz] = useState(null);
@@ -22,6 +22,8 @@ export default function QuizWorkspace({ documents, user, initialDocumentId }) {
   const [error, setError] = useState("");
   const [history, setHistory] = useState([]);
   const [currentQuestion, setCurrentQuestion] = useState(0);
+  const [topics, setTopics] = useState([]);
+  const canGenerate = entitlements?.capabilities?.document_quiz_generate?.allowed === true;
 
   const subjects = useMemo(() => {
     const seen = new Map();
@@ -41,6 +43,7 @@ export default function QuizWorkspace({ documents, user, initialDocumentId }) {
     let active = true;
     if (!user) return () => { active = false; };
     getQuizHistory().then((result) => { if (active) setHistory(result.items || []); }).catch(() => {});
+    getBasicQuizTopics().then((result) => { if (active) setTopics(result.items || []); }).catch(() => {});
     return () => { active = false; };
   }, [user]);
 
@@ -49,6 +52,7 @@ export default function QuizWorkspace({ documents, user, initialDocumentId }) {
   };
   const selectVisible = () => setSelectedIds((current) => current.length === filteredDocuments.length ? [] : filteredDocuments.map((document) => document.id));
   const generate = async () => {
+    if (!canGenerate) { setError("Cần gói Pro Sinh Viên"); return; }
     if (!selectedIds.length) {
       setError("Hãy chọn ít nhất một tài liệu.");
       return;
@@ -56,16 +60,20 @@ export default function QuizWorkspace({ documents, user, initialDocumentId }) {
     setLoading(true);
     setError("");
     setResult(null);
-    setAnswers({});
-    setCurrentQuestion(0);
     try {
       setQuiz(await createQuiz(selectedIds));
+      setAnswers({}); setCurrentQuestion(0);
     } catch (requestError) {
-      setQuiz(null);
       setError(requestError.message || "Không thể tạo Quiz.");
     } finally {
       setLoading(false);
     }
+  };
+  const generateSample = async (topic) => {
+    setLoading(true); setError("");
+    try { setQuiz(await createBasicQuiz(topic)); setAnswers({}); setResult(null); setCurrentQuestion(0); }
+    catch (requestError) { setError(requestError.message); }
+    finally { setLoading(false); }
   };
   const submit = async () => {
     if (!quiz) return;
@@ -108,10 +116,12 @@ export default function QuizWorkspace({ documents, user, initialDocumentId }) {
           ))}
           {!filteredDocuments.length && <p className="empty-state">Chưa có tài liệu trong môn học này. Hãy upload tài liệu trước.</p>}
         </div>
-        <button type="button" className="btn btn-primary" onClick={generate} disabled={loading || !filteredDocuments.length}>{loading ? "AI đang đọc tài liệu…" : `Tạo Quiz Card (${selectedIds.length} tài liệu)`}</button>
+        <button type="button" className="btn btn-primary" onClick={generate} disabled={loading || !filteredDocuments.length || !canGenerate}>{!canGenerate ? "Cần gói Pro Sinh Viên" : loading ? "AI đang đọc tài liệu…" : `Tạo Quiz Card (${selectedIds.length} tài liệu)`}</button>
+        <div className="quiz-basic-topics"><strong>Đề mẫu cơ bản</strong><div>{topics.map((item) => <button className="quiz-basic-topic" type="button" key={item.id} disabled={loading} onClick={() => generateSample(item.id)}>{item.title}</button>)}</div></div>
       </>}
 
       {quiz && <div className="quiz-question-list">
+        {quiz.sample && <p role="status">{quiz.sample_notice}</p>}
         <div className="quiz-result-head"><div><span className="eyebrow">BỘ QUIZ ĐANG LÀM · {quiz.questions.length} CÂU</span><h2>{quiz.title}</h2></div><button type="button" className="btn btn-ghost" onClick={() => { setQuiz(null); setResult(null); }}>Chọn lại tài liệu</button></div>
         <QuizFlashCard quiz={quiz} answers={answers} result={result} currentIndex={currentQuestion} loading={loading} onAnswer={(questionId, optionIndex) => setAnswers((current) => ({ ...current, [questionId]: optionIndex }))} onNavigate={setCurrentQuestion} onSubmit={submit} />
         {result && <QuizResultSummary quiz={quiz} result={result} onReviewQuestion={setCurrentQuestion} />}

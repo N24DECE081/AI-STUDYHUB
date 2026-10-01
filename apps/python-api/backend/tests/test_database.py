@@ -16,7 +16,8 @@ EXPECTED_TABLES = {
     "chat_messages", "document_chunks", "user_progress", "subscription_changes",
     # AI Tutor: hội thoại, đánh giá năng lực, lộ trình, bài tập và bài nộp
     "tutor_conversations", "tutor_messages", "tutor_assessments",
-    "tutor_roadmaps", "tutor_exercises", "tutor_submissions"
+    "tutor_roadmaps", "tutor_exercises", "tutor_submissions",
+    "entitlement_usage", "entitlement_reservations",
 }
 
 
@@ -152,7 +153,7 @@ class DatabasePhase1Tests(unittest.TestCase):
         seed(self.database)
         seed(self.database)
         self.assertEqual(self.database.fetch_one("SELECT COUNT(*) FROM users")[0], 3)
-        self.assertEqual(self.database.fetch_one("SELECT COUNT(*) FROM subjects")[0], 4)
+        self.assertEqual(self.database.fetch_one("SELECT COUNT(*) FROM subjects")[0], 0)
         self.assertEqual(self.database.fetch_one("SELECT COUNT(*) FROM plans")[0], 3)
 
     def test_expected_indexes_and_triggers(self):

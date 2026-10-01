@@ -129,12 +129,10 @@ ENTRIES = [
         'answer': (
             '**Gói Master Thủ Khoa — 299.000đ/tháng** (gói cao cấp nhất, mở khoá toàn bộ đặc quyền):\n'
             '- **Tất cả quyền lợi của gói Pro 199.000đ**\n'
-            '- Phòng luyện thi **Mock Exam** mô phỏng đề thi thật đại học\n'
-            '- **Nova AI phân tích lỗ hổng kiến thức 1-1** & gợi ý khắc phục\n'
-            '- **Nova AI cố vấn chuyên sâu đồ án tốt nghiệp & review CV thực tập**\n'
+            '- **Sắp có:** Mock Exam, phân tích lỗ hổng kiến thức và cố vấn đồ án/CV.\n'
             '- **Huy hiệu Thủ Khoa StudyHub** độc quyền trên hồ sơ\n'
             '- Hỗ trợ học tập ưu tiên **24/7 qua Zalo / Hotline VIP**\n'
-            '- **Tải toàn bộ bộ thẻ và đề thi offline**'
+            '- **Sắp có:** xuất bộ thẻ và đề thi offline, Nova AI Voice.'
         ),
     },
     {
@@ -165,8 +163,8 @@ ENTRIES = [
             '- **Bám sát tài liệu riêng** của bạn, không giới hạn lượt hỏi ở gói Pro/Master\n'
             '- **Giải thích sâu các câu làm sai** ngay trong màn hình kết quả Quiz\n'
             '- **Chủ động gợi ý phiên tập trung** trước khi bắt đầu bài học khó\n'
-            '- Phân tích **lỗ hổng kiến thức 1-1**, cố vấn **đồ án tốt nghiệp & review CV** (gói Master)\n'
-            '- Sắp tới có **Nova AI Voice** — luyện tập tương tác bằng giọng nói, đọc tài liệu rảnh tay (Release 3)'
+            '- **Sắp có:** phân tích lỗ hổng kiến thức 1-1 và cố vấn đồ án/CV.\n'
+            '- **Sắp có:** Nova AI Voice luyện tập bằng giọng nói và đọc tài liệu.'
         ),
     },
     {
@@ -180,7 +178,7 @@ ENTRIES = [
             'Giới hạn lượt hỏi Nova AI Tutor theo gói:\n'
             '- **Gói Khởi Động 0đ**: 10 câu/ngày.\n'
             '- **Gói Pro Sinh Viên & Master**: không giới hạn lượt hỏi, bám sát tài liệu của bạn.\n'
-            '**Nova AI Voice** (đọc tài liệu, luyện tập bằng giọng nói) chưa có ở gói 0đ — thuộc Release 3.'
+            '**Nova AI Voice: Sắp có**, hiện chưa mở cho gói nào.'
         ),
     },
     {
@@ -198,7 +196,7 @@ ENTRIES = [
             '- **Tự động trích xuất Flashcard 3D & câu hỏi trắc nghiệm chỉ với 1 click**\n'
             '- Tự động **gắn nhãn kiến thức thông minh** từ nội dung tài liệu\n'
             '- **Thư viện chia sẻ học liệu công khai** giữa các trường/lớp (Release 3)\n'
-            '- **Tải toàn bộ bộ thẻ và đề thi để học offline** (gói Master)'
+            '- **Sắp có:** xuất bộ thẻ và đề thi để học offline.'
         ),
     },
     {
@@ -277,7 +275,7 @@ ENTRIES = [
             'dự đoán phổ điểm', 'đề thi', 'chứng chỉ', 'luyện thi',
         ],
         'answer': (
-            '**Phòng luyện thi Mock Exam** (đặc quyền gói Master Thủ Khoa):\n'
+            '**Phòng luyện thi Mock Exam: Sắp có** (dự kiến cho gói Master Thủ Khoa):\n'
             '- Mô phỏng **đề thi thật đại học**, luyện tập thực chiến\n'
             '- **Phân tích điểm yếu tức thì**, chỉ rõ lỗ hổng kiến thức cần bù đắp\n'
             '- **AI dự đoán phổ điểm** thi tốt nghiệp/cuối kỳ\n'
@@ -315,8 +313,8 @@ ENTRIES = [
         ],
         'answer': (
             'StudyHub hướng tới:\n'
-            '- **Sinh viên đại học/cao đẳng (trọng tâm)**: quản lý tài liệu, học sâu chuyên ngành, giữ kỷ luật tự học, '
-            'mục tiêu GPA 3.6+, săn học bổng, luyện Mock Exam, làm đồ án và review CV thực tập.\n'
+            '- **Sinh viên đại học/cao đẳng (trọng tâm)**: quản lý tài liệu, học sâu chuyên ngành, giữ kỷ luật tự học; '
+            'Mock Exam và cố vấn đồ án/CV đang sắp có.\n'
             '- **Học sinh THPT**: ôn luyện kiến thức, luyện thi chứng chỉ/đại học, chống xao nhãng khi tự học ở nhà.\n'
             '- **Giảng viên / Trợ giảng (mở rộng)**: quản lý lớp, chia sẻ tài liệu, trích xuất ngân hàng câu hỏi tự động từ slide.\n'
             '- **Tất cả người dùng**: quản lý tài khoản, nâng cấp gói hội viên.'
@@ -338,7 +336,7 @@ ENTRIES = [
             '- **Trích xuất 1-click** biến slide/giáo trình thành bộ thẻ và đề trắc nghiệm, **tiết kiệm ~80% thời gian tổng hợp**\n'
             '- **Mindmap + Micro-learning** phân định rõ ngày nào học nội dung gì\n'
             '- **Nova AI đồng hành 24/7** giải đáp khi gặp bài khó, giải thích vì sao sai\n'
-            '- **Phân tích lỗ hổng kiến thức 1-1** trước khi vào phòng thi thật\n'
+            '- **Sắp có:** phân tích lỗ hổng kiến thức 1-1 trước khi vào phòng thi thật\n'
             'Lợi ích kỳ vọng: GPA 3.6+, săn học bổng, duy trì kỷ luật qua Streak/XP, tự tin trước kỳ thi, '
             'sẵn sàng đi làm với đồ án & CV chỉn chu.'
         ),
@@ -402,9 +400,9 @@ ENTRIES = [
             'xem offline', 'điện thoại', 'mobile',
         ],
         'answer': (
-            '**Học offline & đồng bộ**:\n'
+            '**Đồng bộ và xuất offline** (xuất offline sắp có):\n'
             '- **Lưu lịch sử ôn tập đồng bộ đa thiết bị** (Gói Pro trở lên)\n'
-            '- **Tải toàn bộ bộ thẻ và đề thi để học ngoại tuyến (Offline Mode)** — đặc quyền Gói Master\n'
+            '- **Sắp có:** xuất bộ thẻ và đề thi để học ngoại tuyến (Offline Mode).\n'
             '- Trải nghiệm web app đồng bộ giữa máy tính và điện thoại khi cùng tài khoản'
         ),
     },
@@ -435,7 +433,7 @@ ENTRIES = [
             '**Công nghệ & hạ tầng StudyHub**:\n'
             '- Hạ tầng **Nova AI (LLM bám sát tài liệu cá nhân)** + thuật toán **Spaced Repetition**\n'
             '- Hệ thống **Cloud server**, Web App, tính năng khoá màn hình Focus Lock, cơ sở dữ liệu học liệu số\n'
-            '- **Ngân hàng đề thi Mock Exam** mô phỏng format các trường đại học\n'
+            '- **Sắp có:** ngân hàng đề thi Mock Exam mô phỏng format các trường đại học\n'
             '- Đối tác hạ tầng: nhà cung cấp **API LLM** và cloud (**Google Cloud/AWS/Azure**) lưu trữ tài liệu người dùng\n'
             '- Đối tác thanh toán: Momo, ZaloPay, VNPAY, thẻ ngân hàng/Visa\n'
             '- Đội ngũ cốt lõi: kỹ sư AI/Fullstack, Product Designer (UX/UI), cố vấn học thuật & review CV'
@@ -476,8 +474,8 @@ ENTRIES = [
             '- **Lộ trình Micro-learning theo ngày thi**: nhập mục tiêu điểm và số ngày còn lại, hệ thống tự chia '
             'nhịp học theo tuần và có **Boss môn học** để vượt ải\n'
             '- **Focus Lock** đo chính xác từng phút tập trung, cộng **Streak/XP** và bảng xếp hạng để giữ kỷ luật\n'
-            '- **Mock Exam mô phỏng format đề của trường** và **phân tích lỗ hổng kiến thức 1-1** trước khi thi thật\n'
-            '- **Học được cả khi mất mạng**: tải bộ thẻ và đề thi về học offline (gói Master)\n'
+            '- **Sắp có:** Mock Exam và phân tích lỗ hổng kiến thức 1-1.\n'
+            '- **Sắp có:** xuất bộ thẻ và đề thi để học offline.\n'
             '- **Bắt đầu miễn phí 0đ**, chỉ nâng cấp 199.000đ hoặc 299.000đ khi cần — dùng trên cả máy tính và điện thoại'
         ),
     },

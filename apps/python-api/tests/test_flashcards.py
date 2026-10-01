@@ -1,5 +1,8 @@
 import io
 import json
+import sqlite3
+from contextlib import closing
+from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 from backend.app.flashcards import service
@@ -83,6 +86,12 @@ class FlashcardContractTest(unittest.TestCase):
 
 class FlashcardHTTPTest(unittest.TestCase):
     @classmethod
+    def grant_plus(cls, email):
+        with closing(sqlite3.connect(Path(cls.tmp.name) / 'integration.db')) as connection:
+            connection.execute("UPDATE subscriptions SET plan_id=(SELECT id FROM plans WHERE lower(name)='standard'), status='active' WHERE user_id=(SELECT id FROM users WHERE email=?)", (email,))
+            connection.execute("INSERT INTO subscriptions(user_id,plan_id,status) SELECT u.id,p.id,'active' FROM users u,plans p WHERE u.email=? AND lower(p.name)='standard' AND NOT EXISTS(SELECT 1 FROM subscriptions WHERE user_id=u.id)", (email,))
+            connection.commit()
+    @classmethod
     def setUpClass(cls):
         integration.ServerIntegrationTest.setUpClass.__func__(cls)
     @classmethod
@@ -120,6 +129,7 @@ class FlashcardHTTPTest(unittest.TestCase):
         self.assertEqual(self.request('/api/flashcards', 'POST', deck(), headers)[0], 201)
 
     def test_preview_validation_and_no_implicit_save(self):
+        self.grant_plus('teacher@studyhub.local')
         cookie = self.login_cookie('teacher@studyhub.local', 'Teacher123!')
         def upload(name, content):
             body = b'--preview\r\nContent-Disposition: form-data; name="file"; filename="'+name.encode()+b'"\r\nContent-Type: application/octet-stream\r\n\r\n'+content+b'\r\n--preview--\r\n'
@@ -143,6 +153,7 @@ class FlashcardHTTPTest(unittest.TestCase):
         self.assertEqual(self.request('/api/documents',headers=headers)[2],before)
 
     def test_preview_pdf_office_csv_and_size_limit(self):
+        self.grant_plus('teacher@studyhub.local')
         import zipfile
         from pypdf import PdfWriter
         from pypdf.generic import DictionaryObject, NameObject, DecodedStreamObject
@@ -169,6 +180,6 @@ class FlashcardHTTPTest(unittest.TestCase):
             with zipfile.ZipFile(content,'w') as archive: archive.writestr(entry,xml)
             with self.subTest(name=name): self.assertEqual(upload(name,content.getvalue())[0],200)
         self.assertEqual(upload('notes.csv',b'term,meaning\nhello,greeting')[0],200)
-        self.assertEqual(upload('large.txt',b'x'*(20*1024*1024+1))[0],413)
+        self.assertEqual(upload('large.txt',b'x'*(50*1024*1024+1))[0],413)
         for name in ('broken.docx','broken.pptx','broken.xlsx','legacy.doc','legacy.ppt'):
             self.assertEqual(upload(name,b'broken')[0],422)

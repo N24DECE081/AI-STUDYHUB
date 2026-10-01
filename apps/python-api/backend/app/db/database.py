@@ -260,6 +260,8 @@ class Database:
             self._ensure_columns(conn)
             self._ensure_oauth_providers(conn)
             self._ensure_user_scoped_subject_codes(conn)
+            from ..entitlements.service import migrate_catalog
+            migrate_catalog(conn)
             conn.commit()
 
     def execute(self, sql: str, params: Iterable = ()) -> int:

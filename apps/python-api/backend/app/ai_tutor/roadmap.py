@@ -261,6 +261,45 @@ def summarize_answers(answers: list[dict], questions: list[dict] | None = None) 
     }
 
 
+def build_standard_roadmap(payload: dict) -> dict:
+    """Fixed study template. Does not call a model or the personalized pipeline."""
+    subject = str(payload.get('subject') or '').strip() or 'Kiến thức nền'
+    goal = str(payload.get('goal') or '').strip() or 'Nắm vững kiến thức cơ bản'
+    current = normalize_level(payload.get('current_level'))
+    topics = [str(item).strip() for item in (payload.get('topics') or []) if str(item).strip()][:4]
+    if not topics:
+        topics = [subject]
+    lessons = []
+    for index, topic in enumerate(topics, start=1):
+        lessons.append({
+            'key': f'm1-l{index}',
+            'title': topic,
+            'objectives': [f'Ôn khái niệm chính của {topic}', f'Làm một bài tập ngắn về {topic}'],
+            'examples': [f'Ví dụ mẫu cho {topic}, không lấy từ tài liệu riêng.'],
+            'estimated_minutes': 40,
+        })
+    return {
+        'title': f'Lộ trình tiêu chuẩn: {subject}',
+        'summary': 'Lộ trình mẫu theo chủ đề. Đây không phải lộ trình AI cá nhân hóa theo chuyên ngành.',
+        'subject': subject,
+        'goal': goal,
+        'current_level': current,
+        'target_level': normalize_level(payload.get('target_level'), 'intermediate'),
+        'pace': normalize_pace(payload.get('pace')),
+        'topics': topics,
+        'roadmap_kind': 'standard',
+        'modules': [{
+            'key': 'm1',
+            'title': 'Nhịp học tiêu chuẩn',
+            'difficulty': current,
+            'lessons': lessons,
+            'quiz': {'question_count': 3, 'max_score': 10},
+            'assessment': {'type': 'short_answer', 'max_score': 10},
+        }],
+        'focus_weaknesses': [],
+    }
+
+
 def build_roadmap(payload: dict, *, engine) -> dict:
     """Ask the engine for a roadmap, then normalize it into the wire contract.
 
@@ -400,6 +439,7 @@ def _roadmap_from_engine(payload: dict, *, engine) -> dict:
         'target_level': target,
         'pace': pace,
         'topics': list(topics),
+        'roadmap_kind': 'personalized',
         'modules': cleaned,
         'focus_weaknesses': [str(item) for item in (raw.get('focus_weaknesses') or weaknesses)][:4],
     }

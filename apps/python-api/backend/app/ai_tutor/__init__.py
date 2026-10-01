@@ -2,7 +2,7 @@
 from .engine import EngineError, LocalEngine, ProviderEngine, get_engine
 from .grading import GradingError, grade_exercise, validate_result
 from .roadmap import (RoadmapError, adapt, build_assessment_questions, build_exercises,
-                      build_roadmap, start_assessment, summarize_answers)
+                      build_roadmap, build_standard_roadmap, start_assessment, summarize_answers)
 
 __all__ = [
     'EngineError',
@@ -14,6 +14,7 @@ __all__ = [
     'build_assessment_questions',
     'build_exercises',
     'build_roadmap',
+    'build_standard_roadmap',
     'get_engine',
     'grade_exercise',
     'start_assessment',

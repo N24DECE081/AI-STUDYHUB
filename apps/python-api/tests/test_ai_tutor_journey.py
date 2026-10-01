@@ -212,6 +212,10 @@ class AITutorJourneyTests(unittest.TestCase):
         for mode in ('explain', 'solve', 'hint', 'summarize', 'generate_quiz'):
             status, body = self.api('/api/ai-tutor/chat', 'POST',
                                     {'message': f'Kiểm tra chế độ {mode}', 'mode': mode})
+            if mode == 'generate_quiz':
+                self.assertEqual(status, 403, body)
+                self.assertEqual(body['code'], 'feature_not_in_plan')
+                continue
             self.assertEqual(status, 200, body)
             self.assertTrue(body['content'].strip(), mode)
         status, body = self.api('/api/ai-tutor/chat', 'POST', {'message': 'x', 'mode': 'nonsense'})
@@ -332,7 +336,7 @@ class AITutorJourneyTests(unittest.TestCase):
         self.assertTrue(built['modules'])
         self.assertTrue(built['title'])
         self.assertTrue(built['summary'])
-        self.assertIn('Nhịp học', built['summary'])
+        self.assertEqual(built['roadmap_kind'], 'standard')
         self.assertNotIn('Pace', built['summary'])
         self.assertIn('Kế thừa', built['topics'])
         status, roadmap = self.api('/api/ai-tutor/roadmap')

@@ -46,6 +46,10 @@ class MySQLConnection:
     def __init__(self, connection):
         self.connection = connection
 
+    @property
+    def in_transaction(self):
+        return self.connection.in_transaction
+
     @staticmethod
     def _sql(sql: str) -> str:
         return sql.replace("?", "%s")
@@ -131,6 +135,10 @@ class MySQLDatabase:
             "visibility": "VARCHAR(20)", "billing_cycle": "VARCHAR(10)",
             "session_key": "VARCHAR(64)",
             "cache_key": "VARCHAR(64)",
+            "feature": "VARCHAR(64)",
+            "usage_date": "VARCHAR(32)",
+            "request_key": "VARCHAR(80)",
+            "fingerprint": "VARCHAR(64)",
         }
         for column, mysql_type in indexed_varchars.items():
             schema = re.sub(rf"(\b{column}\s+)LONGTEXT\b", rf"\g<1>{mysql_type}", schema)
@@ -203,6 +211,8 @@ class MySQLDatabase:
             except Exception as exc:
                 if "1091" not in str(exc) and "check that column/key exists" not in str(exc).lower():
                     raise
+            from ..entitlements.service import migrate_catalog
+            migrate_catalog(connection)
             for statement in (
                 "CREATE UNIQUE INDEX ux_subjects_owner_code ON subjects(created_by, code)",
                 "CREATE INDEX ix_subjects_owner_name ON subjects(created_by, name)",

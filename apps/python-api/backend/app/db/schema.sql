@@ -540,3 +540,35 @@ CREATE TABLE IF NOT EXISTS flashcard_decks (
     payload TEXT NOT NULL,
     PRIMARY KEY (user_id, id)
 );
+
+CREATE TABLE IF NOT EXISTS entitlement_usage (
+    user_id INTEGER NOT NULL,
+    feature TEXT NOT NULL,
+    usage_date TEXT NOT NULL,
+    used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, feature, usage_date),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS entitlement_reservations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    feature TEXT NOT NULL,
+    usage_date TEXT NOT NULL,
+    request_key TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('reserved', 'finalized', 'released', 'expired')),
+    result_json TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(user_id, request_key),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS ix_entitlement_reservations_quota
+    ON entitlement_reservations(user_id, feature, usage_date, status);
+
+INSERT OR IGNORE INTO schema_migrations(version,description)
+VALUES(11,'Plan entitlements, tutor quota ledger and Plus unlimited migration');
