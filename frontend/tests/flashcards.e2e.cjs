@@ -184,3 +184,46 @@ test('every palette color persists and cards without an override inherit the dec
   await page.reload(); await page.getByRole('button',{name:'Bắt đầu ôn tập'}).click();
   await expect(page.locator('.study-card')).toHaveCSS('border-top-color','rgb(100, 116, 139)');
 });
+
+test('library upload suggests a content title and saves user edits', async ({ page, context }) => {
+  await signIn(context,'library-title');
+  const subject = await context.request.post('/api/subjects',{data:{code:'OOP',name:'Lập trình Java'}});
+  expect(subject.status()).toBe(201);
+  await page.goto('/app/materials');
+  await page.getByRole('button',{name:'Upload tài liệu mới'}).click();
+  await page.locator('#upload-file').setInputFiles({name:'scan001.txt',mimeType:'text/plain',buffer:Buffer.from('[PAGE:1]\nTRƯỜNG ĐẠI HỌC ABC\n# Chương 2: Lập trình hướng đối tượng\nKế thừa và đa hình trong Java.')});
+  await expect(page.locator('#upload-title')).toHaveValue('Chương 2: Lập trình hướng đối tượng');
+  await expect(page.getByRole('status')).toContainText('Tên được trích');
+  expect(await (await context.request.get('/api/documents')).json()).toEqual([]);
+  await page.locator('#upload-title').fill('Java OOP — tài liệu ôn thi');
+  await page.getByRole('button',{name:'Tải lên & Xử lý'}).click();
+  await expect(page.getByRole('heading',{name:'Tải lên Tài liệu Mới'})).toBeHidden();
+  await page.reload();
+  await expect(page.getByRole('heading',{name:'Java OOP — tài liệu ôn thi',exact:true})).toBeVisible();
+  const documents=await (await context.request.get('/api/documents')).json();
+  expect(documents[0].title).toBe('Java OOP — tài liệu ôn thi');
+});
+
+test('library suggestions never overwrite typing or a more recently selected file', async ({page,context})=>{
+  await signIn(context,'library-race');
+  await page.goto('/app/materials');await page.getByRole('button',{name:'Upload tài liệu mới'}).click();
+  let pending=[];
+  await page.route('**/api/documents/preview',route=>{pending.push(route);});
+  const file=name=>({name,mimeType:'text/plain',buffer:Buffer.from('Sample content')});
+  await page.locator('#upload-file').setInputFiles(file('first.txt'));
+  await expect.poll(()=>pending.length).toBe(1);
+  await page.locator('#upload-title').fill('Tên tự nhập');
+  await page.locator('#upload-description').fill('Mô tả tự nhập');
+  await pending[0].fulfill({json:{suggestion:{title:'Gợi ý AI',description:'Mô tả AI'},warning:''}});
+  await expect(page.getByRole('button',{name:'Dùng tên gợi ý'})).toBeVisible();
+  await expect(page.locator('#upload-title')).toHaveValue('Tên tự nhập');
+  await expect(page.locator('#upload-description')).toHaveValue('Mô tả tự nhập');
+  await page.getByRole('button',{name:'Dùng tên gợi ý'}).click();
+  await page.locator('#upload-file').setInputFiles(file('second.txt'));await expect.poll(()=>pending.length).toBe(2);
+  await page.locator('#upload-file').setInputFiles(file('third.txt'));await expect.poll(()=>pending.length).toBe(3);
+  await pending[2].fulfill({json:{suggestion:{title:'Tài liệu mới nhất',description:'Nội dung mới'},warning:''}});
+  await expect(page.locator('#upload-title')).toHaveValue('Tài liệu mới nhất');
+  await pending[1].fulfill({json:{suggestion:{title:'Kết quả cũ',description:'Nội dung cũ'},warning:''}}).catch(()=>{});
+  await expect(page.locator('#upload-title')).toHaveValue('Tài liệu mới nhất');
+  await expect(page.locator('#upload-description')).toHaveValue('Mô tả tự nhập');
+});

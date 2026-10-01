@@ -198,3 +198,8 @@ export const previewFlashcardDocument = (file, signal) => {
   const body = new FormData(); body.append('file', file);
   return request('/flashcards/preview', { method: 'POST', body, signal });
 };
+
+export const previewDocumentMetadata = (file, signal) => {
+  const body = new FormData(); body.append('file', file);
+  return request('/documents/preview', { method: 'POST', body, signal });
+};

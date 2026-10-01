@@ -29,6 +29,20 @@ class FlashcardContractTest(unittest.TestCase):
         result['cards'].append(dict(result['cards'][0]))
         with self.assertRaises(ValueError): service.normalize_deck(result)
 
+    def test_document_title_ignores_page_and_institution_headers(self):
+        content = '[PAGE:1]\nTRƯỜNG ĐẠI HỌC ABC\nKHOA CÔNG NGHỆ THÔNG TIN\n# Chương 2: Lập trình hướng đối tượng\nKế thừa và đa hình trong Java.'
+        self.assertEqual(service.content_title(content), 'Chương 2: Lập trình hướng đối tượng')
+        result = service.document_suggestion(content, 'scan001.pdf', Mock(complete_json=Mock(side_effect=TimeoutError)))
+        self.assertEqual(result['suggestion']['title'], 'Chương 2: Lập trình hướng đối tượng')
+        self.assertTrue(result['warning'])
+
+    def test_document_ai_title_and_flashcard_title_survive_invalid_cards(self):
+        engine = Mock(complete_json=Mock(return_value={'title': 'Kế thừa trong Java', 'description': 'Lớp cha và lớp con', 'cards': []}))
+        result = service.document_suggestion('Chương 2\nJava', 'file.pdf', engine)
+        self.assertEqual(result['suggestion']['title'], 'Kế thừa trong Java')
+        self.assertEqual(engine.complete_json.call_args.kwargs['task'], 'document_metadata')
+        self.assertEqual(service.suggest('Chương 2\nJava', 'file.pdf', engine)['suggestion']['name'], 'Kế thừa trong Java')
+
     def test_bad_card_data(self):
         for value in (None, [], {}, {'name': 'x', 'cards': []}, {'name': 'x', 'cards': ['bad']}, {'name': 'x', 'cards': [{'front': 'x'}]}):
             with self.subTest(value=value), self.assertRaises(ValueError): service.normalize_deck(value)
@@ -116,6 +130,17 @@ class FlashcardHTTPTest(unittest.TestCase):
             status, _, result = upload(name, content)
             self.assertEqual(status, 200); self.assertTrue(result['suggestion']['cards'])
         self.assertEqual(self.request('/api/flashcards', headers={'Cookie': cookie})[2], [])
+
+    def test_library_preview_returns_title_without_persisting_document(self):
+        self.assertEqual(self.request('/api/documents/preview', 'POST', b'')[0], 401)
+        headers = {'Cookie': self.login_cookie('teacher@studyhub.local', 'Teacher123!')}
+        before = self.request('/api/documents', headers=headers)[2]
+        content = '[PAGE:1]\nTRƯỜNG ĐẠI HỌC ABC\n# Chương 2: Java OOP\nKế thừa trong Java.'.encode()
+        body = b'--preview\r\nContent-Disposition: form-data; name="file"; filename="scan.txt"\r\n\r\n'+content+b'\r\n--preview--\r\n'
+        status, _, response = self.request('/api/documents/preview','POST',body,{**headers,'Content-Type':'multipart/form-data; boundary=preview'})
+        self.assertEqual(status,200,response)
+        self.assertEqual(response['suggestion']['title'],'Chương 2: Java OOP')
+        self.assertEqual(self.request('/api/documents',headers=headers)[2],before)
 
     def test_preview_pdf_office_csv_and_size_limit(self):
         import zipfile
