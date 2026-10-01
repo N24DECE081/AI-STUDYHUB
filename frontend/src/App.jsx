@@ -64,6 +64,8 @@ import {
   PencilSquareIcon,
   SunIcon,
   MoonIcon,
+  EyeIcon,
+  EyeSlashIcon,
 } from "@heroicons/react/24/outline";
 
 const PLANS = {
@@ -290,6 +292,9 @@ function Modal({ title, children, onClose, icon, subtitle, className = "" }) {
 }
 
 function StudyHubAuthScreen({ mode, user, oauthStatus, error, identifier, onBack, onMode, onOAuth, onSubmit }) {
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
+  
   const heading = {
     login: ["Chào mừng đến StudyHub", "Đăng nhập để tiếp tục hành trình học tập."],
     register: ["Tạo tài khoản StudyHub", "Bắt đầu xây dựng không gian học tập của bạn."],
@@ -341,7 +346,23 @@ function StudyHubAuthScreen({ mode, user, oauthStatus, error, identifier, onBack
         {mode === "login" && (
           <form className="studyhub-auth__form" onSubmit={onSubmit}>
             <label>Email<input name="email" type="email" autoComplete="email" required /></label>
-            <label>Mật khẩu<input name="password" type="password" autoComplete="current-password" required /></label>
+            <label>
+              Mật khẩu
+              <div style={{ position: "relative" }}>
+                <input name="password" type={showPassword ? "text" : "password"} autoComplete="current-password" required style={{ paddingRight: "40px" }} />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                  style={{
+                    position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)",
+                    background: "none", border: "none", cursor: "pointer", padding: "0", color: "var(--text-light, #888)", display: "flex"
+                  }}
+                >
+                  {showPassword ? <EyeSlashIcon style={{ width: "20px" }} aria-hidden="true" /> : <EyeIcon style={{ width: "20px" }} aria-hidden="true" />}
+                </button>
+              </div>
+            </label>
             <button type="button" className="studyhub-auth__link studyhub-auth__forgot" onClick={() => onMode("forgot")}>Quên mật khẩu?</button>
             <button className="studyhub-auth__submit">Đăng nhập</button>
             <p>Chưa có tài khoản? <button type="button" className="studyhub-auth__link" onClick={() => onMode("register")}>Đăng ký</button></p>
@@ -354,9 +375,41 @@ function StudyHubAuthScreen({ mode, user, oauthStatus, error, identifier, onBack
               <label>Last name<input name="lastName" autoComplete="family-name" required /></label>
               <label>First name<input name="firstName" autoComplete="given-name" required /></label>
             </div>
-            <label>Mật khẩu<input name="password" type="password" autoComplete="new-password" minLength="8" required /></label>
+            <label>
+              Mật khẩu
+              <div style={{ position: "relative" }}>
+                <input name="password" type={showPassword ? "text" : "password"} autoComplete="new-password" minLength="8" required style={{ paddingRight: "40px" }} />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                  style={{
+                    position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)",
+                    background: "none", border: "none", cursor: "pointer", padding: "0", color: "var(--text-light, #888)", display: "flex"
+                  }}
+                >
+                  {showPassword ? <EyeSlashIcon style={{ width: "20px" }} aria-hidden="true" /> : <EyeIcon style={{ width: "20px" }} aria-hidden="true" />}
+                </button>
+              </div>
+            </label>
             <small>Mật khẩu gồm ít nhất 8 ký tự, 1 chữ in hoa, 1 số và 1 ký tự đặc biệt.</small>
-            <label>Nhập lại mật khẩu<input name="passwordConfirm" type="password" autoComplete="new-password" minLength="8" required /></label>
+            <label>
+              Nhập lại mật khẩu
+              <div style={{ position: "relative" }}>
+                <input name="passwordConfirm" type={showPasswordConfirm ? "text" : "password"} autoComplete="new-password" minLength="8" required style={{ paddingRight: "40px" }} />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordConfirm(!showPasswordConfirm)}
+                  aria-label={showPasswordConfirm ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                  style={{
+                    position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)",
+                    background: "none", border: "none", cursor: "pointer", padding: "0", color: "var(--text-light, #888)", display: "flex"
+                  }}
+                >
+                  {showPasswordConfirm ? <EyeSlashIcon style={{ width: "20px" }} aria-hidden="true" /> : <EyeIcon style={{ width: "20px" }} aria-hidden="true" />}
+                </button>
+              </div>
+            </label>
             <label>Gmail<input name="email" type="email" autoComplete="email" required /></label>
             <button className="studyhub-auth__submit">Tạo tài khoản</button>
             <p>Đã có tài khoản? <button type="button" className="studyhub-auth__link" onClick={() => onMode("login")}>Đăng nhập</button></p>
@@ -392,9 +445,41 @@ function StudyHubAuthScreen({ mode, user, oauthStatus, error, identifier, onBack
 
         {mode === "reset" && (
           <form className="studyhub-auth__form" onSubmit={onSubmit}>
-            <label>Mật khẩu mới<input name="password" type="password" autoComplete="new-password" minLength="8" required /></label>
+            <label>
+              Mật khẩu mới
+              <div style={{ position: "relative" }}>
+                <input name="password" type={showPassword ? "text" : "password"} autoComplete="new-password" minLength="8" required style={{ paddingRight: "40px" }} />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                  style={{
+                    position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)",
+                    background: "none", border: "none", cursor: "pointer", padding: "0", color: "var(--text-light, #888)", display: "flex"
+                  }}
+                >
+                  {showPassword ? <EyeSlashIcon style={{ width: "20px" }} aria-hidden="true" /> : <EyeIcon style={{ width: "20px" }} aria-hidden="true" />}
+                </button>
+              </div>
+            </label>
             <small>Mật khẩu gồm ít nhất 8 ký tự, 1 chữ in hoa, 1 số và 1 ký tự đặc biệt.</small>
-            <label>Nhập lại mật khẩu<input name="passwordConfirm" type="password" autoComplete="new-password" minLength="8" required /></label>
+            <label>
+              Nhập lại mật khẩu
+              <div style={{ position: "relative" }}>
+                <input name="passwordConfirm" type={showPasswordConfirm ? "text" : "password"} autoComplete="new-password" minLength="8" required style={{ paddingRight: "40px" }} />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordConfirm(!showPasswordConfirm)}
+                  aria-label={showPasswordConfirm ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+                  style={{
+                    position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)",
+                    background: "none", border: "none", cursor: "pointer", padding: "0", color: "var(--text-light, #888)", display: "flex"
+                  }}
+                >
+                  {showPasswordConfirm ? <EyeSlashIcon style={{ width: "20px" }} aria-hidden="true" /> : <EyeIcon style={{ width: "20px" }} aria-hidden="true" />}
+                </button>
+              </div>
+            </label>
             <button className="studyhub-auth__submit">Lưu mật khẩu mới</button>
           </form>
         )}
