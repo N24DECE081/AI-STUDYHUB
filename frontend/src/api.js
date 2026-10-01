@@ -111,11 +111,11 @@ export async function uploadDocument({
   return request(`/documents/${result.document_id}`);
 }
 
-export const createQuiz = (documentIds) =>
+export const createQuiz = (documentIds, questionCount = 10) =>
   request("/quizzes/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ document_ids: documentIds }),
+    body: JSON.stringify({ document_ids: documentIds, question_count: questionCount }),
   });
 
 export const submitQuiz = (quizId, answers) =>
