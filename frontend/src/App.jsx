@@ -36,14 +36,13 @@ import {
   verifyPasswordOtp,
 } from "./api";
 import AITutorPage from "./components/ai-tutor/AITutorPage";
-import QuizWorkspace from "./components/QuizWorkspace";
+import QuizCardPage from "./components/quiz-card/QuizCardPage";
 import LearningRoadmapPage from "./components/LearningRoadmapPage";
 import PaymentCheckout from "./components/PaymentCheckout";
 import ProgressDashboard from "./components/progress/ProgressDashboard";
 import { EMPTY_PROGRESS_ANALYTICS } from "./components/progress/progressDefaults";
 import StudyDeckSession from "./components/StudyDeckSession";
 import FlashcardDeckForm from "./components/flashcard/FlashcardDeckForm";
-import { normalizeFlashcardColor, rememberedCount } from "./components/flashcard/flashcardTheme";
 import { buildSubjectHashMap, findSubject, quickSortSubjects } from "./utils/subjectAlgorithms";
 import {
   ArrowRightIcon,
@@ -61,7 +60,6 @@ import {
   XMarkIcon,
   SparklesIcon,
   TrashIcon,
-  PencilSquareIcon,
   SunIcon,
   MoonIcon,
 } from "@heroicons/react/24/outline";
@@ -1109,9 +1107,8 @@ export default function App() {
     getStreak().then(setStreak).catch(() => {});
   };
   const removeFlashcardDeck = async (deck) => {
-    if (!window.confirm(`Xóa bộ thẻ “${deck.name}”?`)) return;
-    try { await deleteFlashcardDeck(deck.id); setQuizDecks((current) => current.filter((item) => item.id !== deck.id)); }
-    catch (error) { notify(error.message); }
+    await deleteFlashcardDeck(deck.id);
+    setQuizDecks((current) => current.filter((item) => item.id !== deck.id));
   };
   const requestPlan = (plan) => {
     if (requireLogin() || plan === subscription.plan) return;
@@ -1572,47 +1569,12 @@ export default function App() {
           </section>
         )}
         {view === "quiz" && (
-          <section className="quiz-page" aria-labelledby="quiz-title">
-            <header className="quiz-hero reveal">
-              <div className="quiz-hero-copy">
-                <span className="quiz-kicker"><RectangleStackIcon aria-hidden="true" /> 3D Flashcards & Lặp lại Ngắt quãng (Spaced Repetition)</span>
-                <h1 id="quiz-title">Bộ Thẻ Ôn Tập & Quiz Card Thông Minh</h1>
-                <p>Luyện tập thẻ 3D phản xạ nhanh. Tự động trích xuất các thuật ngữ then chốt từ tài liệu học tập hoặc tự tạo thẻ ôn thi riêng theo môn học.</p>
-              </div>
-              <button className="btn quiz-create-button" onClick={() => !requireLogin() && setModal("quiz-create")}>
-                <PlusIcon aria-hidden="true" /> Tạo Bộ Thẻ Mới
-              </button>
-            </header>
-            <QuizWorkspace documents={documents} user={user} initialDocumentId={selectedDocument?.id} />
-            {decksLoading ? <p role="status">Đang tải bộ thẻ…</p> : quizDecks.length ? (
-              <div className="quiz-deck-grid reveal-stagger">
-                {quizDecks.map((deck) => (
-                  <article className={`quiz-deck-card flashcard-deck is-${deck.cover || "plain"}`} key={deck.id} style={{ "--deck-color": normalizeFlashcardColor(deck.color), "--deck-ink": normalizeFlashcardColor(deck.color) === "#64748b" ? "#ffffff" : "#0f172a" }}>
-                    <span className="flashcard-deck-emblem" aria-hidden="true"><RectangleStackIcon /></span>
-                    <h2>{deck.name}</h2>
-                    <p>{deck.subject || "Chưa phân loại"}</p>
-                    {deck.description && <small>{deck.description}</small>}
-                    <progress value={rememberedCount(deck)} max={Math.max(1, deck.cards?.length || 0)} aria-label={`${rememberedCount(deck)} trên ${deck.cards?.length || 0} thẻ đã nhớ`} style={{ "--deck-color": normalizeFlashcardColor(deck.color) }} />
-                    <small className="flashcard-deck-count">{rememberedCount(deck)}/{deck.cards?.length || 0} thẻ đã nhớ</small>
-                    <div className="flashcard-deck-actions">
-                      <button className="flashcard-deck-study" type="button" onClick={() => setActiveStudyDeck(deck)}><BookOpenIcon aria-hidden="true" />Bắt đầu ôn tập</button>
-                      <div className="flashcard-deck-manage">
-                        <button type="button" onClick={() => { setEditingDeck(deck); setModal("quiz-create"); }}><PencilSquareIcon aria-hidden="true" />Chỉnh sửa</button>
-                        <button type="button" className="flashcard-deck-delete" onClick={() => removeFlashcardDeck(deck)}><TrashIcon aria-hidden="true" />Xóa bộ thẻ</button>
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <section className="quiz-empty" aria-live="polite">
-                <RectangleStackIcon aria-hidden="true" />
-                <h2>Chưa có bộ thẻ nào</h2>
-                <p>Hãy tạo bộ thẻ đầu tiên để bắt đầu ghi nhớ và ôn tập thông minh.</p>
-                <button className="text-link" onClick={() => !requireLogin() && setModal("quiz-create")}>Tạo bộ thẻ đầu tiên <ArrowRightIcon aria-hidden="true" className="link-icon" /></button>
-              </section>
-            )}
-          </section>
+          <QuizCardPage key={userKey || 'guest'} user={user} decks={quizDecks} decksLoading={decksLoading}
+            onDeckSaved={(saved) => setQuizDecks((current) => current.some((item) => item.id === saved.id) ? current.map((item) => item.id === saved.id ? saved : item) : [...current,saved])}
+            onDeleteDeck={removeFlashcardDeck} onStudy={setActiveStudyDeck}
+            onEdit={(deck) => {setEditingDeck(deck);setModal('quiz-create');}}
+            onManual={() => {setEditingDeck(null);setModal('quiz-create');}}
+            onLogin={() => openAuth('login')} onLibrary={() => go('library')} />
         )}
         {view === "roadmap" && (
           <LearningRoadmapPage

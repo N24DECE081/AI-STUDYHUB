@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 
 const optionLetter = (index) => String.fromCharCode(65 + index);
 
-export default function QuizFlashCard({ quiz, answers, result, currentIndex, loading, onAnswer, onNavigate, onSubmit }) {
+export default function QuizFlashCard({ quiz, answers, result, currentIndex, loading, answerDisabled = false, onAnswer, onNavigate, onSubmit }) {
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const dialogRef = useRef(null);
   useEffect(() => {
@@ -58,7 +58,7 @@ export default function QuizFlashCard({ quiz, answers, result, currentIndex, loa
             const optionResultClass = itemResult ? (optionIndex === itemResult.correct_index ? " is-correct" : (isSelected && !itemResult.correct ? " is-wrong" : "")) : "";
             return (
               <label className={`quiz-option${isSelected ? " is-selected" : ""}${optionResultClass}`} key={optionIndex}>
-                <input type="radio" name={`question-${question.id}`} checked={isSelected} disabled={Boolean(result) || loading} onChange={() => onAnswer(question.id, optionIndex)} />
+                <input type="radio" name={`question-${question.id}`} checked={isSelected} disabled={Boolean(result) || loading || answerDisabled} onChange={() => onAnswer(question.id, optionIndex)} />
                 <b>{optionLetter(optionIndex)}</b><span>{option}</span>
               </label>
             );
@@ -68,9 +68,9 @@ export default function QuizFlashCard({ quiz, answers, result, currentIndex, loa
       </article>
 
       <footer className="quiz-flashcard-actions">
-        <button type="button" className="btn btn-ghost" disabled={currentIndex === 0} onClick={() => onNavigate(currentIndex - 1)}>← Lùi lại</button>
-        {!isLastQuestion && <button type="button" className="btn btn-ghost" onClick={() => onNavigate(currentIndex + 1)}>Tiếp tục →</button>}
-        {!result ? <button type="button" className="btn btn-primary" disabled={loading} onClick={requestSubmit}>{loading ? "Đang chấm bài…" : "Nộp bài & xem giải thích"}</button>
+        <button type="button" className="btn btn-ghost" disabled={currentIndex === 0} onClick={() => onNavigate(currentIndex - 1)}>← Câu trước</button>
+        {!isLastQuestion && <button type="button" className="btn btn-ghost" onClick={() => onNavigate(currentIndex + 1)}>Tiếp theo →</button>}
+        {!result ? <button type="button" className="btn btn-primary" disabled={loading} onClick={requestSubmit}>{loading ? "Đang chấm bài…" : "Hoàn thành bài"}</button>
           : <button type="button" className="btn btn-primary" onClick={() => onNavigate(0)}>Xem lại từ đầu ↺</button>}
       </footer>
 

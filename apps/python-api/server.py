@@ -2,6 +2,7 @@
 import tempfile
 from backend.app.flashcards import service as flashcards
 from backend.app.quizzes import service as quizzes
+from backend.app.quizzes import repository as quiz_store
 import json, os, re, secrets, sqlite3, hashlib, mimetypes, html, zipfile, smtplib, ssl
 from datetime import datetime, timezone, timedelta
 from calendar import monthrange
@@ -776,9 +777,88 @@ def extract_document_text(path):
         return markitdown_text or ''
     return ''
 
-def build_quiz_questions(documents, question_count=10):
-    sources = [{**document, 'text': extract_document_text(document['absolute_path'])} for document in documents]
-    return quizzes.generate(sources, question_count, get_engine())
+def learning_sources(connection, user_id, payload):
+    if not isinstance(payload,dict):raise ValueError('Dữ liệu không hợp lệ.')
+    ids=payload.get('document_ids')
+    if not isinstance(ids,list) or not 1 <= len(ids) <= 20 or any(type(i) is not int or i<=0 for i in ids):
+        raise ValueError('Chọn từ 1 đến 20 tài liệu trong cùng môn học.')
+    ids=list(dict.fromkeys(ids)); marks=','.join('?' for _ in ids)
+    rows=connection.execute(f"SELECT d.*,s.name subject_name FROM documents d JOIN subjects s ON s.id=d.subject_id WHERE d.uploaded_by=? AND d.id IN ({marks})",[user_id,*ids]).fetchall()
+    if len(rows)!=len(ids):raise LookupError('Một hoặc nhiều tài liệu không tồn tại.')
+    subject_id=rows[0]['subject_id']
+    if any(row['subject_id']!=subject_id for row in rows) or ('subject_id' in payload and payload['subject_id']!=subject_id):
+        raise ValueError('Các tài liệu phải thuộc cùng môn học đã chọn.')
+    subject=connection.execute('SELECT id,name FROM subjects WHERE id=? AND (created_by=? OR created_by IS NULL)',(subject_id,user_id)).fetchone()
+    if not subject:raise LookupError('Môn học không tồn tại.')
+    by_id={row['id']:row for row in rows}; docs=[]
+    for doc_id in ids:
+        row=by_id[doc_id]
+        try: content=document_text(row,connection)
+        except (OSError,ValueError):raise ValueError('Không đọc được nội dung tài liệu. Hãy chọn tài liệu có văn bản.')
+        if not content or not content.strip():raise ValueError('Một tài liệu không có nội dung chữ. Vui lòng bỏ chọn tài liệu đó.')
+        docs.append({'id':doc_id,'title':row['title'],'text':content})
+    return docs,dict(subject)
+
+
+def handle_learning_post(handler,path,data):
+    match=re.fullmatch(r'/api/(quizzes|flashcards)/([^/]+)/(start|answers|rename)',path)
+    if path not in ('/api/quizzes/limits','/api/flashcards/generate','/api/quizzes/manual','/api/flashcards/manual') and not match:return False
+    user=require_user(handler)
+    if not user:return True
+    try:
+        payload=json_body(data)
+        if not isinstance(payload,dict):raise ValueError('Dữ liệu không hợp lệ.')
+        with db() as c:
+            if path in ('/api/quizzes/limits','/api/flashcards/generate'):
+                docs,subject=learning_sources(c,user['id'],payload)
+                if path=='/api/quizzes/limits': result=quizzes.content_limits(docs)
+                else:
+                    deck=flashcards.generate_from_documents(docs,{**payload,'subject_id':subject['id'],'subject':subject['name']},get_engine())
+                    # Generated IDs are always server-owned, never supplied by the client.
+                    deck['id']=secrets.token_hex(16)
+                    c.execute('INSERT INTO flashcard_decks(id,user_id,payload) VALUES(?,?,?)',(deck['id'],user['id'],json.dumps(deck,ensure_ascii=False)))
+                    result=deck
+            elif path in ('/api/quizzes/manual','/api/flashcards/manual'):
+                subject_id=payload.get('subject_id')
+                if type(subject_id) is not int or subject_id < 1:raise ValueError('Vui lòng chọn môn học.')
+                subject=c.execute('SELECT id,name FROM subjects WHERE id=? AND (created_by=? OR created_by IS NULL)',(subject_id,user['id'])).fetchone()
+                if not subject:raise LookupError('Môn học không tồn tại.')
+                if path=='/api/flashcards/manual':
+                    result=flashcards.normalize_deck({**payload,'id':secrets.token_hex(16),'subject':subject['name'],'document_ids':[]})
+                    for card in result['cards']:card['remembered']=False
+                    c.execute('INSERT INTO flashcard_decks(id,user_id,payload) VALUES(?,?,?)',(result['id'],user['id'],json.dumps(result,ensure_ascii=False)))
+                else:
+                    quiz=quizzes.normalize_manual(payload)
+                    quiz.update(subject_id=subject_id,subject=subject['name'])
+                    quiz_id=c.execute('INSERT INTO chat_sessions(user_id,subject_id,document_id,title) VALUES(?,?,?,?)',(user['id'],subject_id,None,'QUIZ_CARD:'+quiz['title'])).lastrowid
+                    c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(quiz_id,'assistant',json.dumps(quiz,ensure_ascii=False)))
+                    result=public_quiz_payload(quiz,quiz_id)
+            elif match.group(1)=='flashcards':
+                if match.group(3)!='rename':raise LookupError('Không tìm thấy chức năng.')
+                row=c.execute('SELECT payload FROM flashcard_decks WHERE id=? AND user_id=?',(unquote(match.group(2)),user['id'])).fetchone()
+                if not row:raise LookupError('Bộ Flashcard không tồn tại.')
+                name=flashcards.text(payload.get('name'),100)
+                if not name:raise ValueError('Vui lòng nhập tên bộ Flashcard.')
+                result=json.loads(row['payload']);result['name']=name
+                c.execute('UPDATE flashcard_decks SET payload=? WHERE id=? AND user_id=?',(json.dumps(result,ensure_ascii=False),unquote(match.group(2)),user['id']))
+            else:
+                quiz_id=match.group(2)
+                if match.group(3)=='start':result=quiz_store.start(c,user['id'],quiz_id)
+                elif match.group(3)=='answers':result=quiz_store.save_answers(c,user['id'],quiz_id,payload)
+                else:
+                    row,quiz=quiz_store.owned_quiz(c,user['id'],quiz_id)
+                    title=flashcards.text(payload.get('name'),100)
+                    if not title:raise ValueError('Vui lòng nhập tên bài trắc nghiệm.')
+                    quiz['title']=title
+                    c.execute('UPDATE chat_messages SET content=? WHERE id=?',(json.dumps(quiz,ensure_ascii=False),row['id']))
+                    c.execute('UPDATE chat_sessions SET title=? WHERE id=?',('QUIZ_CARD:'+title,quiz_id))
+                    result=public_quiz_payload(quiz,int(quiz_id))
+            c.commit()
+        handler.json(result,201 if path in ('/api/flashcards/generate','/api/flashcards/manual','/api/quizzes/manual') else 200)
+    except LookupError as error:handler.json({'error':str(error)},404)
+    except TutorEngineError:handler.json({'error':'Nova chưa thể tạo nội dung lúc này. Vui lòng thử lại.'},503)
+    except ValueError as error:handler.json({'error':str(error)},400)
+    return True
 
 def public_quiz_payload(payload, quiz_id=None, created_at=None):
     """Return only quiz fields the client needs before submitting answers."""
@@ -787,7 +867,7 @@ def public_quiz_payload(payload, quiz_id=None, created_at=None):
         questions.append({key:question[key] for key in (
             'id','question','options','document_id','source_title','difficulty'
         ) if key in question})
-    result={key:payload[key] for key in ('kind','title','document_ids','question_count') if key in payload}
+    result={key:payload[key] for key in ('kind','title','document_ids','question_count','subject_id','subject','time_limit','difficulty') if key in payload}
     result['questions']=questions
     if quiz_id is not None: result['id']=quiz_id
     if created_at is not None: result['created_at']=created_at
@@ -1045,6 +1125,8 @@ class H(BaseHTTPRequestHandler):
    qs=parse_qs(p.query); q=qs.get('q',[''])[0]; sub=qs.get('subject',[''])[0]; c=db(); sql='SELECT d.*, d.original_filename AS file_name, d.storage_path AS file_path, d.uploaded_by AS uploader_id, s.code subject_code,s.name subject_name,u.full_name AS uploader, (SELECT substr(dc.content,1,320) FROM document_chunks dc WHERE dc.document_id=d.id ORDER BY dc.chunk_index LIMIT 1) AS content_preview FROM documents d JOIN subjects s ON s.id=d.subject_id JOIN users u ON u.id=d.uploaded_by WHERE d.uploaded_by=?'; args=[u['id']]
    if q: sql+=' AND (d.title LIKE ? OR d.description LIKE ?)'; args += [f'%{q}%',f'%{q}%']
    if sub: sql+=' AND s.code=?'; args.append(sub)
+   subject_id=qs.get('subject_id',[''])[0]
+   if subject_id:sql+=' AND d.subject_id=?';args.append(subject_id)
    sql+=' ORDER BY d.created_at DESC'; rows=[dict(r) for r in c.execute(sql,args)]; c.close(); return self.json(rows)
   if path=='/api/courses':
     qs=parse_qs(p.query); subject=qs.get('subject',[''])[0]; c=db(); sql='SELECT c.*, s.code subject_code,s.name subject_name,u.full_name AS creator FROM courses c JOIN subjects s ON s.id=c.subject_id JOIN users u ON u.id=c.created_by WHERE c.status != ?'; args=['archived']
@@ -1109,9 +1191,9 @@ class H(BaseHTTPRequestHandler):
      for attempt in c.execute("SELECT content,created_at FROM chat_messages WHERE session_id=? AND role='user' ORDER BY id DESC",(session['id'],)).fetchall():
       try:
        value=json.loads(attempt['content'])
-       if value.get('kind')=='quiz_attempt': attempts.append({'score':value.get('score',0),'total':value.get('total',payload.get('question_count',0)),'score_10':round((value.get('score',0)*10)/max(value.get('total',1),1),2),'score_30':round((value.get('score',0)*30)/max(value.get('total',1),1),2),'created_at':attempt['created_at']})
+       if value.get('kind')=='quiz_attempt': attempts.append({'score':value.get('score',0),'total':value.get('total',payload.get('question_count',0)),'score_10':round((value.get('score',0)*10)/max(value.get('total',1),1),2),'score_30':round((value.get('score',0)*30)/max(value.get('total',1),1),2),'created_at':attempt['created_at'],'duration':value.get('duration',0)})
       except (TypeError,json.JSONDecodeError):pass
-     history.append({'id':session['id'],'title':payload.get('title',session['title'].replace('QUIZ_CARD:','')),'document_ids':payload.get('document_ids',[]),'question_count':payload.get('question_count',len(payload.get('questions',[]))),'created_at':session['created_at'],'attempts':attempts})
+     history.append({'id':session['id'],'title':payload.get('title',session['title'].replace('QUIZ_CARD:','')),'document_ids':payload.get('document_ids',[]),'question_count':payload.get('question_count',len(payload.get('questions',[]))),'created_at':session['created_at'],'attempts':attempts,'subject':payload.get('subject','Chưa phân loại'),'subject_id':payload.get('subject_id'),'time_limit':payload.get('time_limit',0),'difficulty':payload.get('difficulty','mixed')})
    return self.json({'items':history})
   m=re.fullmatch(r'/api/quizzes/(\d+)',path)
   if m:
@@ -1268,6 +1350,13 @@ class H(BaseHTTPRequestHandler):
  def do_DELETE(self):
   if not self.gateway_access(): return
   path=urlparse(self.path).path
+  match=re.fullmatch(r'/api/quizzes/(\d+)',path)
+  if match:
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    deleted=c.execute("DELETE FROM chat_sessions WHERE id=? AND user_id=? AND title LIKE 'QUIZ_CARD:%'",(match.group(1),u['id'])).rowcount;c.commit()
+   return self.json({'ok':True} if deleted else {'error':'Bài trắc nghiệm không tồn tại'},200 if deleted else 404)
   match=re.fullmatch(r'/api/flashcards/([^/]+)',path)
   if match:
    u=require_user(self)
@@ -1330,6 +1419,7 @@ class H(BaseHTTPRequestHandler):
    p=urlparse(self.path); path=p.path; data=self.body()
   except ValueError:
    return self.json({'error':'Content-Length không hợp lệ'},400)
+  if handle_learning_post(self,path,data):return
   if path in ('/api/flashcards/preview','/api/documents/preview'):
    u=require_user(self)
    if not u:return
@@ -1391,44 +1481,33 @@ class H(BaseHTTPRequestHandler):
    u=require_user(self)
    if not u:return
    x=json_body(data)
-   try: question_count=quizzes.validate_count(x.get('question_count',10) if isinstance(x,dict) else None)
+   try:
+    count=quizzes.validate_count(x.get('question_count',10) if isinstance(x,dict) else None)
+    difficulty=x.get('difficulty','mixed');time_limit=x.get('time_limit',0)
+    if difficulty not in ('easy','medium','hard','mixed'):raise ValueError('Độ khó không hợp lệ.')
+    if type(time_limit) is not int or not 0 <= time_limit <= 240:raise ValueError('Thời gian phải từ 1 đến 240 phút hoặc không giới hạn.')
+    with db() as c:docs,subject=learning_sources(c,u['id'],x)
+    limits=quizzes.content_limits(docs)
+    if count>limits['max_questions']:raise ValueError(f"Tối đa {limits['max_questions']} câu dựa trên tài liệu đã chọn.")
+    questions=quizzes.generate(docs,count,get_engine(),difficulty)
+   except LookupError as error:return self.json({'error':str(error)},404)
+   except quizzes.QuizGenerationError as error:return self.json({'error':str(error),'code':'quiz_quality_failed'},422)
    except ValueError as error:return self.json({'error':str(error)},400)
-   raw_ids=x.get('document_ids',[]) if isinstance(x,dict) else []
-   if not isinstance(raw_ids,list) or not raw_ids or len(raw_ids)>20:
-    return self.json({'error':'Hãy chọn từ 1 đến 20 tài liệu để tạo Quiz'},400)
-   try: document_ids=list(dict.fromkeys(int(value) for value in raw_ids))
-   except (TypeError,ValueError): return self.json({'error':'Danh sách tài liệu không hợp lệ'},400)
-   placeholders=','.join('?' for _ in document_ids)
+   except TutorEngineError:return self.json({'error':'Nova chưa thể tạo bài trắc nghiệm lúc này. Vui lòng thử lại.','retryable':True},503)
+   title=flashcards.text(x.get('title'),100) or 'Quiz: '+', '.join(doc['title'] for doc in docs[:2])
+   for index,question in enumerate(questions):question['id']=f'q{index+1}'
+   document_ids=[doc['id'] for doc in docs]
+   payload={'kind':'quiz','title':title,'subject_id':subject['id'],'subject':subject['name'],'document_ids':document_ids,'question_count':len(questions),'questions':questions,'time_limit':time_limit,'difficulty':difficulty}
    with db() as c:
-    rows=c.execute(f'''SELECT d.id,d.title,d.description,d.storage_path,d.original_filename,s.name subject_name
-      FROM documents d JOIN subjects s ON s.id=d.subject_id
-      WHERE d.uploaded_by=? AND d.id IN ({placeholders})''',[u['id'],*document_ids]).fetchall()
-    by_id={row['id']:row for row in rows}
-    if len(by_id)!=len(document_ids): return self.json({'error':'Một hoặc nhiều tài liệu không tồn tại'},404)
-    docs=[]
-    for document_id in document_ids:
-     row=by_id[document_id]
-     absolute_path=row['storage_path'] if os.path.isabs(row['storage_path']) else os.path.join(ROOT,row['storage_path'])
-     docs.append({'id':row['id'],'title':row['title'],'absolute_path':absolute_path})
-    try: questions=build_quiz_questions(docs,question_count)
-    except quizzes.QuizGenerationError as error:return self.json({'error':str(error),'code':'quiz_quality_failed'},422)
-    except TutorEngineError:return self.json({'error':'AI chưa sẵn sàng tạo đủ câu hỏi chất lượng. Vui lòng thử lại sau.','code':'quiz_provider_unavailable','retryable':True},503)
-    except DocumentTextError:return self.json({'error':'Không đọc được nội dung chữ trong tài liệu.'},422)
-    if not questions:return self.json({'error':'Không đọc được nội dung tài liệu để tạo Quiz. Hãy dùng PDF/Word có text hoặc file TXT/MD.'},422)
-    title='Quiz Card: '+', '.join(row['title'] for row in rows[:2])
-    for index, question in enumerate(questions): question['id']=f'q{index+1}'
-    quiz_payload={'kind':'quiz','title':title,'document_ids':document_ids,'question_count':len(questions),'questions':questions}
-    session_title='QUIZ_CARD:'+json.dumps({'title':title,'document_ids':document_ids},ensure_ascii=False)
-    quiz_id=c.execute('INSERT INTO chat_sessions(user_id,document_id,title) VALUES(?,?,?)',(u['id'],document_ids[0],session_title)).lastrowid
-    c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(quiz_id,'assistant',json.dumps(quiz_payload,ensure_ascii=False)))
-    c.commit()
-   public_questions=[{key:value for key,value in question.items() if key!='correct_index' and key not in ('explanation','source_locator')} for question in questions]
-   return self.json({'id':quiz_id,'title':title,'document_ids':document_ids,'question_count':len(questions),'questions':public_questions},201)
+    quiz_id=c.execute('INSERT INTO chat_sessions(user_id,subject_id,document_id,title) VALUES(?,?,?,?)',(u['id'],subject['id'],document_ids[0],'QUIZ_CARD:'+title)).lastrowid
+    c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(quiz_id,'assistant',json.dumps(payload,ensure_ascii=False)));c.commit()
+   return self.json(public_quiz_payload(payload,quiz_id),201)
   m=re.fullmatch(r'/api/quizzes/(\d+)/submit',path)
   if m:
    u=require_user(self)
    if not u:return
    x=json_body(data)
+   if not isinstance(x,dict):return self.json({'error':'Đáp án không hợp lệ'},400)
    answers=x.get('answers',{}) if isinstance(x,dict) else {}
    if not isinstance(answers,dict):return self.json({'error':'Đáp án không hợp lệ'},400)
    with db() as c:
@@ -1437,6 +1516,17 @@ class H(BaseHTTPRequestHandler):
     message=c.execute("SELECT content FROM chat_messages WHERE session_id=? AND role='assistant' ORDER BY id DESC LIMIT 1",(quiz['id'],)).fetchone()
     if not message:return self.json({'error':'Quiz chưa có câu hỏi'},422)
     quiz_payload=json.loads(message['content']); rows=quiz_payload.get('questions',[])
+    try:answers=quiz_store.validate_answers(quiz_payload,answers)
+    except ValueError as error:return self.json({'error':str(error)},400)
+    run_row=None;run=None;duration=0
+    if x.get('run_id') is not None or quiz_payload.get('time_limit'):
+     try:run_row,run=quiz_store.load_run(c,quiz['id'],x.get('run_id'))
+     except (ValueError,LookupError) as error:return self.json({'error':str(error)},400)
+     if run.get('result'):return self.json(run['result'])
+     now=time.time();duration=max(0,int(now-run['started_at']))
+     if run.get('deadline') and now>=run['deadline']:
+      answers=run.get('answers',{});duration=max(0,int(run['deadline']-run['started_at']))
+
     if not rows:return self.json({'error':'Quiz chưa có câu hỏi'},422)
     items=[]; score=0
     for row in rows:
@@ -1446,16 +1536,25 @@ class H(BaseHTTPRequestHandler):
      correct=selected is not None and selected==row['correct_index']
      score += int(correct)
      items.append({'id':row['id'],'question':row['question'],'selected_index':selected,'correct_index':row['correct_index'],'correct':correct,'explanation':row['explanation'],'source_document_id':row['document_id'],'source_title':row.get('source_title'),'source_locator':row['source_locator'],'options':row['options']})
+    total=len(rows)
+    result={'score':score,'total':total,'correct_count':score,'wrong_count':total-score,'duration':duration,'score_30':round(score*30/total,2),'score_10':round(score*10/total,2),'weak_count':total-score,'weak_items':[item for item in items if not item['correct']],'items':items}
+    if run is not None:
+     run['result']=result
+     if not quiz_store.replace_run(c,run_row,run):return self.json({'error':'Lượt làm bài đang được nộp. Vui lòng thử lại.'},409)
     update_streak(c,u['id'],record=True)
-    attempt_payload={'kind':'quiz_attempt','score':score,'total':len(rows),'answers':answers}
+    attempt_payload={'kind':'quiz_attempt','quiz_id':quiz['id'],'user_id':u['id'],'score':score,'total':total,'correct_count':score,'wrong_count':total-score,'duration':duration,'answers':answers}
+
     attempt_id=c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(quiz['id'],'user',json.dumps(attempt_payload,ensure_ascii=False))).lastrowid
+    result['attempt_id']=attempt_id
+    if run is not None:
+     run['result']=result
+     c.execute('UPDATE chat_messages SET content=? WHERE id=?',(json.dumps(run,ensure_ascii=False),run_row['id']))
     automatic_progress=60+round((score/max(len(rows),1))*40)
     document_ids=quiz_payload.get('document_ids') or [item['source_document_id'] for item in items]
     for source_document_id in dict.fromkeys(document_ids):
      advance_document_progress(c,u['id'],source_document_id,automatic_progress,score)
     c.commit()
-   total=len(rows)
-   return self.json({'attempt_id':attempt_id,'score':score,'total':total,'score_30':round(score*30/total,2),'score_10':round(score*10/total,2),'weak_count':sum(1 for item in items if not item['correct']),'weak_items':[item for item in items if not item['correct']],'items':items},200)
+   return self.json(result,200)
   if path in ('/api/login','/api/auth/login'):
    try:
     x=json.loads(data or '{}')

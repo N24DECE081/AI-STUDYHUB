@@ -1,135 +1,59 @@
-import { useEffect, useMemo, useState } from "react";
-import { createQuiz, getQuizHistory, submitQuiz } from "../api";
-import QuizFlashCard from "./QuizFlashCard";
-import QuizResultSummary from "./QuizResultSummary";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Clock, ArrowLeft, RotateCcw } from 'lucide-react';
+import { saveQuizAnswers, submitQuiz } from '../api';
+import QuizFlashCard from './QuizFlashCard';
+import QuizResultSummary from './QuizResultSummary';
 
-const fieldStyle = {
-  width: "100%",
-  border: "1px solid rgba(148, 163, 184, .32)",
-  borderRadius: 10,
-  padding: "10px 12px",
-  background: "#fff",
-  color: "#172033",
-};
-
-export default function QuizWorkspace({ documents, user, initialDocumentId }) {
-  const [questionCount, setQuestionCount] = useState("10");
-  const validCount = /^\d+$/.test(questionCount) && Number(questionCount) >= 1 && Number(questionCount) <= 120;
-  const [subjectFilter, setSubjectFilter] = useState("all");
-  const [selectedIds, setSelectedIds] = useState(() => initialDocumentId ? [initialDocumentId] : []);
-  const [quiz, setQuiz] = useState(null);
+export default function QuizWorkspace({ quiz, onBack, onRetake }) {
   const [answers, setAnswers] = useState({});
   const [result, setResult] = useState(null);
+  const [review, setReview] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [history, setHistory] = useState([]);
-  const [currentQuestion, setCurrentQuestion] = useState(0);
-
-  const subjects = useMemo(() => {
-    const seen = new Map();
-    documents.forEach((document) => {
-      if (document.subject_code && !seen.has(document.subject_code)) {
-        seen.set(document.subject_code, document.subject_name || document.subject_code);
-      }
-    });
-    return [...seen.entries()];
-  }, [documents]);
-  const filteredDocuments = useMemo(
-    () => documents.filter((document) => subjectFilter === "all" || document.subject_code === subjectFilter),
-    [documents, subjectFilter],
-  );
-
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(0);
+  const [current, setCurrent] = useState(0);
+  const [now, setNow] = useState(() => quiz.run.server_now);
+  const [clockOffset] = useState(() => Date.now()/1000 - quiz.run.server_now);
+  const revision = useRef(0);
+  const submitting = useRef(false);
+  const autoSubmitted = useRef(false);
+  const remaining = quiz.run.deadline ? Math.max(0,Math.ceil(quiz.run.deadline-now)) : null;
+  const expired = remaining===0;
   useEffect(() => {
-    let active = true;
-    if (!user) return () => { active = false; };
-    getQuizHistory().then((result) => { if (active) setHistory(result.items || []); }).catch(() => {});
-    return () => { active = false; };
-  }, [user]);
-
-  const toggleDocument = (id) => {
-    setSelectedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+    if (!quiz.run.deadline || result) return;
+    const timer=setInterval(() => setNow(Date.now()/1000-clockOffset),500);
+    return () => clearInterval(timer);
+  }, [quiz.run.deadline,result,clockOffset]);
+  const submit = useCallback(async () => {
+    if (submitting.current || result) return;
+    submitting.current=true;setLoading(true);setError('');
+    try {setResult(await submitQuiz(quiz.id,answers,quiz.run.run_id));}
+    catch {setError('Chưa nộp được bài. Đáp án đang giữ nguyên, vui lòng bấm nộp lại.');}
+    finally {submitting.current=false;setLoading(false);}
+  },[quiz.id,quiz.run.run_id,answers,result]);
+  useEffect(() => {
+    if (!expired || result || autoSubmitted.current) return;
+    autoSubmitted.current=true;
+    // Schedule submission outside the effect body, preserving the latest answer snapshot.
+    const timer=setTimeout(() => {submit();},0);
+    return () => {clearTimeout(timer);autoSubmitted.current=false;};
+  },[expired,result,submit]);
+  const answer = async (id,index) => {
+    if (expired || result || submitting.current) return;
+    const next={...answers,[id]:index};setAnswers(next);setSaving((n) => n+1);
+    try {await saveQuizAnswers(quiz.id,quiz.run.run_id,next,++revision.current);}
+    catch {setError('Chưa đồng bộ được đáp án. Kiểm tra kết nối; đáp án trên màn hình vẫn được giữ.');}
+    finally {setSaving((n) => n-1);}
   };
-  const selectVisible = () => setSelectedIds((current) => current.length === filteredDocuments.length ? [] : filteredDocuments.map((document) => document.id));
-  const generate = async () => {
-    if (!validCount) { setError("Số câu phải là số nguyên dương từ 1 đến 120."); return; }
-    if (!selectedIds.length) {
-      setError("Hãy chọn ít nhất một tài liệu.");
-      return;
-    }
-    setLoading(true);
-    setError("");
-    setResult(null);
-    setAnswers({});
-    setCurrentQuestion(0);
-    try {
-      setQuiz(await createQuiz(selectedIds, Number(questionCount)));
-    } catch (requestError) {
-      setQuiz(null);
-      setError(requestError.message || "Không thể tạo Quiz.");
-    } finally {
-      setLoading(false);
-    }
-  };
-  const submit = async () => {
-    if (!quiz) return;
-    setLoading(true);
-    setError("");
-    try {
-      setResult(await submitQuiz(quiz.id, answers));
-    } catch (requestError) {
-      setError(requestError.message || "Không thể chấm bài.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <section className="quiz-workspace" aria-label="Quiz Card từ tài liệu">
-      <div className="quiz-workspace__toolbar">
-        <div>
-          <span className="eyebrow">QUIZ CARD AI</span>
-          <h2>Tạo Quiz từ một hoặc nhiều tài liệu</h2>
-          <p className="muted">Chọn 1–120 câu bám trọng tâm tài liệu, gồm hiểu bản chất, vận dụng và phân tích.</p>
-        </div>
-        <label className="quiz-subject-filter">
-          <span>Môn học</span>
-          <select value={subjectFilter} onChange={(event) => { setSubjectFilter(event.target.value); setSelectedIds([]); }} style={fieldStyle}>
-            <option value="all">Tất cả môn học</option>
-            {subjects.map(([code, name]) => <option value={code} key={code}>{code} · {name}</option>)}
-          </select>
-        </label>
-      </div>
-
-      {!quiz && <>
-        <label className="quiz-count-field">
-          <span>Số câu hỏi</span>
-          <input type="text" inputMode="numeric" value={questionCount} disabled={loading}
-            aria-invalid={!validCount} aria-describedby="quiz-count-help" style={fieldStyle}
-            onChange={(event) => setQuestionCount(event.target.value)} />
-        </label>
-        <p id="quiz-count-help" className={validCount ? "muted" : "form-error"}>
-          {validCount ? "Nhập số nguyên từ 1 đến 120. Đề dài cần nhiều thời gian; tài liệu phải đủ nội dung." : "Số câu phải là số nguyên dương từ 1 đến 120."}
-        </p>
-        <div className="quiz-picker-actions"><span>{selectedIds.length} tài liệu đã chọn · tối đa 120 câu</span><button type="button" className="text-link" onClick={selectVisible}>{filteredDocuments.length > 0 && selectedIds.length === filteredDocuments.length ? "Bỏ chọn tất cả" : "Chọn tất cả môn này"}</button></div>
-        <div className="quiz-document-picker">
-          {filteredDocuments.map((document) => (
-            <label className={`quiz-document-option${selectedIds.includes(document.id) ? " selected" : ""}`} key={document.id}>
-              <input type="checkbox" checked={selectedIds.includes(document.id)} onChange={() => toggleDocument(document.id)} />
-              <span><strong>{document.title}</strong><small>{document.subject_code} · {document.original_filename || document.file_name}</small></span>
-            </label>
-          ))}
-          {!filteredDocuments.length && <p className="empty-state">Chưa có tài liệu trong môn học này. Hãy upload tài liệu trước.</p>}
-        </div>
-        <button type="button" className="btn btn-primary" onClick={generate} disabled={loading || !filteredDocuments.length || !validCount}>{loading ? "AI đang đọc tài liệu…" : `Tạo Quiz Card (${selectedIds.length} tài liệu)`}</button>
-      </>}
-
-      {quiz && <div className="quiz-question-list">
-        <div className="quiz-result-head"><div><span className="eyebrow">BỘ QUIZ ĐANG LÀM · {quiz.questions.length} CÂU</span><h2>{quiz.title}</h2></div><button type="button" className="btn btn-ghost" disabled={loading} onClick={() => { setQuiz(null); setResult(null); }}>Chọn lại tài liệu</button></div>
-        <QuizFlashCard key={quiz.id} quiz={quiz} answers={answers} result={result} currentIndex={currentQuestion} loading={loading} onAnswer={(questionId, optionIndex) => setAnswers((current) => ({ ...current, [questionId]: optionIndex }))} onNavigate={setCurrentQuestion} onSubmit={submit} />
-        {result && <QuizResultSummary quiz={quiz} result={result} onReviewQuestion={setCurrentQuestion} />}
-      </div>}
-      {!quiz && <section className="quiz-history"><div><span className="eyebrow">LỊCH SỬ ÔN TẬP</span><h3>Các bài Quiz đã làm</h3></div>{history.length ? <div className="quiz-history-list">{history.map((item) => <article key={item.id}><div><strong>{item.title}</strong><small>{item.question_count} câu · {new Date(item.created_at).toLocaleDateString("vi-VN")}</small></div>{item.attempts?.length ? <b>{item.attempts[0].score}/{item.attempts[0].total} · {item.attempts[0].score_10}/10</b> : <span>Chưa nộp bài</span>}</article>)}</div> : <p className="muted">Chưa có lịch sử. Hãy chọn tài liệu để bắt đầu bài Quiz đầu tiên.</p>}</section>}
-      {error && <p className="form-error" role="alert">{error}</p>}
-    </section>
-  );
+  return <section className="qc-taking" aria-label="Làm bài trắc nghiệm">
+    <header><button className="btn btn-ghost" disabled={loading} onClick={onBack}><ArrowLeft size={18}/>Về Quiz Card</button><small>{quiz.subject || 'Chưa phân loại'}</small>
+      {!result && remaining!==null && <strong className={`qc-timer ${remaining<60 ? 'is-urgent' : ''}`} role="timer"><Clock size={17}/>{Math.floor(remaining/60)}:{String(remaining%60).padStart(2,'0')}</strong>}</header>
+    <h1>{quiz.title}</h1>
+    {!result && <><p>Đã trả lời {Object.keys(answers).length} / {quiz.questions.length} câu</p><progress max={quiz.questions.length} value={Object.keys(answers).length} aria-label="Tiến độ trả lời"/></>}
+    {error && <p className="form-error" role="alert">{error}</p>}
+    {!result && saving>0 && <small role="status">Đang lưu đáp án…</small>}
+    {!result && expired && <p role="status">Đã hết thời gian. Bài được chấm theo đáp án đã lưu trước hạn.</p>}
+    {(!result || review) && <QuizFlashCard quiz={quiz} answers={answers} result={result} currentIndex={current} loading={loading} answerDisabled={expired} onAnswer={answer} onNavigate={setCurrent} onSubmit={submit}/>}
+    {result && <><div className="qc-finished"><span>✓</span><h2>Hoàn thành bài trắc nghiệm!</h2><strong>{result.score} / {result.total}</strong><p>Đúng: {result.score} · Sai: {result.total-result.score} · Thời gian: {Math.floor((result.duration || 0)/60)} phút {(result.duration || 0)%60} giây</p><div><button className="btn qc-mint" onClick={onRetake}><RotateCcw size={17}/>Làm lại</button><button className="btn btn-primary" onClick={() => {setReview(true);setCurrent(0);}}>Xem đáp án</button><button className="btn btn-ghost" onClick={onBack}>Về Quiz Card</button></div></div><QuizResultSummary quiz={quiz} result={result} onReviewQuestion={(index) => {setReview(true);setCurrent(index);}}/></>}
+  </section>;
 }
