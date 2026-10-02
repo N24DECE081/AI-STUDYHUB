@@ -34,11 +34,11 @@ cp .env.example .env
 
 Terminal 1:
 
-\apps\python-api
+\AI-STUDYHUB\apps\python-api
 python run.py
-
 Terminal 2:
-
+cd I:\AI-STUDYHUB\frontend
+npm.cmd run dev
 ```cmd
 \frontend
 npm.cmd run dev
