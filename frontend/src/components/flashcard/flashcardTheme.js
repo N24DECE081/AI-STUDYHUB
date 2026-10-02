@@ -1,4 +1,13 @@
+export const STUDYHUB_FLASHCARD_COLORS = [
+  { name: "Hồng StudyHub", value: "var(--primary-pink)" },
+  { name: "Mint StudyHub", value: "var(--secondary-mint)" },
+  { name: "Hồng nhạt", value: "var(--pink-soft)" },
+  { name: "Mint nhạt", value: "var(--mint-soft)" },
+  { name: "Hồng đậm", value: "var(--primary-pink-hover)" },
+  { name: "Mint đậm", value: "var(--secondary-mint-hover)" },
+];
 export const FLASHCARD_COLORS = [
+  ...STUDYHUB_FLASHCARD_COLORS,
   { name: "Xanh lam", value: "#38bdf8" },
   { name: "Tím", value: "#a78bfa" },
   { name: "Đỏ", value: "#fb7185" },
@@ -8,7 +17,7 @@ export const FLASHCARD_COLORS = [
   { name: "Tối", value: "#64748b" },
 ];
 
-export const DEFAULT_FLASHCARD_COLOR = FLASHCARD_COLORS[0].value;
+export const DEFAULT_FLASHCARD_COLOR = "#38bdf8";
 
 export const rememberedCount = (deck) =>
   (deck.cards || []).filter((card) => card.remembered).length;

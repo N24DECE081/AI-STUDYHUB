@@ -6,6 +6,7 @@ from urllib.parse import quote, urlparse
 from urllib.request import urlopen
 
 COLORS = {'#38bdf8', '#a78bfa', '#fb7185', '#fb923c', '#4ade80', '#facc15', '#64748b'}
+COLORS.update({'var(--primary-pink)', 'var(--secondary-mint)', 'var(--pink-soft)', 'var(--mint-soft)', 'var(--primary-pink-hover)', 'var(--secondary-mint-hover)'})
 DEFAULT_COLOR = '#38bdf8'
 
 def color(value):
@@ -48,7 +49,9 @@ def normalize_deck(payload):
             'language': 'en' if card.get('language') == 'en' else '',
             'pronunciation': text(card.get('pronunciation'), 200), 'audioUrl': audio_url(card.get('audioUrl'))})
     return {'id': text(payload.get('id'), 80) or str(uuid.uuid4()), 'name': name,
-        'subject': text(payload.get('subject'), 200), 'description': text(payload.get('description'), 2000),
+        'subject': text(payload.get('subject'), 200),
+        'subject_id': payload.get('subject_id') if type(payload.get('subject_id')) is int else None,
+        'document_ids': [v for v in payload.get('document_ids',[]) if type(v) is int] if isinstance(payload.get('document_ids'),list) else [], 'description': text(payload.get('description'), 2000),
         'keywords': [text(v, 80) for v in payload.get('keywords', []) if isinstance(v, str)][:20] if isinstance(payload.get('keywords'), list) else [],
         'difficulty': payload.get('difficulty') if payload.get('difficulty') in ('beginner','intermediate','advanced') else 'beginner',
         'color': deck_color, 'cover': payload.get('cover') if payload.get('cover') in ('lines','grid','plain') else 'plain', 'cards': normalized}
@@ -146,3 +149,42 @@ def pronunciation(term):
     except Exception:
         pass
     return result
+
+
+def generate_from_documents(documents, payload, engine):
+    from backend.app.ai_tutor.engine import EngineError
+    from backend.app.quizzes.service import content_limits, normalize
+    limits = content_limits(documents)
+    count = payload.get('requested_count')
+    if count is None:
+        count = limits['suggested_flashcards']
+    if type(count) is not int or count not in (10,20,30,50) and payload.get('requested_count') is not None:
+        raise ValueError('Chọn AI tự đề xuất hoặc 10, 20, 30, 50 thẻ.')
+    if not 1 <= count <= limits['max_flashcards']:
+        raise ValueError(f"Tài liệu đã chọn cho phép tối đa {limits['max_flashcards']} thẻ.")
+    if not text(payload.get('name'),100):
+        raise ValueError('Vui lòng nhập tên bộ Flashcard.')
+    if not getattr(engine,'uses_model',False):
+        raise EngineError('AI unavailable')
+    # Sample throughout every selected document within the existing task input budget.
+    sources = []
+    for doc in documents:
+        content = doc['text']
+        budget = max(180, 5000 // len(documents))
+        sample = content if len(content) <= budget else content[:budget//2] + '\n[…]\n' + content[-budget//2:]
+        sources.append({'document_id':doc['id'],'text':sample})
+    cards, seen = [], set()
+    for start in range(0,count,4):
+        size = min(4,count-start)
+        raw = engine.complete_json(task='document_flashcards',payload={'sources':sources,'count':size,'avoid':[c['front'][:100] for c in cards[-10:]]})
+        rows = raw.get('cards') if isinstance(raw,dict) else None
+        if not isinstance(rows,list) or len(rows) != size:
+            raise ValueError('Nova chưa tạo đủ thẻ. Hãy thử ít thẻ hơn hoặc bổ sung tài liệu.')
+        for row in rows:
+            if not isinstance(row,dict):
+                raise ValueError('Nova trả về thẻ chưa hợp lệ. Vui lòng thử lại.')
+            front, back, evidence = text(row.get('front'),1000), text(row.get('back'),4000), text(row.get('evidence'),1000)
+            if not front or not back or normalize(front) in seen or len(evidence)<10 or not any(s['document_id']==row.get('document_id') and normalize(evidence) in normalize(s['text']) for s in sources):
+                raise ValueError('Nova chưa tạo được thẻ có nguồn rõ ràng. Vui lòng thử lại.')
+            seen.add(normalize(front));cards.append({'front':front,'back':back,'language':row.get('language',''),'remembered':False})
+    return normalize_deck({**payload,'cards':cards})

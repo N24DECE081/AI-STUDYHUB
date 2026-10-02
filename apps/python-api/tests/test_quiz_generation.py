@@ -21,14 +21,14 @@ class QuizGenerationTests(unittest.TestCase):
         return engine
 
     def test_count_validation(self):
-        for value in [None, True, False, 0, -1, 121, 1.5, '10', [], {}]:
+        for value in [None, True, False, 0, -1, 101, 121, 1.5, '10', [], {}]:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 service.validate_count(value)
-        for value in [1, 10, 120]:
+        for value in [1, 10, 100]:
             self.assertEqual(service.validate_count(value), value)
 
     def test_exact_counts_difficulty_and_numbering(self):
-        for count in [1, 10, 120]:
+        for count in [1, 10, 100]:
             engine = self.engine()
             questions = service.generate([{'id': 1, 'title': 'Transactions', 'text': 'Atomicity means all operations complete or roll back together.'}], count, engine)
             self.assertEqual(len(questions), count)
@@ -89,13 +89,17 @@ class QuizHTTPTests(unittest.TestCase):
                 payload = json.loads(body['messages'][-1]['content'])
                 source = payload['sources'][0]
                 rows = []
-                for level in payload['levels']:
+                for level in payload.get('levels',[]):
                     Provider.sequence += 1
                     rows.append({'question':f'Câu 6: Tình huống giao dịch {Provider.sequence} bị ngắt cần thuộc tính nào để rollback?',
                         'options':['Atomicity','Isolation','Durability','Consistency'], 'answer_index':0,
                         'explanation':'Atomicity đảm bảo mọi thao tác thành công hoặc rollback toàn bộ.',
                         'document_id':source['document_id'],'evidence':source['text'],'difficulty':level})
-                data = json.dumps({'choices':[{'message':{'content':json.dumps({'questions':rows})}}]}).encode()
+                output={'questions':rows}
+                if 'count' in payload:
+                    output={'cards':[{'front':f'Thuật ngữ {Provider.sequence+i}', 'back':'Atomicity ensures rollback of incomplete transactions.', 'language':'en', 'document_id':source['document_id'], 'evidence':source['text'][:100]} for i in range(payload['count'])]}
+                    Provider.sequence+=payload['count']
+                data = json.dumps({'choices':[{'message':{'content':json.dumps(output)}}]}).encode()
                 self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers(); self.wfile.write(data)
         cls.provider = ThreadingHTTPServer(('127.0.0.1',0), Provider)
         cls.thread = threading.Thread(target=cls.provider.serve_forever,daemon=True);cls.thread.start()
@@ -111,7 +115,7 @@ class QuizHTTPTests(unittest.TestCase):
         ServerIntegrationTest.tearDownClass.__func__(cls)
         cls.provider.shutdown();cls.provider.server_close();cls.thread.join()
 
-    def test_generate_120_persist_hide_answers_and_submit(self):
+    def test_generate_100_persist_hide_answers_and_submit(self):
         from test_server_integration import ServerIntegrationTest as Integration
         self.request = Integration.request.__get__(self)
         self.login_cookie = Integration.login_cookie.__get__(self)
@@ -122,19 +126,19 @@ class QuizHTTPTests(unittest.TestCase):
         body = (f'--{boundary}\r\nContent-Disposition: form-data; name="title"\r\n\r\nTransactions\r\n'
                 f'--{boundary}\r\nContent-Disposition: form-data; name="subject_id"\r\n\r\n{subject}\r\n'
                 f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="transactions.txt"\r\nContent-Type: text/plain\r\n\r\n'
-                'Atomicity means all operations complete or roll back together.\r\n'
+                + ('Atomicity means all operations complete or roll back together. ' * 400) + '\r\n' +
                 f'--{boundary}--\r\n').encode()
         status,_,document = self.request('/api/upload','POST',body,{'Cookie':cookie,'Content-Type':f'multipart/form-data; boundary={boundary}'})
         self.assertEqual(status,201,document)
-        status,_,quiz = self.request('/api/quizzes/generate','POST',{'document_ids':[document['document_id']],'question_count':120},{'Cookie':cookie})
+        status,_,quiz = self.request('/api/quizzes/generate','POST',{'document_ids':[document['document_id']],'question_count':100},{'Cookie':cookie})
         self.assertEqual(status,201,quiz)
-        self.assertEqual(len(quiz['questions']),120)
-        self.assertEqual(quiz['questions'][0]['id'],'q1'); self.assertEqual(quiz['questions'][-1]['id'],'q120')
+        self.assertEqual(len(quiz['questions']),100)
+        self.assertEqual(quiz['questions'][0]['id'],'q1'); self.assertEqual(quiz['questions'][-1]['id'],'q100')
         for question in quiz['questions']:
             self.assertNotIn('correct_index',question);self.assertNotIn('source_locator',question)
             self.assertNotIn('explanation',question);self.assertFalse(question['question'].startswith('Câu 6'))
         status,_,saved=self.request(f"/api/quizzes/{quiz['id']}",headers={'Cookie':cookie})
-        self.assertEqual(status,200,saved);self.assertEqual(len(saved['questions']),120)
+        self.assertEqual(status,200,saved);self.assertEqual(len(saved['questions']),100)
         import sqlite3, json
         from pathlib import Path
         with sqlite3.connect(Path(self.tmp.name) / 'integration.db') as conn:
@@ -142,5 +146,5 @@ class QuizHTTPTests(unittest.TestCase):
         correct = payload['questions'][0]['correct_index']
         self.assertEqual(payload['questions'][0]['options'][correct], 'Atomicity')
         status,_,result=self.request(f"/api/quizzes/{quiz['id']}/submit",'POST',{'answers':{'q1':correct}},{'Cookie':cookie})
-        self.assertEqual(status,200,result);self.assertEqual(result['score'],1);self.assertEqual(result['total'],120)
+        self.assertEqual(status,200,result);self.assertEqual(result['score'],1);self.assertEqual(result['total'],100)
         self.assertTrue(result['items'][0]['source_locator'])

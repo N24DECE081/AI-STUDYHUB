@@ -82,7 +82,7 @@ export const createSubject = ({ name, code, description }) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, code, description }),
   });
-export const getDocuments = () => request("/documents");
+export const getDocuments = (subjectId) => request(subjectId ? `/documents?subject_id=${encodeURIComponent(subjectId)}` : "/documents");
 export const getDocumentContent = (documentId) =>
   request(`/documents/${documentId}/content`);
 export const deleteDocument = (documentId) =>
@@ -111,18 +111,18 @@ export async function uploadDocument({
   return request(`/documents/${result.document_id}`);
 }
 
-export const createQuiz = (documentIds, questionCount = 10) =>
+export const createQuiz = (documentIds, questionCount = 30, settings = {}) =>
   request("/quizzes/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ document_ids: documentIds, question_count: questionCount }),
+    body: JSON.stringify({ document_ids: documentIds, question_count: questionCount, ...settings }),
   });
 
-export const submitQuiz = (quizId, answers) =>
+export const submitQuiz = (quizId, answers, runId) =>
   request(`/quizzes/${quizId}/submit`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ answers }),
+    body: JSON.stringify({ answers, run_id: runId }),
   });
 
 export const getQuizHistory = () => request("/quizzes/history");
@@ -203,3 +203,15 @@ export const previewDocumentMetadata = (file, signal) => {
   const body = new FormData(); body.append('file', file);
   return request('/documents/preview', { method: 'POST', body, signal });
 };
+
+// Quiz Card reuses existing quiz/deck resources and authenticated session.
+export const getQuiz = (id) => request(`/quizzes/${id}`);
+export const getQuizLimits = (subjectId, documentIds) => postJson('/quizzes/limits', { subject_id: subjectId, document_ids: documentIds });
+export const startQuiz = (id) => postJson(`/quizzes/${id}/start`, {});
+export const saveQuizAnswers = (id, runId, answers, revision) => postJson(`/quizzes/${id}/answers`, { run_id: runId, answers, revision });
+export const renameQuiz = (id, name) => postJson(`/quizzes/${id}/rename`, { name });
+export const deleteQuiz = (id) => request(`/quizzes/${id}`, { method: 'DELETE' });
+export const generateFlashcards = (payload) => postJson('/flashcards/generate', payload);
+export const renameFlashcardDeck = (id, name) => postJson(`/flashcards/${encodeURIComponent(id)}/rename`, { name });
+
+export const createManualLearning = (kind, payload) => postJson(`/${kind === 'flashcard' ? 'flashcards' : 'quizzes'}/manual`, payload);

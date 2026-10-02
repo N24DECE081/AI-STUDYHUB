@@ -9,7 +9,7 @@ test('document preview, persistence, colors, IPA, review, edit and mobile', asyn
  const page=await context.newPage(); const errors=[]; page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/api/flashcards/pronunciation?*',route=>route.fulfill({json:{term:'important',pronunciation:'/ɪmˈpɔːrtənt/',audioUrl:''}}));
  await page.goto(base+'/app/quiz');
- await page.getByRole('button',{name:'Tạo Bộ Thẻ Mới'}).click();
+ await page.getByRole('button',{name:'Hoặc tạo bộ thẻ thủ công / tải file mới'}).click();
  await page.getByLabel('Tự điền từ tài liệu').setInputFiles({name:'words.txt',mimeType:'text/plain',buffer:Buffer.from('important\nquan trọng\nLearn useful English words.')});
  await page.getByLabel('Tên bộ thẻ',{exact:true}).waitFor();
  await page.waitForFunction(()=>document.querySelector('input[maxlength="100"]')?.value==='important');
@@ -21,14 +21,14 @@ test('document preview, persistence, colors, IPA, review, edit and mobile', asyn
  await page.getByRole('button',{name:'Tím',exact:true}).first().click();
  await page.getByRole('button',{name:'Đỏ',exact:true}).last().click();
  await page.reload();
- await page.getByRole('button',{name:'Tạo Bộ Thẻ Mới'}).click();
+ await page.getByRole('button',{name:'Hoặc tạo bộ thẻ thủ công / tải file mới'}).click();
  assert.equal(await page.getByLabel('Tên bộ thẻ',{exact:true}).inputValue(),'E2E vocabulary');
  await page.getByRole('button',{name:'Lưu bộ thẻ',exact:true}).click();
  await page.getByRole('heading',{name:'E2E vocabulary'}).waitFor();
  await page.reload(); await page.getByRole('heading',{name:'E2E vocabulary'}).waitFor();
  const decks=await (await context.request.get(base+'/api/flashcards')).json();
  assert.equal(decks[0].color,'#a78bfa');assert.equal(decks[0].cards[0].color,'#fb7185');assert.equal(decks[0].description,'Edited suggestion');
- await page.getByRole('button',{name:'Bắt đầu ôn tập'}).click();
+ await page.getByRole('button',{name:'Ôn lại',exact:true}).click();await page.getByRole('button',{name:/Ôn lại tất cả/}).click();
  await page.getByLabel('Phiên âm IPA').waitFor();
  assert.equal(await page.locator('.study-card').evaluate(e=>getComputedStyle(e).borderTopColor),'rgb(251, 113, 133)');
  await page.getByRole('button',{name:'Xanh lá',exact:true}).click();
@@ -37,16 +37,16 @@ test('document preview, persistence, colors, IPA, review, edit and mobile', asyn
  await page.getByRole('heading',{name:'Hoàn thành phiên ôn tập'}).waitFor();
  assert.equal((await (await context.request.get(base+'/api/streak')).json()).current_streak,1);
  await page.getByRole('button',{name:'Đóng',exact:true}).click();
- await page.getByRole('button',{name:'Chỉnh sửa',exact:true}).click();
+ await page.locator('.qc-menu summary').click();await page.getByRole('button',{name:'Chỉnh sửa',exact:true}).click();
  await page.getByLabel('Tên bộ thẻ',{exact:true}).fill('Edited deck');await page.getByRole('button',{name:'Lưu bộ thẻ',exact:true}).click();
  await page.getByRole('heading',{name:'Edited deck'}).waitFor();
  await page.setViewportSize({width:390,height:844});await page.reload();await page.getByRole('heading',{name:'Edited deck'}).waitFor();
- await page.getByRole('button',{name:'Bắt đầu ôn tập'}).click();await page.getByLabel('Phiên âm IPA').waitFor();
+ await page.getByRole('button',{name:'Ôn lại',exact:true}).click();await page.getByRole('button',{name:/Ôn lại tất cả/}).click();await page.getByLabel('Phiên âm IPA').waitFor();
  assert.equal(await page.locator('.study-card').evaluate(e=>getComputedStyle(e).borderTopColor),'rgb(74, 222, 128)');
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
  await page.screenshot({path:test.info().outputPath('mobile-flashcard.png'),fullPage:true});
  await page.getByRole('button',{name:'Đóng phiên ôn tập'}).click();
- page.on('dialog',d=>d.accept());await page.getByRole('button',{name:'Xóa bộ thẻ',exact:true}).click();
+ await page.locator('.qc-menu summary').click();await page.getByRole('button',{name:'Xóa',exact:true}).click();await page.getByRole('button',{name:'Xóa bộ',exact:true}).click();
  await page.getByRole('heading',{name:'Edited deck'}).waitFor({state:'hidden'});
  assert.deepEqual(errors,[]);console.log('PASS: upload preview, edited metadata, draft reload, confirm save, DB persistence, deck/card colors, IPA, review/streak, edit, mobile, delete; no page errors');
  await context.close();
@@ -85,7 +85,7 @@ test('audio loading, pause, resume, replay, failure and switching cards', async 
     };
   });
   await page.route('**/api/flashcards/pronunciation?*', route=>route.fulfill({json:{pronunciation:'',audioUrl:''}}));
-  await page.goto('/app/quiz'); await page.getByRole('button',{name:'Bắt đầu ôn tập'}).click();
+  await page.goto('/app/quiz'); await page.getByRole('button',{name:'Ôn lại',exact:true}).click();await page.getByRole('button',{name:/Ôn lại tất cả/}).click();
   await expect(page.getByLabel('Phiên âm IPA')).toHaveText('/test/');
   await page.getByRole('button',{name:'🔊 Phát âm tiếng Anh'}).click();
   await page.getByRole('button',{name:'⏸ Tạm dừng'}).click();
@@ -109,7 +109,7 @@ test('slow audio times out and unavailable pronunciation preserves the card', as
   await signIn(context,'offline'); await seedDeck(context);
   await page.addInitScript(()=> { window.Audio=class { play(){return new Promise(()=>{});} pause(){} }; });
   await page.route('**/api/flashcards/pronunciation?*',route=>route.abort());
-  await page.goto('/app/quiz'); await page.getByRole('button',{name:'Bắt đầu ôn tập'}).click();
+  await page.goto('/app/quiz'); await page.getByRole('button',{name:'Ôn lại',exact:true}).click();await page.getByRole('button',{name:/Ôn lại tất cả/}).click();
   await page.getByRole('button',{name:'🔊 Phát âm tiếng Anh'}).click();
   await expect(page.getByRole('button',{name:'Đang tải âm thanh…'})).toBeDisabled();
   await expect(page.getByRole('status')).toContainText('Không phát được âm thanh',{timeout:12000});
@@ -138,7 +138,7 @@ test('streak fire follows zero, one, two and threshold; reduced motion is respec
 
 test('AI preview stays editable, errors preserve draft, unchanged confirmation persists', async ({ page, context }) => {
   await signIn(context,'preview');
-  await page.goto('/app/quiz'); await page.getByRole('button',{name:'Tạo Bộ Thẻ Mới'}).click();
+  await page.goto('/app/quiz'); await page.getByRole('button',{name:'Hoặc tạo bộ thẻ thủ công / tải file mới'}).click();
   let status=200;
   const suggestion={id:'suggested',name:'AI title',subject:'English',description:'AI description',keywords:['word'],difficulty:'intermediate',color:'#38bdf8',cover:'plain',cards:[{id:'ai-card',front:'word',back:'từ',language:'en',pronunciation:'/wɜːd/'}]};
   await page.route('**/api/flashcards/preview',route=>route.fulfill({status,json:status===200?{suggestion,warning:''}:{error:'AI unavailable'}}));
@@ -150,7 +150,7 @@ test('AI preview stays editable, errors preserve draft, unchanged confirmation p
   await expect(page.getByRole('heading',{name:'AI title'})).toBeVisible();
   const stored=(await (await context.request.get('/api/flashcards')).json())[0];
   expect(stored.description).toBe(suggestion.description);expect(stored.keywords).toEqual(suggestion.keywords);
-  await page.getByRole('button',{name:'Chỉnh sửa',exact:true}).click();
+  await page.locator('.qc-menu summary').click();await page.getByRole('button',{name:'Chỉnh sửa',exact:true}).click();
   await page.getByLabel('Mô tả',{exact:true}).fill('My own description');
   status=503; page.once('dialog',dialog=>dialog.accept());
   await page.getByLabel('Tự điền từ tài liệu').setInputFiles(file);
@@ -165,10 +165,10 @@ test('AI preview stays editable, errors preserve draft, unchanged confirmation p
 test('every palette color persists and cards without an override inherit the deck', async ({ page, context }) => {
   await signIn(context,'palette');
   const deck=await seedDeck(context,{name:'Palette',cards:[{id:'inherit',front:'Term',back:'Definition'}]});
-  await page.goto('/app/quiz'); await page.getByRole('button',{name:'Chỉnh sửa',exact:true}).click();
+  await page.goto('/app/quiz'); await page.locator('.qc-menu summary').click();await page.getByRole('button',{name:'Chỉnh sửa',exact:true}).click();
   await page.getByRole('button',{name:'Cam',exact:true}).first().click();
   await page.getByRole('button',{name:'Lưu bộ thẻ',exact:true}).click();
-  await page.getByRole('button',{name:'Bắt đầu ôn tập'}).click();
+  await page.getByRole('button',{name:'Ôn lại',exact:true}).click();await page.getByRole('button',{name:/Ôn lại tất cả/}).click();
   await expect(page.locator('.study-card')).toHaveCSS('border-top-color','rgb(251, 146, 60)');
   for(const [name,color,rgb] of [
     ['Xanh lam','#38bdf8','rgb(56, 189, 248)'],['Tím','#a78bfa','rgb(167, 139, 250)'],
@@ -181,7 +181,7 @@ test('every palette color persists and cards without an override inherit the dec
     expect(stored.cards[0].color).toBe(color);
   }
   await page.getByRole('button',{name:'Đóng phiên ôn tập'}).click();
-  await page.reload(); await page.getByRole('button',{name:'Bắt đầu ôn tập'}).click();
+  await page.reload(); await page.getByRole('button',{name:'Ôn lại',exact:true}).click();await page.getByRole('button',{name:/Ôn lại tất cả/}).click();
   await expect(page.locator('.study-card')).toHaveCSS('border-top-color','rgb(100, 116, 139)');
 });
 

@@ -6,7 +6,7 @@ import re
 from random import SystemRandom
 from backend.app.ai_tutor.engine import EngineError
 
-MAX_QUESTIONS = 120
+MAX_QUESTIONS = 100
 BATCH_SIZE = 2  # Keep evidence and explanations within the provider task token budget.
 
 
@@ -16,7 +16,7 @@ class QuizGenerationError(ValueError):
 
 def validate_count(value):
     if type(value) is not int or not 1 <= value <= MAX_QUESTIONS:
-        raise ValueError('Số câu phải là số nguyên dương từ 1 đến 120.')
+        raise ValueError('Số câu phải là số nguyên dương từ 1 đến 100.')
     return value
 
 
@@ -28,8 +28,10 @@ def clean_question(value):
     return re.sub(r'^\s*(?:(?:câu(?:\s+hỏi)?|question)\s*\d+\s*[:.)-]?|\d+\s*[.)])\s*', '', value, flags=re.I).strip()
 
 
-def generate(documents, count, engine):
+def generate(documents, count, engine, difficulty="mixed"):
     validate_count(count)
+    if difficulty not in ('easy', 'medium', 'hard', 'mixed'):
+        raise ValueError('Độ khó không hợp lệ.')
     if not getattr(engine, 'uses_model', False):
         raise EngineError('Tạo Quiz phân hóa cần AI đang hoạt động. Hãy thử lại khi AI sẵn sàng.')
     sources = []
@@ -53,6 +55,8 @@ def generate(documents, count, engine):
     levels += ['analyze'] * (count - len(levels))
     if count == 1:
         levels = ['apply']
+    if difficulty != 'mixed':
+        levels = [{'easy':'understand','medium':'apply','hard':'analyze'}[difficulty]] * count
     for offset in range(0, count, BATCH_SIZE):
         size = min(BATCH_SIZE, count - offset)
         batch_sources = [sources[(offset // BATCH_SIZE * 3 + i) % len(sources)] for i in range(min(3, len(sources)))]
@@ -108,3 +112,52 @@ def validate_batch(raw, size, sources, seen, levels):
                        'document_id': source['document_id'], 'source_title': source['title'],
                        'source_locator': evidence.strip()})
     return result
+
+
+def content_limits(documents):
+    words = sum(len(re.findall(r'\w+', doc['text'])) for doc in documents)
+    if not words:
+        raise QuizGenerationError('Không đọc được nội dung chữ trong tài liệu.')
+    maximum = 20 if words < 800 else 50 if words < 3000 else 100
+    return {'max_questions':maximum, 'max_flashcards':min(50,maximum),
+            'suggested_flashcards':min(20,max(1,words // 70)), 'word_count':words}
+
+
+def normalize_manual(payload):
+    """Validate authored questions without a document or model dependency."""
+    title = payload.get('title')
+    if not isinstance(title, str) or not title.strip() or len(title.strip()) > 100:
+        raise ValueError('Tên bài trắc nghiệm phải từ 1 đến 100 ký tự.')
+    rows = payload.get('questions')
+    if not isinstance(rows, list):
+        raise ValueError('Danh sách câu hỏi không hợp lệ.')
+    validate_count(len(rows))
+    minutes = payload.get('time_limit', 0)
+    if type(minutes) is not int or not 0 <= minutes <= 240:
+        raise ValueError('Thời gian phải từ 0 đến 240 phút.')
+    questions = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ValueError('Câu hỏi không hợp lệ.')
+        question = row.get('question')
+        options = row.get('options')
+        correct = row.get('correct_index')
+        explanation = row.get('explanation', '')
+        if not isinstance(question, str) or not question.strip() or len(question) > 2000:
+            raise ValueError(f'Câu {index+1}: nhập câu hỏi, tối đa 2000 ký tự.')
+        if (not isinstance(options, list) or len(options) != 4
+                or any(not isinstance(option, str) or not option.strip() or len(option) > 1000 for option in options)):
+            raise ValueError(f'Câu {index+1}: cần đủ 4 đáp án, mỗi đáp án tối đa 1000 ký tự.')
+        options = [option.strip() for option in options]
+        if len({option.casefold() for option in options}) != 4:
+            raise ValueError(f'Câu {index+1}: các đáp án không được trùng nhau.')
+        if type(correct) is not int or correct not in range(4):
+            raise ValueError(f'Câu {index+1}: hãy chọn đáp án đúng.')
+        if not isinstance(explanation, str) or len(explanation) > 4000:
+            raise ValueError('Giải thích tối đa 4000 ký tự.')
+        questions.append({'id': f'q{index+1}', 'question': question.strip(), 'options': options,
+                          'correct_index': correct, 'explanation': explanation.strip() or 'Đáp án do người tạo bài lựa chọn.',
+                          'difficulty': 'understand', 'document_id': None,
+                          'source_title': 'Nội dung tự tạo', 'source_locator': ''})
+    return {'kind': 'quiz', 'title': title.strip(), 'document_ids': [],
+            'question_count': len(questions), 'questions': questions, 'time_limit': minutes, 'difficulty': 'mixed'}
