@@ -548,10 +548,33 @@ def chat_quiz(engine, topic, context):
 def public_roadmap(row, exercises, progress):
     payload=row.get('payload') or {}
     if not isinstance(payload,dict): payload={}
-    by_lesson={}
-    for item in exercises:
-        by_lesson.setdefault(str(item.get('lesson_key') or ''),[]).append(str(item.get('id')))
+    modules=[]
+    lesson_keys={}
     for module in payload.get('modules') or []:
+        lessons=module.get('lessons') or []
+        topic=str(lessons[0].get('title') or '').removesuffix(' — phần 1') if lessons else ''
+        # Compact only the old local template; distinct lessons and stored history stay intact.
+        repeated=len(lessons)>1 and all(
+            lesson.get('title')==f'{topic} — phần {index}'
+            and lesson.get('objectives')==lessons[0].get('objectives')
+            and lesson.get('examples')==[f'Ví dụ minh hoạ cho {topic} (phần {index})']
+            for index,lesson in enumerate(lessons,start=1)
+        )
+        if repeated:
+            key=str(lessons[0]['key'])
+            lesson_keys.update({str(lesson['key']):key for lesson in lessons})
+            lessons=[{**lessons[0], 'title':topic,
+                      'examples':[f'Ví dụ minh hoạ cho {topic}'],
+                      'estimated_minutes':sum(int(lesson.get('estimated_minutes') or 0) for lesson in lessons)}]
+        modules.append({**module,'lessons':[dict(lesson) for lesson in lessons]})
+    by_lesson={}
+    public_exercises=[]
+    for item in exercises:
+        key=str(item.get('lesson_key') or '')
+        key=lesson_keys.get(key,key)
+        by_lesson.setdefault(key,[]).append(str(item.get('id')))
+        public_exercises.append(tutor_store.to_public({**item,'lesson_key':key}))
+    for module in modules:
         for lesson in module.get('lessons') or []:
             lesson['exercise_ids']=by_lesson.get(str(lesson.get('key')),[])
     return {
@@ -564,12 +587,12 @@ def public_roadmap(row, exercises, progress):
         'target_level': payload.get('target_level') or row.get('difficulty'),
         'pace': payload.get('pace') or 'steady',
         'topics': payload.get('topics') or [],
-        'modules': payload.get('modules') or [],
+        'modules': modules,
         'focus_weaknesses': payload.get('focus_weaknesses') or [],
         'adaptation_note': payload.get('adaptation_note') or row.get('adaptation_note'),
         'average_score': payload.get('average_score'),
         'version': row.get('version') or 1,
-        'exercises': [tutor_store.to_public(item) for item in exercises],
+        'exercises': public_exercises,
         'progress': progress,
     }
 

@@ -66,8 +66,9 @@ function ProgressChart({ points, range }) {
   );
 }
 
-export default function ProgressDashboard({ user, analytics, progress, studyTime, streak, quizDecks = [], onLogin }) {
+export default function ProgressDashboard({ user, analytics, progress, studyTime, streak, quizDecks = [], subscription, onUpgrade, onLogin }) {
   const [range, setRange] = useState("day");
+  const isFree = !subscription?.plan || subscription.plan === 'free';
   const data = analytics || EMPTY_PROGRESS_ANALYTICS;
   const summary = data.summary || EMPTY_PROGRESS_ANALYTICS.summary;
   const today = data.today || EMPTY_PROGRESS_ANALYTICS.today;
@@ -105,6 +106,98 @@ export default function ProgressDashboard({ user, analytics, progress, studyTime
         <MetricCard icon={CheckCircleIcon} label="Thẻ đã nhớ" value={learnedCards} note={`${quizDecks.length} bộ thẻ`} tone="answer" />
         <MetricCard icon={TrophyIcon} label="Độ chính xác" value={`${summary.accuracy_percent || 0}%`} note={`${summary.correct_answers || 0} câu trả lời đúng`} tone="accuracy" />
       </div>
+
+      {/* Phân tích học tập bằng AI Card (Gated) */}
+      <section className="progress-surface progress-ai-analytics" style={{
+        margin: '0 0 24px',
+        padding: '18px 22px',
+        borderRadius: '16px',
+        background: '#ffffff',
+        border: '1px solid var(--border-color)',
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '16px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', maxWidth: '720px' }}>
+          <div style={{
+            width: '42px',
+            height: '42px',
+            borderRadius: '12px',
+            background: isFree ? '#fcebf1' : '#edf8f1',
+            color: isFree ? '#954c68' : '#166534',
+            display: 'grid',
+            placeItems: 'center',
+            fontSize: '18px',
+            flexShrink: 0
+          }}>
+            {isFree ? '🔒' : '🧠'}
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span className="progress-section-label" style={{ margin: 0 }}>AI INSIGHTS</span>
+              <span style={{
+                fontSize: '10px',
+                fontWeight: '800',
+                padding: '2px 8px',
+                borderRadius: '999px',
+                background: isFree ? '#fcebf1' : '#edf8f1',
+                color: isFree ? '#954c68' : '#166534'
+              }}>
+                {isFree ? 'Khóa · Cần Gói Pro' : 'Đã mở khóa'}
+              </span>
+            </div>
+            <h3 style={{ margin: '3px 0 2px', fontSize: '15px', fontWeight: '700', color: 'var(--text-dark)' }}>
+              Phân tích học tập bằng AI
+            </h3>
+            <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--text-body)', lineHeight: 1.4 }}>
+              {isFree
+                ? 'Tính năng phân tích chuyên sâu lỗ hổng kiến thức, dự đoán điểm số và cá nhân hóa lịch ôn tập yêu cầu Gói Pro Sinh Viên hoặc Master.'
+                : 'Nova AI phân tích: Tiến độ tuần này tăng 24%, độ chính xác bài kiểm tra đạt mức tốt. Bạn nên tập trung ôn tập thêm các thẻ khó.'}
+            </p>
+          </div>
+        </div>
+
+        <div>
+          {isFree ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={onUpgrade}
+              style={{
+                background: '#f6bfd2',
+                color: '#832746',
+                borderRadius: '999px',
+                padding: '8px 18px',
+                fontWeight: '700',
+                fontSize: '12.5px',
+                border: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              Mở khóa với Gói Pro ⚡
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-outline"
+              disabled
+              style={{
+                borderRadius: '999px',
+                padding: '7px 16px',
+                fontSize: '12px',
+                color: '#166534',
+                borderColor: '#c8e7d5',
+                background: '#edf8f1',
+                cursor: 'default'
+              }}
+            >
+              ✓ Đang phân tích tự động
+            </button>
+          )}
+        </div>
+      </section>
 
       <div className="progress-layout">
         <section className="progress-surface progress-insights" aria-labelledby="progress-chart-title">

@@ -92,13 +92,12 @@ ENTRIES = [
             'dùng thử', 'tài khoản mới', 'giới hạn', 'được gì', 'có gì miễn phí',
         ],
         'answer': (
-            '**Gói Khởi Động — 0đ/tháng** (miễn phí vĩnh viễn, gói mặc định cho tài khoản mới):\n'
-            '- Tối đa **5 tài liệu** tải lên\n'
-            '- Tạo đến **20 thẻ Quiz Card 3D**\n'
-            '- **2 đề trắc nghiệm** cơ bản\n'
-            '- **Nova AI Tutor giới hạn 10 câu/ngày**\n'
-            '- Lộ trình học tập sinh viên tiêu chuẩn\n'
-            'Đây là gói phễu để bắt đầu học mà không mất phí.'
+            '**Gói Khởi Động — 0đ/tháng** (miễn phí vĩnh viễn, dành cho sinh viên mới bắt đầu):\n'
+            '- Tải lên tối đa **10 tài liệu** (200 MB dung lượng lưu trữ)\n'
+            '- Quiz Card và Flashcard cơ bản\n'
+            '- **AI Tutor 5 lượt mỗi ngày**\n'
+            '- Theo dõi tiến độ cơ bản & Đầy đủ tính năng Deep Focus\n'
+            'Giới hạn: Giới hạn số tài liệu, dung lượng và không gồm các tính năng AI nâng cao.'
         ),
     },
     {
@@ -109,14 +108,13 @@ ENTRIES = [
             'sinh viên học thường xuyên', 'pro sinh viên', 'không giới hạn',
         ],
         'answer': (
-            '**Gói Pro Sinh Viên — 199.000đ/tháng** (gói phổ biến nhất, khuyên dùng cho sinh viên):\n'
-            '- **Không giới hạn** tài liệu tải lên (PDF, DOC, MD)\n'
-            '- **Không giới hạn** bộ thẻ Quiz Card 3D Spaced Repetition\n'
-            '- **Không giới hạn** bài thi trắc nghiệm & chấm điểm tức thì\n'
-            '- **Nova AI Tutor bám tài liệu không giới hạn lượt hỏi**\n'
-            '- Tự động trích xuất Thẻ & Trắc nghiệm từ tài liệu chỉ với **1 click**\n'
-            '- Lộ trình học **cá nhân hóa theo chuyên ngành**\n'
-            '- Lưu lịch sử ôn tập **đồng bộ đa thiết bị**'
+            '**Gói Pro Sinh Viên — 199.000đ/tháng** (khuyên dùng cho sinh viên, cá nhân hóa việc học mỗi ngày):\n'
+            '- Tải lên tối đa **50 tài liệu** (2 GB dung lượng lưu trữ)\n'
+            '- Quiz Card và Flashcard nâng cao\n'
+            '- **AI Tutor 200 lượt mỗi tháng**\n'
+            '- **Phân tích học tập bằng AI**\n'
+            '- **Lộ trình học cá nhân hóa**\n'
+            'Giới hạn: Dung lượng tối đa 2 GB; một số tính năng AI chuyên sâu cần gói Master.'
         ),
     },
     {
@@ -127,14 +125,13 @@ ENTRIES = [
             'học bổng', 'gpa 3.6', 'gói cao cấp nhất', 'đồ án tốt nghiệp', 'review cv',
         ],
         'answer': (
-            '**Gói Master Thủ Khoa — 299.000đ/tháng** (gói cao cấp nhất, mở khoá toàn bộ đặc quyền):\n'
-            '- **Tất cả quyền lợi của gói Pro 199.000đ**\n'
-            '- Phòng luyện thi **Mock Exam** mô phỏng đề thi thật đại học\n'
-            '- **Nova AI phân tích lỗ hổng kiến thức 1-1** & gợi ý khắc phục\n'
-            '- **Nova AI cố vấn chuyên sâu đồ án tốt nghiệp & review CV thực tập**\n'
-            '- **Huy hiệu Thủ Khoa StudyHub** độc quyền trên hồ sơ\n'
-            '- Hỗ trợ học tập ưu tiên **24/7 qua Zalo / Hotline VIP**\n'
-            '- **Tải toàn bộ bộ thẻ và đề thi offline**'
+            '**Gói Master Thủ Khoa — 299.000đ/tháng** (dành cho học chuyên sâu và luyện thi):\n'
+            '- Tải lên tối đa **200 tài liệu** (5 GB dung lượng lưu trữ)\n'
+            '- **Tất cả quyền lợi của gói Pro Sinh Viên**\n'
+            '- **Sử dụng nhiều mô hình AI**\n'
+            '- **Phân tích tài liệu chuyên sâu**\n'
+            '- **Hạn mức AI Tutor cao hơn**\n'
+            '- **Lộ trình học nâng cao**'
         ),
     },
     {

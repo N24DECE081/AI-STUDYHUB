@@ -5,15 +5,25 @@ import beeMascot from "../assets/bee-kawaii.png";
 import { askAiTutor, askWebAssistant, getWebAssistantStarters } from "../api";
 import { newId } from "./ai-tutor/conversationStore";
 import "./BeeChatWidget.css";
+import { Sparkles } from "lucide-react";
 
 const STARTERS = [
   { icon: "📚", label: "Giải thích bài học", prompt: "Giải thích giúp mình một bài học đang ôn." },
-  { icon: "🧠", label: "Tạo Quiz", prompt: "Tạo một quiz nhanh về nội dung mình đang học." },
+  { icon: "🧠", label: "Tạo quiz", prompt: "Tạo một quiz nhanh về nội dung mình đang học." },
   { icon: "📝", label: "Tóm tắt tài liệu", prompt: "Tóm tắt tài liệu mình đã tải lên." },
   { icon: "🗺️", label: "Xem lộ trình", route: "roadmap" },
 ];
 
 const GREETING = "Xin chào! Mình là Nova. Hôm nay bạn muốn học gì?";
+const COPY = {
+  noAnswer: "Nova chưa có câu trả lời cho nội dung này.", connectionError: "Nova chưa kết nối được:",
+  novaAssistant: "Trợ lý Nova", beeAssistant: "Trợ lý Bee", chatLabel: "Trò chuyện với Nova",
+  novaName: "Nova AI", beeName: "Bee kawaii", ready: "Đang sẵn sàng hỗ trợ bạn", closeChat: "Đóng khung chat",
+  typing: "Nova đang trả lời", suggestions: "Gợi ý nhanh", placeholder: "Nhập câu hỏi của bạn...",
+  questionLabel: "Câu hỏi dành cho Nova", send: "Gửi câu hỏi", hint: "Thắc mắc gì đó? Hỏi Bee nè!",
+  closeNova: "Đóng Nova AI Tutor", openNova: "Mở Nova AI Tutor", askNova: "Hỏi Nova AI Tutor",
+  launcherTitle: "Hỏi Nova", launcherSubtitle: "Trợ lý học tập AI",
+};
 const GUEST_STARTERS = [
   { icon: "💰", label: "Bảng giá StudyHub", prompt: "Bảng giá 3 gói StudyHub" },
   { icon: "🎁", label: "Gói miễn phí", prompt: "Gói miễn phí 0đ có gì?" },
@@ -21,7 +31,7 @@ const GUEST_STARTERS = [
   { icon: "💬", label: "Liên hệ hỗ trợ", prompt: "Thanh toán và liên hệ hỗ trợ" },
 ];
 
-export default function BeeChatWidget({ visible, user, onNavigate }) {
+export default function BeeChatWidget({ visible, user, onNavigate, variant = "default" }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -75,13 +85,13 @@ export default function BeeChatWidget({ visible, user, onNavigate }) {
       setMessages((current) => [...current, {
         id: result.message_id || newId(),
         role: "assistant",
-        content: result.content || result.answer || "Nova chưa có câu trả lời cho nội dung này.",
+        content: result.content || result.answer || COPY.noAnswer,
       }]);
     } catch (error) {
       setMessages((current) => [...current, {
         id: newId(),
         role: "assistant",
-        content: `Nova chưa kết nối được: ${error.message}`,
+        content: `${COPY.connectionError} ${error.message}`,
         error: true,
       }]);
     } finally {
@@ -101,16 +111,16 @@ export default function BeeChatWidget({ visible, user, onNavigate }) {
   if (!visible) return null;
 
   return (
-    <aside className="bee-chat-widget" aria-label="Trợ lý Bee">
+    <aside className={`bee-chat-widget${variant === "roadmap" ? " bee-chat-widget--roadmap" : ""}`} aria-label={variant === "roadmap" ? COPY.novaAssistant : COPY.beeAssistant}>
       {open && (
-        <section className="bee-chat-panel" role="dialog" aria-label="Trò chuyện với Nova">
+        <section className="bee-chat-panel" role="dialog" aria-label={COPY.chatLabel}>
           <header className="bee-chat-header">
             <img className="bee-chat-avatar" src={beeMascot} alt="" />
             <div className="bee-chat-identity">
-              <strong>Bee kawai</strong>
-              <span><i aria-hidden="true" />Đang sẵn sàng hỗ trợ bạn</span>
+              <strong>{variant === "roadmap" ? COPY.novaName : COPY.beeName}</strong>
+              <span><i aria-hidden="true" />{COPY.ready}</span>
             </div>
-            <button className="bee-chat-close" type="button" aria-label="Đóng khung chat" onClick={() => setOpen(false)}>
+            <button className="bee-chat-close" type="button" aria-label={COPY.closeChat} onClick={() => setOpen(false)}>
               <XMarkIcon aria-hidden="true" />
             </button>
           </header>
@@ -126,13 +136,13 @@ export default function BeeChatWidget({ visible, user, onNavigate }) {
                 </div>
               </div>
             ))}
-            {sending && <div className="bee-chat-typing" role="status">Nova đang trả lời<span>...</span></div>}
+            {sending && <div className="bee-chat-typing" role="status">{COPY.typing}<span>...</span></div>}
             <div ref={endRef} />
           </div>
 
           {messages.length === 1 && (
-            <section className="bee-chat-suggestions" aria-label="Gợi ý nhanh">
-              <p>Gợi ý nhanh</p>
+            <section className="bee-chat-suggestions" aria-label={COPY.suggestions}>
+              <p>{COPY.suggestions}</p>
               <div>
                 {(user ? STARTERS : guestStarters).map((starter) => (
                   <button key={starter.label} type="button" onClick={() => chooseStarter(starter)}>
@@ -148,11 +158,11 @@ export default function BeeChatWidget({ visible, user, onNavigate }) {
               ref={inputRef}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
-              placeholder="Nhập câu hỏi của bạn..."
-              aria-label="Câu hỏi dành cho Nova"
+              placeholder={COPY.placeholder}
+              aria-label={COPY.questionLabel}
               maxLength={4000}
             />
-            <button type="submit" aria-label="Gửi câu hỏi" disabled={!draft.trim() || sending}>
+            <button type="submit" aria-label={COPY.send} disabled={!draft.trim() || sending}>
               <ArrowRightIcon aria-hidden="true" />
             </button>
           </form>
@@ -160,16 +170,16 @@ export default function BeeChatWidget({ visible, user, onNavigate }) {
       )}
 
       <div className="bee-chat-launcher-wrap">
-        {!open && <span className="bee-chat-hint" aria-hidden="true">Thắc mắc gì đó hỏi Bee nè!</span>}
+        {!open && variant !== "roadmap" && <span className="bee-chat-hint" aria-hidden="true">{COPY.hint}</span>}
         <button
           className="bee-chat-launcher"
           type="button"
-          aria-label={open ? "Đóng Nova AI Tutor" : "Mở Nova AI Tutor"}
-          title="Hỏi Nova AI Tutor"
+          aria-label={open ? COPY.closeNova : COPY.openNova}
+          title={COPY.askNova}
           aria-expanded={open}
           onClick={() => setOpen((current) => !current)}
         >
-          <img src={beeMascot} alt="" />
+          {variant === "roadmap" ? <><span className="bee-chat-launcher-icon"><Sparkles aria-hidden="true" /></span><span className="bee-chat-launcher-copy"><strong>{COPY.launcherTitle}</strong><small>{COPY.launcherSubtitle}</small></span></> : <img src={beeMascot} alt="" />}
         </button>
       </div>
     </aside>

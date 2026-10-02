@@ -4,11 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import "./Logo3D.css";
 import Logo3D from "./components/Logo3D.jsx";
+import useRandomQuote from "./hooks/useRandomQuote";
 import LandingExtras from "./components/LandingExtras.jsx";
 import BeeChatWidget from "./components/BeeChatWidget.jsx";
 import FocusSpaceLogo from "./components/FocusSpaceLogo.jsx";
 import FocusSpacePage from "./components/FocusSpacePage.jsx";
 import studyHubLogo from "./assets/studyhub-logo.png";
+import { FOOTER_COPY, HOME_COPY, NAV_ITEMS, STREAK_COPY } from "./homeContent";
 
 import {
   checkoutSubscription,
@@ -66,60 +68,82 @@ import {
   EyeSlashIcon,
 } from "@heroicons/react/24/outline";
 
-const PLANS = {
+export const PLANS = {
   free: {
+    id: "free",
     name: "Gói Khởi Động",
     price: "0đ",
-    subtitle: "Miễn phí vĩnh viễn cho mọi sinh viên",
-    badge: "Cơ bản",
+    pricePeriod: "",
+    subtitle: "Dành cho sinh viên mới bắt đầu",
+    badge: "Miễn phí vĩnh viễn",
+    maxDocs: 10,
+    maxStorageMb: 200,
+    aiTutorDailyLimit: 5,
     items: [
-      "Tối đa 5 tài liệu tải lên",
-      "Tạo đến 20 thẻ Quiz Card 3D",
-      "2 đề trắc nghiệm cơ bản",
-      "Nova AI Tutor (giới hạn 10 câu/ngày)",
-      "Lộ trình học tập sinh viên tiêu chuẩn",
+      "Tải lên tối đa 10 tài liệu",
+      "200 MB dung lượng lưu trữ",
+      "Quiz Card và Flashcard cơ bản",
+      "AI Tutor 5 lượt mỗi ngày",
+      "Theo dõi tiến độ cơ bản",
+      "Đầy đủ tính năng Deep Focus",
     ],
+    hasLimits: true,
+    limitsTitle: "GIỚI HẠN",
     excluded: [
-      "Không giới hạn tài liệu & thẻ",
-      "Tự động tạo Quiz/Thẻ từ tài liệu AI 1-click",
-      "Luyện thi Mock Exam phân tích 1-1",
-      "Nova AI Voice đọc tài liệu không giới hạn",
+      "Giới hạn số tài liệu và dung lượng",
+      "Không gồm các tính năng AI nâng cao",
     ],
+    cta: "Gói hiện tại",
   },
   plus: {
+    id: "plus",
     name: "Gói Pro Sinh Viên",
     price: "199.000đ",
-    subtitle: "199.000đ / tháng (hoặc 199đ tương đương)",
+    pricePeriod: " / tháng",
+    subtitle: "Cá nhân hóa việc học mỗi ngày",
     badge: "Phổ biến nhất",
+    ribbon: "KHUYÊN DÙNG CHO SINH VIÊN",
+    maxDocs: 50,
+    maxStorageMb: 2048,
+    aiTutorMonthlyLimit: 200,
     items: [
-      "Không giới hạn tài liệu tải lên (PDF, DOC, MD)",
-      "Không giới hạn bộ thẻ Quiz Card 3D Spaced Repetition",
-      "Không giới hạn bài thi trắc nghiệm & chấm điểm tức thì",
-      "Nova AI Tutor trực tiếp về tài liệu KHÔNG GIỚI HẠN",
-      "Tự động trích xuất Thẻ & Trắc nghiệm từ tài liệu chỉ với 1 click",
-      "Lộ trình học cá nhân hóa theo chuyên ngành",
-      "Lưu lịch sử ôn tập đồng bộ đa thiết bị",
+      "Tải lên tối đa 50 tài liệu",
+      "2 GB dung lượng lưu trữ",
+      "Quiz Card và Flashcard nâng cao",
+      "AI Tutor 200 lượt mỗi tháng",
+      "Phân tích học tập bằng AI",
+      "Lộ trình học cá nhân hóa",
     ],
+    hasLimits: true,
+    limitsTitle: "GIỚI HẠN",
     excluded: [
-      "Luyện thi Mock Exam chuyên sâu 1-1",
-      "Nova AI cố vấn đồ án tốt nghiệp & CV xin việc",
+      "Dung lượng tối đa 2 GB",
+      "Một số tính năng AI chuyên sâu cần gói Master",
     ],
+    cta: "Chọn Gói Pro Sinh Viên",
   },
   pro: {
+    id: "pro",
     name: "Gói Master Thủ Khoa",
     price: "299.000đ",
-    subtitle: "299.000đ / tháng (hoặc 299đ tương đương)",
-    badge: "Vip Học Bổng",
+    pricePeriod: " / tháng",
+    subtitle: "Dành cho học chuyên sâu và luyện thi",
+    badge: "Nâng cấp học bổng VIP",
+    maxDocs: 200,
+    maxStorageMb: 5120,
+    aiTutorLimit: "Hạn mức AI Tutor cao hơn",
     items: [
-      "Tất cả quyền lợi của Gói Pro 199đ",
-      "Phòng luyện thi Mock Exam mô phỏng đề thi thật đại học",
-      "Nova AI phân tích lỗ hổng kiến thức 1-1 & gợi ý khắc phục",
-      "Nova AI cố vấn chuyên sâu Đồ án tốt nghiệp & Review CV thực tập",
-      "Huy hiệu Thủ Khoa StudyHub độc quyền trên hồ sơ",
-      "Hỗ trợ học tập ưu tiên 24/7 trực tiếp qua Zalo / Hotline VIP",
-      "Tải toàn bộ bộ thẻ và đề thi offline",
+      "Tải lên tối đa 200 tài liệu",
+      "5 GB dung lượng lưu trữ",
+      "Tất cả quyền lợi của gói Pro Sinh Viên",
+      "Sử dụng nhiều mô hình AI",
+      "Phân tích tài liệu chuyên sâu",
+      "Hạn mức AI Tutor cao hơn",
+      "Lộ trình học nâng cao",
     ],
+    hasLimits: false,
     excluded: [],
+    cta: "Chọn Gói Master Thủ Khoa",
   },
 };
 
@@ -182,7 +206,7 @@ function mapDocumentProgress(result) {
 }
 
 function ThemeToggle({ theme, onToggle }) {
-  return <button type="button" className="theme-toggle" onClick={onToggle} aria-label={theme === 'light' ? 'Bật chế độ tối' : 'Bật chế độ sáng'} title={theme === 'light' ? 'Chế độ tối' : 'Chế độ sáng'} aria-pressed={theme === 'dark'}>
+  return <button type="button" className="theme-toggle" onClick={onToggle} aria-label={theme === 'light' ? HOME_COPY.enableDark : HOME_COPY.enableLight} title={theme === 'light' ? HOME_COPY.dark : HOME_COPY.light} aria-pressed={theme === 'dark'}>
     {theme === 'light' ? <MoonIcon aria-hidden="true" /> : <SunIcon aria-hidden="true" />}
   </button>;
 }
@@ -203,22 +227,22 @@ function StreakCard({ user, streak, onLogin }) {
       <div className="streak-card-heading">
         <div className={`streak-symbol fire-level-${user ? Math.min(streak.current_streak, 3) : 0}`}>{user && streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}</div>
         <div>
-          <span className="eyebrow">THÓI QUEN HỌC TẬP</span>
-          <h2 id="streak-title">Giữ chuỗi mỗi ngày</h2>
+          <span className="eyebrow">{STREAK_COPY.eyebrow}</span>
+          <h2 id="streak-title">{STREAK_COPY.title}</h2>
         </div>
         <div className="streak-total">
           <strong>{user ? streak.current_streak : "—"}</strong>
-          <span>ngày</span>
+          <span>{STREAK_COPY.dayUnit}</span>
         </div>
       </div>
       <p className="streak-description">
         {user
           ? todayActive
-            ? "Bạn đã học hôm nay. Hãy duy trì nhịp học của mình."
-            : "Ôn flashcard hoặc hoàn thành bài tập để ghi nhận ngày học."
-          : "Đăng nhập và học mỗi ngày để bắt đầu chuỗi học tập của bạn."}
+            ? STREAK_COPY.active
+            : STREAK_COPY.inactive
+          : STREAK_COPY.guest}
       </p>
-      <div className="streak-week" aria-label="Hoạt động học tập 7 ngày gần nhất">
+      <div className="streak-week" aria-label={STREAK_COPY.activityLabel}>
         {days.map((day) => {
           const active = user && (streak.activity_dates || [streak.last_activity_date]).includes(day.date);
           return (
@@ -231,10 +255,10 @@ function StreakCard({ user, streak, onLogin }) {
         })}
       </div>
       <footer className="streak-card-footer">
-        <span><CalendarDaysIcon aria-hidden="true" /> Hôm nay: {todayActive ? "đã ghi nhận" : "chưa ghi nhận"}</span>
-        <span>Chuỗi chỉ tính những ngày học liên tiếp</span>
-        <span>GMT+7</span>
-        {!user && <button className="text-link" onClick={onLogin}>Đăng nhập <ArrowRightIcon aria-hidden="true" className="link-icon" /></button>}
+        <span><CalendarDaysIcon aria-hidden="true" /> {STREAK_COPY.today} {todayActive ? STREAK_COPY.recorded : STREAK_COPY.unrecorded}</span>
+        <span>{STREAK_COPY.rule}</span>
+        <span>{STREAK_COPY.timezone}</span>
+        {!user && <button className="text-link" onClick={onLogin}>{HOME_COPY.login} <ArrowRightIcon aria-hidden="true" className="link-icon" /></button>}
       </footer>
     </section>
   );
@@ -515,6 +539,7 @@ function useRevealOnScroll(dependencyKey) {
 }
 
 export default function App() {
+  const randomQuote = useRandomQuote();
   const [view, setView] = useState(() => viewForPath(window.location.pathname));
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState(() => {
@@ -579,6 +604,7 @@ export default function App() {
   const userRef = useRef(user);
   const uploadInput = useRef(null);
   const uploadInFlight = useRef(false);
+  const uploadSavedCallback = useRef(null);
   const uploadSuggestionRequest = useRef(null);
   const uploadTitleEdited = useRef(false);
   const uploadDescriptionEdited = useRef(false);
@@ -1055,6 +1081,33 @@ export default function App() {
       setAuthError(error.message || "Không thể thực hiện yêu cầu.");
     }
   };
+  const openUpload = (subjectCode = "", onSaved = null) => {
+    if (requireLogin()) return;
+    const planConfig = PLANS[subscription?.plan] || PLANS.free;
+    const maxDocs = planConfig.maxDocs || 10;
+    if (documents.length >= maxDocs) {
+      notify(
+        `Bạn đã tải lên ${documents.length}/${maxDocs} tài liệu (đạt giới hạn của ${planConfig.name}). Vui lòng nâng cấp gói để tiếp tục tải thêm!`,
+        "warning"
+      );
+      setView("pricing");
+      return;
+    }
+    uploadSavedCallback.current = onSaved;
+    setUploadPhase("idle");
+    setUploadError("");
+    setUploadFile(null);
+    setUploadFileName("");
+    setUploadTitle("");
+    uploadTitleEdited.current = false;
+    uploadDescriptionEdited.current = false;
+    setUploadSuggestionNote("");
+    setSuggestedUploadTitle("");
+    setUploadSuggestionBusy(false);
+    setUploadDescription("");
+    setUploadSubject(subjectCode);
+    setModal("upload");
+  };
   const submitUpload = async (event) => {
     event.preventDefault();
     if (uploadInFlight.current || uploadSuggestionBusy) return;
@@ -1080,7 +1133,7 @@ export default function App() {
     uploadInFlight.current = true;
     try {
       setUploadPhase("uploading");
-      await uploadDocument({
+      const uploaded = await uploadDocument({
         file,
         title,
         description: uploadDescription,
@@ -1088,6 +1141,8 @@ export default function App() {
       });
       setUploadPhase("processing");
       await loadDocumentsAndProgress();
+      uploadSavedCallback.current?.({ id: uploaded.id, subjectId: uploaded.subject_id || subjectOptions.find((item) => item.code === subjectCode)?.id });
+      uploadSavedCallback.current = null;
       setUploadPhase("success");
       notify("Đã tải tài liệu vào kho học liệu.");
       window.setTimeout(() => {
@@ -1266,27 +1321,20 @@ export default function App() {
     <FocusSpacePage key={userKey || 'guest'} active={view === 'focusSpace'} user={user} onBack={() => go("home")} theme={theme} onToggleTheme={() => setTheme(theme === 'light' ? 'dark' : 'light')} />
     <div className={`studyhub-app ${theme}`} hidden={view === 'focusSpace'}>
       <header className="topbar">
-        <button className="brand-wrap" onClick={() => go("home")} aria-label="StudyHub - Trang chủ">
+        <button className="brand-wrap" onClick={() => go("home")} aria-label={HOME_COPY.brandLabel}>
           <span className="brand-mark"><BookOpenIcon aria-hidden="true" /></span>
           <span className="brand-text">
             Study<span>Hub</span>
           </span>
         </button>
-        <nav className="nav-menu" aria-label="Điều hướng chính">
-          {[
-            ["home", "Trang chủ"],
-            ["library", "Kho học liệu"],
-            ["quiz", "Quiz Card"],
-            ["roadmap", "Lộ trình học"],
-            ["dashboard", "Tiến độ"],
-            ["tutor", "AI Tutor"],
-            ["pricing", "Gói học"],
-          ].map(([id, label]) => (
+        <nav className="nav-menu" aria-label={HOME_COPY.navigation}>
+          {NAV_ITEMS.map(([id, label]) => (
             <button
               key={id}
               type="button"
               className={view === id ? "nav-item active" : "nav-item"}
               onClick={() => go(id)}
+              aria-current={view === id ? "page" : undefined}
             >
               {label}
             </button>
@@ -1298,46 +1346,45 @@ export default function App() {
             <>
               <button
                 className="streak-pill"
-                title="Số ngày học liên tiếp"
+                title={HOME_COPY.streakTooltip}
               >
                 {streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}
                 <strong>{streak.current_streak}</strong>
-                <span>ngày</span>
+                <span>{HOME_COPY.dayUnit}</span>
               </button>
-              <button className="user-pill" onClick={() => setModal("account")}>
+              <button className="user-pill" onClick={() => setModal("account")} title={user.name}>
                 <span className="user-avatar">
                   {user.name?.[0]?.toUpperCase() || "U"}
                 </span>
-                {user.name}
+                <span className="user-name">{user.name}</span>
               </button>
               <button className="btn btn-ghost" onClick={signOut}>
-                Đăng xuất
+                {HOME_COPY.logout}
               </button>
             </>
           ) : (
             <>
-              <button className="btn btn-ghost" onClick={() => openAuth("login")}>Đăng nhập</button>
-              <button className="btn btn-primary" onClick={() => openAuth("register")}>Đăng ký</button>
+              <button className="btn btn-ghost" onClick={() => openAuth("login")}>{HOME_COPY.login}</button>
+              <button className="btn btn-primary" onClick={() => openAuth("register")}>{HOME_COPY.register}</button>
             </>
           )}
         </div>
       </header>
       <main className="main-shell">
         {view === "home" && (
-          <>
+          <div className="home-page">
             <section className={`hero-section ${!user ? 'landing-hero' : ''}`}>
               <div className="hero-copy">
                 <span className="eyebrow">
-                  STUDYHUB · NỀN TẢNG HỌC CÁ NHÂN CÓ ĐỊNH HƯỚNG
+                  {HOME_COPY.eyebrow}
                 </span>
                 <h1>
-                  Học sâu hơn.
+                  {HOME_COPY.headline[0]}
                   <br />
-                  <span>Tiến bộ rõ hơn.</span>
+                  <span>{HOME_COPY.headline[1]}</span>
                 </h1>
                 <p className="hero-tagline">
-                  Nền tảng AI giúp sinh viên tổ chức tài liệu, tạo Quiz thông minh, xây dựng lộ trình học cá nhân hóa và trao đổi trực tiếp với Nova AI Tutor 24/7.
-
+                  {HOME_COPY.description}
                 </p>
                 <div className="hero-actions">
                   <button
@@ -1345,45 +1392,40 @@ export default function App() {
                     onClick={() => user ? go("tutor") : openAuth("login")}
                   >
                     <SparklesIcon aria-hidden="true" className="btn-icon" />
-                    Hỏi Nova AI Tutor
+                    {HOME_COPY.askNova}
                   </button>
                   <button
                     className="btn btn-outline large"
                     onClick={() => user ? go("library") : openAuth("login")}
                   >
                     <BookOpenIcon aria-hidden="true" className="btn-icon" />
-                    Mở kho học liệu
+                    {HOME_COPY.openLibrary}
                   </button>
                 </div>
                 <div className="hero-badges">
-                  <button type="button" className="hero-badge" onClick={() => go("quiz")}><RectangleStackIcon aria-hidden="true" /> Quiz Card AI</button>
-                  <button type="button" className="hero-badge" onClick={() => go("roadmap")}><SparklesIcon aria-hidden="true" /> Lộ trình cá nhân</button>
-                  <button type="button" className="hero-badge" onClick={() => go("dashboard")}><BoltIcon aria-hidden="true" /> Theo dõi tiến độ</button>
+                  <button type="button" className="hero-badge" onClick={() => go("quiz")}><RectangleStackIcon aria-hidden="true" /> {HOME_COPY.chips[0]}</button>
+                  <button type="button" className="hero-badge" onClick={() => go("roadmap")}><SparklesIcon aria-hidden="true" /> {HOME_COPY.chips[1]}</button>
+                  <button type="button" className="hero-badge" onClick={() => go("dashboard")}><BoltIcon aria-hidden="true" /> {HOME_COPY.chips[2]}</button>
                 </div>
               </div>
               <div className="hero-visual">
-                <Logo3D />
+                <Logo3D {...randomQuote} onNotify={notify} />
                 {user ? <>
-                  <div className="hero-note hero-note--one"><BookOpenIcon aria-hidden="true" /><div><strong>{documents.length} tài liệu</strong><small>Đã lưu</small></div></div>
-                  <div className="hero-note hero-note--two"><SparklesIcon aria-hidden="true" /><div><strong>{progress.length ? `${average}%` : "—"}</strong><small>Tiến độ</small></div></div>
-                  <div className="hero-note hero-note--three">{streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}<div><strong>{streak.current_streak} ngày</strong><small>Streak</small></div></div>
+                  <div className="hero-note hero-note--one"><BookOpenIcon aria-hidden="true" /><div><strong>{documents.length} {HOME_COPY.documentUnit}</strong><small>{HOME_COPY.stats[0]}</small></div></div>
+                  <div className="hero-note hero-note--two"><SparklesIcon aria-hidden="true" /><div><strong>{progress.length ? `${average}%` : "—"}</strong><small>{HOME_COPY.stats[1]}</small></div></div>
+                  <div className="hero-note hero-note--three">{streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}<div><strong>{streak.current_streak} {HOME_COPY.dayUnit}</strong><small>{HOME_COPY.stats[2]}</small></div></div>
                 </> : <>
-                  <div className="hero-note hero-note--one"><BookOpenIcon aria-hidden="true" /><div><strong>Gọn một nơi</strong><small>Tài liệu & kiến thức</small></div></div>
-                  <div className="hero-note hero-note--two"><SparklesIcon aria-hidden="true" /><div><strong>Rõ từng bước</strong><small>Lộ trình của riêng bạn</small></div></div>
-                  <div className="hero-note hero-note--three">{streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}<div><strong>Mỗi ngày một chút</strong><small>Xây thói quen học</small></div></div>
+                  <div className="hero-note hero-note--one"><BookOpenIcon aria-hidden="true" /><div><strong>{HOME_COPY.guestStats[0][0]}</strong><small>{HOME_COPY.guestStats[0][1]}</small></div></div>
+                  <div className="hero-note hero-note--two"><SparklesIcon aria-hidden="true" /><div><strong>{HOME_COPY.guestStats[1][0]}</strong><small>{HOME_COPY.guestStats[1][1]}</small></div></div>
+                  <div className="hero-note hero-note--three">{streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}<div><strong>{HOME_COPY.guestStats[2][0]}</strong><small>{HOME_COPY.guestStats[2][1]}</small></div></div>
                 </>}
               </div>
             </section>
             <section className="content-section pain-points-section">
-              <span className="eyebrow">❤️ VẤN ĐỀ</span>
-              <h2>Bạn có đang học theo cách này?</h2>
+              <span className="eyebrow">{HOME_COPY.painEyebrow}</span>
+              <h2>{HOME_COPY.painTitle}</h2>
               <div className="pain-grid">
-                {[
-                  ["📄", "Tài liệu nằm khắp nơi", "Drive, Google, Messenger, đủ nơi không biết bắt đầu từ đâu."],
-                  ["❤️", "Học nhiều nhưng khô nhớ", "Không có phương pháp lặp lại hiệu quả."],
-                  ["💡", "Không biết học gì tiếp theo", "Không có lộ trình rõ ràng."],
-                  ["🔥", "Khó duy trì thói quen", "Học được vài ngày rồi bỏ."],
-                ].map(([icon, title, desc], i) => (
+                {HOME_COPY.painPoints.map(([icon, title, desc], i) => (
                   <article className="pain-card" key={i}>
                     <span className="pain-icon">{icon}</span>
                     <h3>{title}</h3>
@@ -1392,8 +1434,8 @@ export default function App() {
                 ))}
               </div>
               <p className="pain-conclusion">
-                <strong>Bạn không thiếu tài liệu.</strong><br/>
-                Bạn đang thiếu một hệ thống học tập phù hợp.
+                <strong>{HOME_COPY.painConclusion[0]}</strong><br/>
+                {HOME_COPY.painConclusion[1]}
               </p>
             </section>
             {user && <StreakCard
@@ -1402,47 +1444,16 @@ export default function App() {
               onLogin={() => openAuth("login")}
             />}
             <section className="content-section workflow-section" id="studyhub-workflow">
-              <span className="eyebrow">WORKFLOW CÁ NHÂN</span>
-              <h2>StudyHub gom mọi thứ bạn cần<br />vào một nhịp học.</h2>
+              <span className="eyebrow">{HOME_COPY.workflowEyebrow}</span>
+              <h2>{HOME_COPY.workflowTitle[0]}<br />{HOME_COPY.workflowTitle[1]}</h2>
               <div className="workflow-grid reveal-stagger">
-                {[
-                  [
-                    "01",
-                    "Lưu học liệu",
-                    "Tải bài giảng & tài liệu lên kho thông minh.",
-                    "library",
-                  ],
-                  [
-                    "02",
-                    "Ôn Quiz Card",
-                    "AI tự tạo thẻ Flashcard ôn tập lặp lại ngắt quãng.",
-                    "quiz",
-                  ],
-                  [
-                    "03",
-                    "Xây lộ trình",
-                    "Phân bổ lịch học cụ thể theo cấu trúc thi.",
-                    "roadmap",
-                  ],
-                  [
-                    "04",
-                    "Theo dõi tiến độ",
-                    "Xem tỉ lệ hoàn thành và giữ vững streak học.",
-                    "dashboard",
-                  ],
-                  [
-                    "05",
-                    "Hỏi Nova AI",
-                    "Giải đáp thắc mắc chuyên sâu tức thì 24/7.",
-                    "tutor",
-                  ],
-                ].map(([num, title, detail, target]) => (
+                {HOME_COPY.workflow.map(([num, title, detail, target]) => (
                   <article className="workflow-card" key={num}>
                     <span className="step-tag">{num}</span>
                     <h3>{title}</h3>
                     <p>{detail}</p>
                 <button className="text-link" onClick={() => go(target)}>
-                      Mở tính năng{" "}
+                      {HOME_COPY.openFeature}{" "}
                       <ArrowRightIcon
                         aria-hidden="true"
                         className="link-icon"
@@ -1453,27 +1464,22 @@ export default function App() {
               </div>
             </section>
             <section className="content-section roadmap-sample-section">
-              <span className="eyebrow">■ LỘ TRÌNH HỌC MẪu</span>
-              <h2>Học từng bước, tiến bộ từng tuần.</h2>
-              <p>StudyHub giúp bạn biến một mục tiêu lớn thành những bước học nhỏ và rõ ràng.</p>
+              <span className="eyebrow">{HOME_COPY.roadmapEyebrow}</span>
+              <h2>{HOME_COPY.roadmapTitle}</h2>
+              <p>{HOME_COPY.roadmapDescription}</p>
               <div className="roadmap-cards">
-                {[
-                  { week: "TUẦN 1", title: "Làm quen", sub: "Xây nền tảng", items: ["Làm quen với kiến thức cơ bản", "Đọc tài liệu nền tảng", "Hoàn thành 2 bài học", "Ôn 10 Quiz Card"], progress: 80, active: false },
-                  { week: "TUẦN 2", title: "Xây nền", sub: "Nắm kiến thức trọng tâm", items: ["Học kiến thức chính", "Làm bài tập cơ bản", "Hoàn thành 3 bài học", "Ôn 20 Quiz Card"], progress: 60, active: true },
-                  { week: "TUẦN 3", title: "Luyện tập", sub: "Áp dụng kiến thức", items: ["Làm bài tập nâng cao", "Ôn tập bằng Quiz Card", "Hỏi Nova những phần chưa hiểu", "Hoàn thành mini test"], progress: 40, active: false },
-                  { week: "TUẦN 4", title: "Tổng ôn", sub: "Kiểm tra và củng cố", items: ["Ôn toàn bộ kiến thức", "Làm bài kiểm tra", "Xem lại phần còn yếu", "Đánh giá tiến độ"], progress: 20, active: false },
-                ].map((w, i) => (
+                {HOME_COPY.roadmapWeeks.map((w, i) => (
                   <article className={`roadmap-week-card${w.active ? ' active' : ''}`} key={i}>
                     <div className="roadmap-week-header">
                       <span className="week-dot" />
                       <span className="week-label">{w.week}</span>
-                      {w.active && <span className="week-badge">ĐANG HỌC</span>}
+                      {w.active && <span className="week-badge">{HOME_COPY.studying}</span>}
                     </div>
                     <h3>{w.title}</h3>
                     <p className="week-sub">{w.sub}</p>
                     <ul>{w.items.map((item, j) => <li key={j}>{item}</li>)}</ul>
                     <div className="week-progress">
-                      <span>Tiến độ</span>
+                      <span>{HOME_COPY.progress}</span>
                       <strong>{w.progress}%</strong>
                     </div>
                     <div className="progress-bar"><span style={{ width: `${w.progress}%` }} /></div>
@@ -1481,34 +1487,34 @@ export default function App() {
                 ))}
               </div>
               <div className="roadmap-cta">
-                <p><strong>Bạn không cần tự lên kế hoạch từ đầu.</strong></p>
-                <p>StudyHub giúp chia mục tiêu lớn thành từng bước học rõ ràng.</p>
-                <button className="btn btn-primary" onClick={() => go("roadmap")}>Xem lộ trình của tôi →</button>
+                <p><strong>{HOME_COPY.roadmapCtaTitle}</strong></p>
+                <p>{HOME_COPY.roadmapCtaDescription}</p>
+                <button className="btn btn-primary" onClick={() => go("roadmap")}>{HOME_COPY.roadmapCta}</button>
               </div>
             </section>
             <section className="content-section streak-habit-section">
-              <span className="eyebrow">■ THÓI QUEN BỀN VỮNG</span>
-              <h2>🔥 Giữ nhịp học mỗi ngày ✨</h2>
-              <p>Sự đều đặn nhỏ bé tích lũy thành thành tựu lớn. Lên kế hoạch, giữ streak để có thói quen học tập bền bỉ và khỏe mạnh.</p>
+              <span className="eyebrow">{HOME_COPY.habitEyebrow}</span>
+              <h2>{HOME_COPY.habitTitle}</h2>
+              <p>{HOME_COPY.habitDescription}</p>
               {user ? <StreakCard user={user} streak={streak} onLogin={() => openAuth("login")} /> : <div className="streak-calendar-card">
                 <div className="streak-cal-header">
-                  <span>{user ? new Date().toLocaleDateString('vi-VN', { month: 'long', year: 'numeric', timeZone: VIETNAM_TIME_ZONE }) : 'Một tuần học · Minh họa'}</span>
-                  <span>✔ {user ? `Chuỗi hiện tại: ${streak.current_streak} ngày` : 'Mỗi ngày một bước tiến'}</span>
+                  <span>{user ? new Date().toLocaleDateString('vi-VN', { month: 'long', year: 'numeric', timeZone: VIETNAM_TIME_ZONE }) : HOME_COPY.calendarExample}</span>
+                  <span>✔ {user ? `${HOME_COPY.currentStreak} ${streak.current_streak} ${HOME_COPY.dayUnit}` : HOME_COPY.calendarCaption}</span>
                 </div>
                 <div className="streak-week">
-                  {["T2", "T3", "T4", "T5", "T6", "T7", "CN"].map((day, i) => (
+                  {HOME_COPY.weekdays.map((day, i) => (
                     <div className={`streak-day${i < (user ? streak.current_streak : 5) ? ' done' : ''}${i === new Date().getDay() - 1 ? ' today' : ''}`} key={i}>
                       <span className="day-label">{day}</span>
                       <span className="day-num">{12 + i}</span>
                       {i < (user ? streak.current_streak : 5) && <span className="day-check">✔</span>}
-                      {user && i === new Date().getDay() - 1 && <span className="day-today">Hôm nay</span>}
+                      {user && i === new Date().getDay() - 1 && <span className="day-today">{HOME_COPY.today}</span>}
                     </div>
                   ))}
                 </div>
               </div>}
             </section>
             {!user && <LandingExtras plans={PLANS} onStart={() => openAuth("register")} onExplore={go} />}
-          </>
+          </div>
         )}
         {view === "library" && (
           <section className="library-page" aria-labelledby="library-title">
@@ -1520,19 +1526,7 @@ export default function App() {
               </div>
               <button
                 className="btn btn-primary hero-upload"
-                onClick={() => {
-                  if (requireLogin()) return;
-                  setUploadPhase("idle");
-                  setUploadError("");
-                  setUploadFile(null);
-                  setUploadFileName("");
-                  setUploadTitle("");
-                  uploadTitleEdited.current = false; uploadDescriptionEdited.current = false;
-                  setUploadSuggestionNote(''); setSuggestedUploadTitle(''); setUploadSuggestionBusy(false);
-                  setUploadDescription("");
-                  setUploadSubject("");
-                  setModal("upload");
-                }}
+                onClick={() => openUpload()}
               >
                 <CloudArrowUpIcon aria-hidden="true" />
                 Upload tài liệu mới
@@ -1666,9 +1660,12 @@ export default function App() {
           <LearningRoadmapPage
             key={String(user?.id || user?.email || "guest")}
             documents={documents}
+            subjects={subjects}
             progress={progress}
             onOpenDocument={openDocumentPreview}
             onTakeQuiz={(document) => { setSelectedDocument(document); go("quiz"); }}
+            onUpload={openUpload}
+            onAskNova={(document) => { setSelectedDocument(document); go("tutor"); }}
             user={user}
             streak={streak}
             studyTime={studyTime}
@@ -1682,11 +1679,20 @@ export default function App() {
             studyTime={studyTime}
             streak={streak}
             quizDecks={quizDecks}
+            subscription={subscription}
+            onUpgrade={() => go("pricing")}
             onLogin={() => openAuth("login")}
           />
         )}
         {view === "tutor" && (
-          <AITutorPage selectedDocument={selectedDocument} user={user} onDocumentsChanged={loadDocumentsAndProgress} onDocumentDeleted={(documentId) => setSelectedDocument((current) => String(current?.id) === String(documentId) ? null : current)} />
+          <AITutorPage
+            selectedDocument={selectedDocument}
+            user={user}
+            subscription={subscription}
+            onUpgrade={() => go("pricing")}
+            onDocumentsChanged={loadDocumentsAndProgress}
+            onDocumentDeleted={(documentId) => setSelectedDocument((current) => String(current?.id) === String(documentId) ? null : current)}
+          />
         )}
         {view === "pricing" && (
           <section className="pricing-page">
@@ -1700,49 +1706,76 @@ export default function App() {
               </div>
             </div>
             <div className="price-grid reveal-stagger">
-              {Object.entries(PLANS).map(([id, plan]) => (
-                <article
-                  className={`price-card pricing-card-${id} ${id === "plus" ? "featured" : ""} ${subscription.plan === id ? "active" : ""}`}
-                  key={id}
-                >
-                  {id === "plus" && <span className="pricing-ribbon">Khuyến dùng cho sinh viên</span>}
-                  <div className="price-card-topline">
-                    <span className="plan-badge">{plan.badge}</span>
-                    {subscription.plan === id && <span className="current-plan"><CheckIcon aria-hidden="true" /> Gói hiện tại</span>}
-                  </div>
-                  <h3>{plan.name}</h3>
-                  <div className="price-line">
-                    {plan.price}
-                    <span>{id === "free" ? "" : " / tháng"}</span>
-                  </div>
-                  <strong className="plan-usage">{plan.subtitle}</strong>
-                  <hr />
-                  <h4>Quyền lợi chính</h4>
-                  <ul>
-                    {plan.items.map((item) => (
-                      <li key={item}><CheckIcon aria-hidden="true" />{item}</li>
-                    ))}
-                    {plan.excluded.length > 0 && <li className="excluded-divider">Chưa có trong gói này</li>}
-                    {plan.excluded.map((item) => (
-                      <li className="is-excluded" key={item}><XMarkIcon aria-hidden="true" />{item}</li>
-                    ))}
-                  </ul>
-                  <button
-                    className={`btn full ${subscription.plan === id ? "btn-ghost" : id === "free" ? "btn-outline" : "btn-primary"}`}
-                    disabled={subscription.plan === id}
-                    onClick={() => requestPlan(id)}
+              {Object.entries(PLANS).map(([id, plan]) => {
+                const isCurrent = subscription.plan === id;
+                return (
+                  <article
+                    className={`price-card pricing-card-${id} ${id === "plus" ? "featured" : ""} ${isCurrent ? "active" : ""}`}
+                    key={id}
                   >
-                    {id !== "free" && <BoltIcon aria-hidden="true" className="btn-icon" />}
-                    {subscription.plan === id
-                      ? "Gói hiện tại"
-                      : id === "free"
-                        ? "Chuyển về Gói Khởi Động"
-                        : id === "plus"
-                          ? "Nâng cấp Gói 199đ"
-                          : "Nâng cấp Gói 299đ"}
-                  </button>
-                </article>
-              ))}
+                    {plan.ribbon && (
+                      <div className="pricing-ribbon-badge">{plan.ribbon}</div>
+                    )}
+                    <div className="price-card-topline">
+                      <span className="plan-badge">{plan.badge}</span>
+                      {isCurrent && (
+                        <span className="current-plan-indicator">
+                          <CheckIcon aria-hidden="true" /> Gói hiện tại
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="price-card-title">{plan.name}</h3>
+                    <div className="price-line">
+                      <span className="price-amount">{plan.price}</span>
+                      {plan.pricePeriod && (
+                        <span className="price-period">{plan.pricePeriod}</span>
+                      )}
+                    </div>
+                    <p className="plan-usage">{plan.subtitle}</p>
+                    <hr className="price-card-divider" />
+                    <h4 className="price-card-section-title">Quyền lợi chính</h4>
+                    <ul className="price-features-list">
+                      {plan.items.map((item) => (
+                        <li key={item}>
+                          <CheckIcon aria-hidden="true" className="feature-check-icon" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+
+                    {plan.hasLimits && plan.excluded?.length > 0 && (
+                      <>
+                        <div className="price-limits-divider">
+                          <span>{plan.limitsTitle || "GIỚI HẠN"}</span>
+                        </div>
+                        <ul className="price-limits-list">
+                          {plan.excluded.map((item) => (
+                            <li key={item} className="is-excluded">
+                              <XMarkIcon aria-hidden="true" className="limit-cross-icon" />
+                              <span>{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+
+                    <div className="price-card-action">
+                      <button
+                        className={`btn full ${isCurrent ? "btn-current-plan" : "btn-plan-select"}`}
+                        disabled={isCurrent}
+                        onClick={() => requestPlan(id)}
+                      >
+                        {!isCurrent && <BoltIcon aria-hidden="true" className="btn-icon" />}
+                        {isCurrent
+                          ? "Gói hiện tại"
+                          : id === "free"
+                            ? "Chuyển về Gói Khởi Động"
+                            : `Chọn ${plan.name}`}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
             {user && (
               <section className="subscription-panel">
@@ -1771,7 +1804,7 @@ export default function App() {
         )}
       </main>
       {view === "home" && <FocusSpaceLogo onOpen={() => go("focusSpace")} />}
-      <BeeChatWidget visible={view === "home"} key={String(user?.id || user?.email || "guest")} user={user} onNavigate={go} />
+      <BeeChatWidget visible={view === "home" || view === "roadmap"} variant={view === "roadmap" ? "roadmap" : "default"} key={String(user?.id || user?.email || "guest")} user={user} onNavigate={go} />
       {modal === "document-preview" && documentPreview && (
         <Modal
           title={documentPreview.document.title || "Nội dung tài liệu"}
@@ -1818,7 +1851,7 @@ export default function App() {
       )}
       {modal === "upload" && (
         <Modal
-          title="Tải lên Tài liệu Mới"
+          title="Thêm tài liệu vào Kho học liệu"
           subtitle="Thêm tài liệu học tập của bạn để bắt đầu ôn luyện và tạo bộ đề tự động."
           icon={<CloudArrowUpIcon />}
           onClose={() => setModal(null)}
@@ -1869,7 +1902,7 @@ export default function App() {
                 <strong>ENTER THE KNOWLEDGE VAULT</strong>
                 <p>{uploadFileName || "Kéo và thả tài liệu vào đây"}</p>
                 <button type="button" className="btn btn-outline" onClick={() => uploadInput.current?.click()}>Chọn tài liệu</button>
-                <small>PDF · DOCX · PPTX · TXT · MD · tối đa 10MB</small>
+                <small>PDF · DOC · DOCX · MD · TXT · PPTX · tối đa 10MB</small>
                 <input
                   ref={uploadInput}
                   id="upload-file"
@@ -2011,37 +2044,27 @@ export default function App() {
               <span className="brand-mark"><AcademicCapIcon aria-hidden="true" /></span>
               <span className="brand-text">Study<span>Hub</span></span>
             </button>
-            <p>Nền tảng học tập thông minh đồng hành cùng sinh viên Việt Nam chinh phục mọi kỳ thi đại học.</p>
+            <p>{FOOTER_COPY.description}</p>
           </div>
           <div className="footer-col">
-            <h4>HỌC LIỆU</h4>
-            <ul>
-              <li><button onClick={() => go("library")}>Đề thi thử</button></li>
-              <li><button onClick={() => go("library")}>Bài tập lớn</button></li>
-              <li><button onClick={() => go("quiz")}>Quiz card</button></li>
-              <li><button onClick={() => go("library")}>Bài giảng tóm tắt</button></li>
-            </ul>
+            <h4>{FOOTER_COPY.headings[0]}</h4>
+            <ul>{FOOTER_COPY.materials.map(([target, label]) => <li key={label}><button onClick={() => go(target)}>{label}</button></li>)}</ul>
           </div>
           <div className="footer-col">
-            <h4>TÍNH NĂNG</h4>
-            <ul>
-              <li><button onClick={() => go("tutor")}>AI Tutor</button></li>
-              <li><button onClick={() => go("roadmap")}>Nhóm học tập</button></li>
-              <li><button onClick={() => go("quiz")}>Flashcard</button></li>
-              <li><button onClick={() => go("dashboard")}>Bảng xếp hạng</button></li>
-            </ul>
+            <h4>{FOOTER_COPY.headings[1]}</h4>
+            <ul>{FOOTER_COPY.features.map(([target, label]) => <li key={label}><button onClick={() => go(target)}>{label}</button></li>)}</ul>
           </div>
           <div className="footer-col">
-            <h4>LIÊN HỆ</h4>
-            <p>Email: support@studyhub.vn</p>
-            <p>Hotline: 1900 1234</p>
+            <h4>{FOOTER_COPY.headings[2]}</h4>
+            <p>{FOOTER_COPY.email}</p>
+            <p>{FOOTER_COPY.hotline}</p>
           </div>
         </div>
         <div className="footer-bottom">
-          <span>© 2026 StudyHub. Tất cả bản quyền được bảo lưu.</span>
+          <span>{FOOTER_COPY.copyright}</span>
           <div>
-            <button>Điều khoản dịch vụ</button>
-            <button>Chính sách bảo mật</button>
+            <button>{FOOTER_COPY.terms}</button>
+            <button>{FOOTER_COPY.privacy}</button>
           </div>
         </div>
       </footer>

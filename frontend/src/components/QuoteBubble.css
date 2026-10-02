@@ -1,0 +1,76 @@
+.quote-bubble {
+  position: absolute;
+  left: var(--quote-left, 0px);
+  top: var(--quote-top, 0px);
+  width: var(--quote-width, 280px);
+  max-width: 90vw;
+  padding: 20px;
+  border: 1px solid var(--border-color);
+  border-radius: 18px;
+  background: var(--bg-alt);
+  color: var(--text-dark);
+  box-shadow: var(--shadow-card);
+  z-index: 12;
+  visibility: hidden;
+  opacity: 0;
+  transform: scale(.97);
+  transform-origin: 25% 100%;
+  transition: opacity 150ms ease, transform 150ms ease, visibility 0s 150ms,
+    background-color 200ms ease, color 200ms ease, border-color 200ms ease;
+}
+.quote-bubble::after {
+  content: "";
+  position: absolute;
+  left: 25%;
+  bottom: -7px;
+  width: 12px;
+  height: 12px;
+  background: var(--bg-alt);
+  border-right: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  transform: rotate(45deg);
+  transition: background-color 200ms ease, border-color 200ms ease;
+}
+.quote-bubble.is-open {
+  visibility: visible;
+  opacity: 1;
+  transform: scale(1);
+  transition-delay: 0s;
+  animation: quote-bubble-enter 220ms ease-out;
+}
+.logo-3d-container[data-quote-placement="below"] .quote-bubble { transform-origin: 25% 0%; }
+.logo-3d-container[data-quote-placement="below"] .quote-bubble::after {
+  bottom: auto;
+  top: -7px;
+  border: 0;
+  border-left: 1px solid var(--border-color);
+  border-top: 1px solid var(--border-color);
+}
+.quote-bubble-actions { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: var(--pink-ink); }
+.quote-bubble-actions button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-main);
+  color: var(--mint-ink);
+  cursor: pointer;
+}
+.quote-bubble-actions button:hover { background: var(--mint-soft); }
+.quote-bubble-actions button:focus-visible { outline: 2px solid var(--mint-ink); outline-offset: 2px; }
+.quote-bubble .quote-bubble-text { margin: 0; min-height: 4.5em; font-size: 16px; line-height: 1.5; color: inherit; animation: quote-text-enter 200ms ease-out; }
+.logo-3d-container:has(.quote-bubble.is-open) { z-index: 4; }
+.logo-3d-control { border: 0; padding: 0; background: transparent; cursor: pointer; }
+.logo-3d-control:focus-visible { outline: 2px solid var(--mint-ink); outline-offset: 6px; }
+.logo-artwork--clicked { animation: quote-logo-pulse 260ms ease-out; }
+@keyframes quote-bubble-enter { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: scale(1); } }
+@keyframes quote-text-enter { from { opacity: 0; } to { opacity: 1; } }
+@keyframes quote-logo-pulse { 50% { transform: translateZ(28px) scale(1.05); } }
+@media (prefers-reduced-motion: reduce) {
+  .quote-bubble, .quote-bubble.is-open { transform: none; animation: none; transition-duration: 100ms, 0s, 0s, 200ms, 200ms, 200ms; }
+  .quote-bubble-text { animation-duration: 100ms !important; }
+  .logo-artwork--clicked { animation: none; }
+}
