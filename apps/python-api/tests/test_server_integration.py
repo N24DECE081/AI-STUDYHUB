@@ -44,7 +44,9 @@ class ServerIntegrationTest(unittest.TestCase):
             raise RuntimeError('server did not start: '+(out or '')[:2000])
     @classmethod
     def tearDownClass(cls):
-        cls.proc.terminate(); cls.proc.wait(timeout=5); cls.tmp.cleanup()
+        cls.proc.terminate(); cls.proc.wait(timeout=5)
+        import gc; gc.collect()
+        cls.tmp.cleanup()
     def get(self,path,timeout=2):
         with urllib.request.urlopen(f'http://127.0.0.1:{self.port}{path}', timeout=timeout) as r:
             return r.status, r.headers.get_content_type(), r.read()

@@ -28,9 +28,13 @@ function UploadSummaryTab({ onUploadSuccess, currentDocument, setCurrentDocument
 
       if (res.ok) {
         const data = await res.json();
-        setCurrentDocument(data);
-        onUploadSuccess();
-        alert('Tải lên và tóm tắt thành công!');
+        if (data && data.extractedText) {
+          setCurrentDocument(data);
+          onUploadSuccess();
+          alert('Tải lên và tóm tắt thành công!');
+        } else {
+          alert('Lỗi: Không thể trích xuất nội dung từ tài liệu này!');
+        }
       } else {
         const errorText = await res.text();
         alert('Lỗi: ' + errorText);
