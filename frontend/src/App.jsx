@@ -71,7 +71,7 @@ const StudyDeckSession = lazy(() => import('./components/StudyDeckSession'));
 const FlashcardDeckForm = lazy(() => import('./components/flashcard/FlashcardDeckForm'));
 const loadingPage = <div className="auth-checking" role="status" aria-label="Đang tải nội dung"><span /></div>;
 
-export const PLANS = {
+const PLANS = {
   free: {
     id: "free",
     name: "Gói Khởi Động",
