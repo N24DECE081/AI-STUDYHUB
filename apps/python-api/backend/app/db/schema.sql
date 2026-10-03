@@ -540,3 +540,82 @@ CREATE TABLE IF NOT EXISTS flashcard_decks (
     payload TEXT NOT NULL,
     PRIMARY KEY (user_id, id)
 );
+
+CREATE TABLE IF NOT EXISTS quiz_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    quiz_id INTEGER,
+    subject_id INTEGER,
+    document_id INTEGER,
+    legacy_run_id INTEGER UNIQUE,
+    legacy_message_id INTEGER UNIQUE,
+    client_key VARCHAR(80) NOT NULL,
+    quiz_payload TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    submitted_at TEXT,
+    total_questions INTEGER NOT NULL,
+    correct_count INTEGER NOT NULL DEFAULT 0,
+    score_percent INTEGER NOT NULL DEFAULT 0,
+    duration_seconds INTEGER NOT NULL DEFAULT 0,
+    revision INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'in_progress' CHECK(status IN ('in_progress','submitted')),
+    result TEXT,
+    UNIQUE(user_id, client_key),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(quiz_id) REFERENCES chat_sessions(id) ON DELETE SET NULL,
+    FOREIGN KEY(subject_id) REFERENCES subjects(id) ON DELETE SET NULL,
+    FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS ix_quiz_attempts_user_started ON quiz_attempts(user_id, started_at);
+CREATE INDEX IF NOT EXISTS ix_quiz_attempts_user_quiz_status ON quiz_attempts(user_id, quiz_id, status);
+CREATE TABLE IF NOT EXISTS quiz_attempt_keys (
+    user_id INTEGER NOT NULL,
+    client_key VARCHAR(80) NOT NULL,
+    attempt_id INTEGER NOT NULL,
+    PRIMARY KEY(user_id, client_key),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(attempt_id) REFERENCES quiz_attempts(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS quiz_answers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempt_id INTEGER NOT NULL,
+    question_id VARCHAR(80) NOT NULL,
+    selected_option_id INTEGER NOT NULL CHECK(selected_option_id BETWEEN 0 AND 3),
+    is_correct INTEGER CHECK(is_correct IN (0,1)),
+    answered_at TEXT NOT NULL,
+    time_spent_seconds INTEGER NOT NULL DEFAULT 0 CHECK(time_spent_seconds >= 0),
+    UNIQUE(attempt_id, question_id),
+    FOREIGN KEY(attempt_id) REFERENCES quiz_attempts(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS flashcard_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    deck_id VARCHAR(80) NOT NULL,
+    card_id VARCHAR(80) NOT NULL,
+    client_key VARCHAR(80) NOT NULL,
+    result VARCHAR(20) NOT NULL CHECK(result IN ('remembered','not_remembered')),
+    reviewed_at TEXT NOT NULL,
+    UNIQUE(user_id, client_key),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_id, deck_id) REFERENCES flashcard_decks(user_id, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_flashcard_reviews_user_date ON flashcard_reviews(user_id, reviewed_at);
+
+CREATE TABLE IF NOT EXISTS study_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    type VARCHAR(20) NOT NULL CHECK(type IN ('quiz_answer','quiz_submit','card_review','study_session')),
+    xp_earned INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    ref_id VARCHAR(160) NOT NULL,
+    session_key VARCHAR(64),
+    duration_seconds INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(user_id, type, ref_id),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ix_study_events_user_created ON study_events(user_id, created_at);
+INSERT OR IGNORE INTO schema_migrations(version,description)
+VALUES(11,'Durable quiz attempts, answers, flashcard reviews and idempotent study events');

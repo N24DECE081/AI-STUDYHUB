@@ -1,10 +1,14 @@
 /* Quiz Card uses the shared StudyHub tokens; scoped to this feature. */
+.qc-page .qc-subject,.qc-page .qc-recall,.qc-page .eyebrow,.qc-page .qc-badge,.qc-page small,.qc-dialog small,.qc-dialog .eyebrow{font-size:13px;color:var(--muted-foreground)}
+.qc-page .qc-hero-art i,.qc-colors button{color:var(--primary-foreground)}
+.qc-page .qc-hero-art span{font-size:12px}
+.qc-create-modes button{color:var(--foreground)}
 .qc-page{max-width:1160px;margin:0 auto;padding:28px 24px 64px;color:var(--text-dark)}
 .qc-hero{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:40px;align-items:center;padding:32px 38px;background:var(--bg-main);border:1px solid var(--border-color);border-radius:var(--radius-lg);box-shadow:var(--shadow-subtle)}
 .qc-badge{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:700;border:1px solid var(--border-color);border-radius:var(--radius-pill);padding:6px 12px;color:var(--text-body)}
 .qc-hero h1{font-size:clamp(27px,3.1vw,40px);line-height:1.18;letter-spacing:-1px;margin:17px 0 13px}.qc-hero h1 span{color:var(--pink-ink)}
 .qc-hero p{color:var(--text-body);font-size:13px;max-width:560px;margin:0 0 22px;line-height:1.8}.qc-hero-actions{display:flex;gap:10px;flex-wrap:wrap}
-.qc-mint{background:var(--secondary-mint);color:var(--text-dark)}.qc-mint:hover:not(:disabled){background:var(--secondary-mint-hover)}
+.qc-mint{background:var(--primary);color:var(--primary-foreground)}.qc-mint:hover:not(:disabled){background:var(--secondary-mint-hover);color:var(--primary-foreground)}
 .qc-hero-art{position:relative;display:grid;place-items:center;min-height:200px}.qc-hero-art>div{transform:rotate(-8deg);background:var(--pink-soft);border:1px solid var(--primary-pink);border-radius:var(--radius-lg);padding:25px;display:grid;gap:15px;width:180px;box-shadow:12px 12px 0 var(--mint-soft)}.qc-hero-art b{font-size:25px;line-height:1.3}.qc-hero-art span{font-size:9px;font-weight:800;letter-spacing:1px;color:var(--pink-ink)}.qc-hero-art i{position:absolute;right:0;top:14px;background:var(--secondary-mint);border:5px solid var(--bg-main);border-radius:50%;padding:13px;display:flex}
 .qc-overview{display:flex;gap:28px;flex-wrap:wrap;justify-content:center;padding:23px;font-size:12px;color:var(--text-body)}.qc-overview span{display:flex;align-items:center;gap:8px}.qc-overview b{color:var(--text-dark)}
 .qc-section{margin-top:22px}.qc-section>header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:22px}.qc-section h2{display:flex;align-items:center;gap:10px;font-size:23px;margin:5px 0}.qc-section header p{margin:0;color:var(--text-body);font-size:13px}.qc-section .eyebrow{font-size:10px;letter-spacing:1.4px;color:var(--mint-ink)}
@@ -32,4 +36,6 @@
 .qc-manual-item { display: grid; gap: 14px; padding: 16px; border: 1px solid #e5e7eb; border-radius: 16px; min-width: 0; }
 .qc-manual-option { display: flex; gap: 12px; align-items: center; min-width: 0; }
 .qc-manual-option > input[type="radio"] { width: 18px; flex: 0 0 18px; accent-color: var(--primary-pink); }
+.qc-page :is(.qc-section .eyebrow,.qc-score,.qc-recall,.qc-subject,.qc-grid p,.qc-grid small),.qc-dialog :is(small,.eyebrow){font-size:13px}
+.qc-page .qc-hero-art span{font-size:12px}
 .qc-manual-option > label { flex: 1; min-width: 0; }

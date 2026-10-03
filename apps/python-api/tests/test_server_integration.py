@@ -232,7 +232,7 @@ class ServerIntegrationTest(unittest.TestCase):
         status,_,study_time=self.request('/api/study-time',headers={'Cookie':cookie})
         self.assertEqual(status,200,study_time)
         self.assertTrue(study_time['active'])
-        self.assertGreaterEqual(study_time['current_session_seconds'],3665)
+        self.assertEqual(study_time['current_session_seconds'],0)  # Login/idle time is not study time.
 
         status,_,logout=self.request('/api/auth/logout','POST',{}, {'Cookie':cookie})
         self.assertEqual(status,200,logout)
@@ -243,7 +243,7 @@ class ServerIntegrationTest(unittest.TestCase):
         ).fetchone()
         connection.close()
         self.assertEqual(closed[0],'completed')
-        self.assertGreaterEqual(closed[1],3665)
+        self.assertEqual(closed[1],0)
 
     def test_progress_analytics_uses_quiz_completion_and_correct_answers(self):
         email=f'progress_analytics_{time.time_ns()}@example.com'
@@ -271,11 +271,11 @@ class ServerIntegrationTest(unittest.TestCase):
         self.assertEqual(status,200,result)
         summary=result['analytics']['summary']
         self.assertEqual(summary['completion_percent'],80)
-        self.assertEqual(summary['accuracy_percent'],60)
-        self.assertEqual(summary['learning_percent'],70)
+        self.assertEqual(summary['accuracy_percent'],75)  # 6 correct / 8 answered, not / 10 total.
+        self.assertEqual(summary['learning_percent'],78)
         self.assertEqual(summary['xp'],65)
         self.assertEqual(result['analytics']['today']['questions_answered'],8)
-        self.assertEqual(result['analytics']['ranges']['day'][-1]['learning_percent'],70)
+        self.assertEqual(result['analytics']['ranges']['day'][-1]['learning_percent'],78)
 
     def test_course_creation_and_progress_round_trip(self):
         student_cookie=self.login_cookie('student@studyhub.local','Student123!')
@@ -494,7 +494,14 @@ class ServerIntegrationTest(unittest.TestCase):
         self.assertGreater(cancel_effective,before_cancel)
 
     def test_quiz_hides_solutions_until_submit_and_is_user_scoped(self):
-        student=self.login_cookie('student@studyhub.local','Student123!')
+        status,headers,account=self.request('/api/auth/register','POST',{
+            'name':'Quiz contract','email':f'quiz-contract-{time.time_ns()}@example.com','password':'Student123!'
+        })
+        self.assertEqual(status,201,account)
+        user_id=account['user']['id'];student=headers['Set-Cookie'].split(';')[0]
+        with sqlite3.connect(Path(self.tmp.name) / 'integration.db') as conn:
+            conn.execute("INSERT INTO subscriptions(user_id,plan_id,status) SELECT ?,id,'active' FROM plans WHERE name='Premium'",(user_id,))
+        conn.close()
         teacher=self.login_cookie('teacher@studyhub.local','Teacher123!')
         subject_id=self.create_subject(student,'QIZ')['id']
         boundary='----QuizSourceUpload'
@@ -519,7 +526,6 @@ class ServerIntegrationTest(unittest.TestCase):
             self.assertEqual(status,400,invalid)
         # Seed a generated quiz to independently verify read/submit authorization and answer secrecy.
         with sqlite3.connect(Path(self.tmp.name) / 'integration.db') as conn:
-            user_id=conn.execute("SELECT id FROM users WHERE email='student@studyhub.local'").fetchone()[0]
             quiz_id=conn.execute("INSERT INTO chat_sessions(user_id,title) VALUES(?,?)",(user_id,'QUIZ_CARD:fixture')).lastrowid
             payload={'kind':'quiz','title':'Fixture','document_ids':[uploaded['document_id']],'question_count':1,'questions':[
                 {'id':'q1','question':'Which constraint prevents orphan records?', 'options':['Foreign key','Index','View','Sort'],

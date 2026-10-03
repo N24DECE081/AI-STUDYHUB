@@ -38,15 +38,15 @@ function FlashcardTab({ currentDocument }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #2e264d', paddingBottom: '16px' }}>
         <div>
-          <h2 style={{ fontSize: '20px', color: '#ffffff', margin: 0 }}>🎴 Flashcards Khái Niệm & Từ Vựng</h2>
-          <p style={{ fontSize: '13px', color: '#a78bfa', margin: '4px 0 0 0' }}>Tài liệu: {currentDocument ? currentDocument.fileName : 'Chưa chọn'}</p>
+          <h2 style={{ fontSize: '20px', color: 'var(--foreground)', margin: 0 }}>🎴 Flashcards Khái Niệm & Từ Vựng</h2>
+          <p style={{ fontSize: '13px', color: 'var(--foreground)', margin: '4px 0 0 0' }}>Tài liệu: {currentDocument ? currentDocument.fileName : 'Chưa chọn'}</p>
         </div>
         <button
           onClick={handleGenerateFlashcards}
           disabled={!currentDocument || loading}
           style={{
-            padding: '12px 20px', background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
-            color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer'
+            padding: '12px 20px', background: 'var(--accent)',
+            color: 'var(--accent-foreground)', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer'
           }}
         >
           {loading ? 'Đang trích xuất...' : '✨ Tạo Thẻ Flashcard'}
@@ -55,13 +55,13 @@ function FlashcardTab({ currentDocument }) {
 
       {loading && (
         <div style={{ textAlign: 'center', padding: '40px' }}>
-          <img src={robotImg} alt="AI Bot" style={{ width: '80px', height: '80px', marginBottom: '12px' }} />
-          <p style={{ color: '#a78bfa' }}>AI đang tìm kiếm các thuật ngữ cốt lõi...</p>
+          <img src={robotImg} alt="AI Bot" loading="lazy" decoding="async" style={{ width: '80px', height: '80px', marginBottom: '12px' }} />
+          <p style={{ color: 'var(--foreground)' }}>AI đang tìm kiếm các thuật ngữ cốt lõi...</p>
         </div>
       )}
 
       {!loading && cards.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--foreground)' }}>
           Nhấn nút <strong>"Tạo Thẻ Flashcard"</strong> để AI ghi nhớ thuật ngữ tự động!
         </div>
       )}
@@ -85,16 +85,16 @@ function FlashcardTab({ currentDocument }) {
               >
                 {!isFlipped ? (
                   <div>
-                    <span style={{ fontSize: '11px', color: '#a78bfa', textTransform: 'uppercase', letterSpacing: '1px' }}>Thuật ngữ</span>
-                    <h3 style={{ color: '#ffffff', marginTop: '10px', fontSize: '18px' }}>{card.term}</h3>
-                    <p style={{ fontSize: '11px', color: '#64748b', marginTop: '20px' }}>👆 Nhấn để xem giải thích</p>
+                    <span style={{ fontSize: '11px', color: 'var(--foreground)', textTransform: 'uppercase', letterSpacing: '1px' }}>Thuật ngữ</span>
+                    <h3 style={{ color: 'var(--foreground)', marginTop: '10px', fontSize: '18px' }}>{card.term}</h3>
+                    <p style={{ fontSize: '11px', color: 'var(--foreground)', marginTop: '20px' }}>👆 Nhấn để xem giải thích</p>
                   </div>
                 ) : (
                   <div>
-                    <h4 style={{ color: '#c4b5fd', margin: '0 0 8px 0', fontSize: '14px' }}>Định nghĩa:</h4>
-                    <p style={{ color: '#e2e8f0', fontSize: '13px', lineHeight: '1.5', margin: 0 }}>{card.definition}</p>
+                    <h4 style={{ color: 'var(--foreground)', margin: '0 0 8px 0', fontSize: '14px' }}>Định nghĩa:</h4>
+                    <p style={{ color: 'var(--foreground)', fontSize: '13px', lineHeight: '1.5', margin: 0 }}>{card.definition}</p>
                     {card.example && (
-                      <p style={{ color: '#94a3b8', fontSize: '11px', fontStyle: 'italic', marginTop: '8px' }}>Ví dụ: {card.example}</p>
+                      <p style={{ color: 'var(--foreground)', fontSize: '11px', fontStyle: 'italic', marginTop: '8px' }}>Ví dụ: {card.example}</p>
                     )}
                   </div>
                 )}

@@ -27,6 +27,7 @@ import {
 import "./learning-roadmap.css";
 import RoadmapLogo from "./RoadmapLogo";
 import { CurrentRoadmapCard, RoadmapBanner } from "./RoadmapOverview";
+import { planPermissions } from '../utils/planPermissions';
 
 const GOALS = [
   "Nắm kiến thức cơ bản",
@@ -277,8 +278,12 @@ export default function LearningRoadmapPage({
   onUpload,
   onAskNova,
   user,
+  subscription,
   streak = {},
 }) {
+  const permissions = planPermissions(subscription);
+  const roadmapLock = { disabled: !permissions.personalizedRoadmap, title: !permissions.personalizedRoadmap ? 'Nâng cấp để sử dụng' : undefined };
+  const uploadLock = { disabled: !permissions.canUpload, title: !permissions.canUpload ? 'Nâng cấp để sử dụng' : undefined };
   const userScope = String(user?.id || user?.email || "guest");
   const storageKey = "studyhub-roadmap-plan:" + userScope;
 
@@ -420,7 +425,7 @@ export default function LearningRoadmapPage({
     return scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : 0;
   };
 
-  const locked = (index) => lessonRows.slice(0, index).some((row) => lessonMastery(row) < 60);
+  const locked = (index) => !permissions.personalizedRoadmap || lessonRows.slice(0, index).some((row) => lessonMastery(row) < 60);
   const completed = lessonRows.filter((row) => lessonMastery(row) >= 60).length;
 
   const currentPlan = roadmap && String(plan.roadmapId) === String(roadmap.roadmap_id) ? plan : null;
@@ -485,6 +490,7 @@ export default function LearningRoadmapPage({
   }, [currentStep, demoMode]);
 
   const beginWizard = () => {
+    if (!permissions.personalizedRoadmap) return;
     const initialSubject = subjectOptions[0]?.key || "";
     setSelectedSubject(initialSubject);
     setSelectedDocIds([]);
@@ -496,6 +502,7 @@ export default function LearningRoadmapPage({
   };
 
   const openLesson = (row) => {
+    if (!permissions.personalizedRoadmap) return;
     setSelectedLessonId(row?.lesson.key || null);
     setActiveExerciseId(null);
     setGrade(null);
@@ -534,6 +541,7 @@ export default function LearningRoadmapPage({
   // Generate roadmap with Nova AI loading from 0% to 100%
   const generateRoadmap = async (event) => {
     if (event) event.preventDefault();
+    if (!permissions.personalizedRoadmap) return;
     if (busy) return;
     if (!selectedDocuments.length) {
       setError("Vui lòng chọn ít nhất 1 tài liệu để tạo lộ trình.");
@@ -584,7 +592,7 @@ export default function LearningRoadmapPage({
         subject: subject?.name || "Lập trình C++",
         goal: selectedGoals.join("; "),
         current_level: "beginner",
-        target_level: "advanced",
+        target_level: permissions.advancedRoadmap ? 'advanced' : 'intermediate',
         pace: hours <= 4 ? "slow" : hours <= 8 ? "steady" : "fast",
         study_time: hours * 60,
         strengths: [...new Set(relevant.filter((i) => Number(i.percentage) >= 80).map((i) => i.topic).filter(Boolean))].slice(0, 5),
@@ -842,7 +850,7 @@ export default function LearningRoadmapPage({
                 <p>{`Lộ trình được tạo từ ${roadmapDocuments.length} tài liệu của bạn`}</p>
                 </div>
               </div>
-              <button className="lr-btn lr-btn-primary" onClick={beginWizard}><Plus size={18} /> Tạo lộ trình mới</button>
+              <button className="lr-btn lr-btn-primary" {...roadmapLock} onClick={beginWizard}><Plus size={18} /> Tạo lộ trình mới</button>
             </header>
           ) : null}
 
@@ -945,6 +953,7 @@ export default function LearningRoadmapPage({
                     <button
                       className="lr-btn lr-btn-outline"
                       type="button"
+                      {...uploadLock}
                       onClick={() => onUpload(subject?.code || "", (uploaded) => {
                         setUploadedDocument(uploaded);
                         setSelectedSubject(String(uploaded.subjectId));
@@ -1220,7 +1229,8 @@ export default function LearningRoadmapPage({
                 <button
                   className="lr-btn lr-btn-primary lr-btn-start"
                   type="submit"
-                  disabled={!selectedGoals.length || !validTime || Boolean(busy)}
+                  disabled={!permissions.personalizedRoadmap || !selectedGoals.length || !validTime || Boolean(busy)}
+                  title={roadmapLock.title}
                 >
                   <Sparkles size={17} /> Tạo lộ trình với Nova
                 </button>
@@ -1239,6 +1249,8 @@ export default function LearningRoadmapPage({
                 documents={roadmap ? roadmapDocuments.length : 0}
                 onCreate={beginWizard}
                 onUpload={onUpload}
+                canCreate={permissions.personalizedRoadmap}
+                canUpload={permissions.canUpload}
               />
 
               <div className="lr-section-header-row">
@@ -1262,6 +1274,7 @@ export default function LearningRoadmapPage({
                 </div>
               ) : roadmap ? (
                 <CurrentRoadmapCard
+                  disabled={!permissions.personalizedRoadmap}
                   title={roadmapTitle}
                   description={roadmapDescription}
                   fileType={fileType(primaryDocument || {})}
@@ -1283,7 +1296,7 @@ export default function LearningRoadmapPage({
                   <RoadmapLogo size="md" interactive />
                   <h2>Bạn chưa có lộ trình học nào</h2>
                   <p>Chọn tài liệu từ Kho học liệu hoặc tải tài liệu mới lên để Nova tạo lộ trình cho bạn.</p>
-                  <button className="lr-btn lr-btn-primary" onClick={beginWizard}>
+                  <button className="lr-btn lr-btn-primary" {...roadmapLock} onClick={beginWizard}>
                     <Plus size={18} /> Tạo lộ trình đầu tiên
                   </button>
                 </div>
@@ -1394,7 +1407,7 @@ export default function LearningRoadmapPage({
                     return (
                       <li key={row.lesson.key} className={`lr-timeline-node ${isDone ? "is-done" : isStarted ? "is-current" : isLocked ? "is-locked" : "is-ready"}`}>
                         <span className="lr-timeline-dot" aria-hidden="true">{isDone ? <Check size={18} /> : isLocked ? <LockKeyhole size={16} /> : String(index + 1).padStart(2, "0")}</span>
-                        <button type="button" className={`lr-topic-card lr-lesson-btn lr-lesson ${selectedLesson === row ? "is-selected" : ""}`} aria-pressed={selectedLesson === row} onClick={() => openLesson(row)}>
+                        <button type="button" {...roadmapLock} className={`lr-topic-card lr-lesson-btn lr-lesson ${selectedLesson === row ? "is-selected" : ""}`} aria-pressed={selectedLesson === row} onClick={() => openLesson(row)}>
                           <span className="lr-topic-top"><span>STEP {String(index + 1).padStart(2, "0")}</span><span>{isDone ? "Hoàn thành" : isLocked ? "Đã khóa" : isStarted ? "Đang học" : "Chưa bắt đầu"}</span></span>
                           <strong>{row.lesson.title}</strong>
                           <span className="lr-topic-range"><Clock3 size={14} /> {formatHours(start)} – {formatHours(start + duration)} giờ · {formatHours(duration)} giờ học</span>

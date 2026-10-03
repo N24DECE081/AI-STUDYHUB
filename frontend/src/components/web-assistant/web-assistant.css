@@ -9,7 +9,7 @@
   height: 62px;
   border: 1px solid rgba(32, 26, 46, 0.06);
   border-radius: 50%;
-  background: #fff;
+  background: var(--card);
   box-shadow: 0 14px 34px rgba(24, 20, 42, 0.22);
   font-size: 28px;
   line-height: 1;
@@ -41,7 +41,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #fff;
+  background: var(--card);
   border: 1px solid rgba(32, 26, 46, 0.06);
   border-radius: 24px;
   box-shadow: 0 26px 60px rgba(24, 20, 42, 0.22);
@@ -116,7 +116,7 @@
   flex: 0 0 auto;
   border: 0;
   border-radius: 50%;
-  background: #fff;
+  background: var(--card);
   color: #2a2438;
   font-size: 13px;
   cursor: pointer;
@@ -278,7 +278,7 @@
   padding: 9px 12px;
   border: 1px solid #e8e5ec;
   border-radius: 999px;
-  background: #fff;
+  background: var(--card);
   color: #3a3550;
   font-size: 12.5px;
   line-height: 1.2;
@@ -323,7 +323,7 @@
 .wa-compose input:focus {
   outline: none;
   border-color: #f4bccf;
-  background: #fff;
+  background: var(--card);
 }
 
 .wa-send {

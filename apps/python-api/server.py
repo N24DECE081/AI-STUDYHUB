@@ -43,6 +43,8 @@ from backend.app.ai_tutor import memory as tutor_memory
 from backend.app.ai_tutor import agent as tutor_agent
 from backend.app.ai_tutor.roadmap import normalize_level, normalize_pace
 from backend.app import web_assistant
+from backend.app import permissions
+from backend.app import study
 
 tutor_config.load_env()
 
@@ -115,6 +117,10 @@ def db():
 def init_db():
  database=get_runtime_database()
  database.initialize()
+ with database.connect() as connection:
+  permissions.initialize(connection)
+  study.migrate(connection)
+  connection.commit()
  with database.connect() as connection:
   has_users=connection.execute('SELECT 1 FROM users LIMIT 1').fetchone()
  if not has_users:
@@ -259,7 +265,7 @@ def close_study_session(connection, token):
         'SELECT * FROM study_sessions WHERE session_key=? AND status=?',(key,'active')
     ).fetchone()
     if not row:return None
-    duration=elapsed_seconds(row['started_at'],now)
+    duration=study.study_time(connection,row['user_id'],key)['current_session_seconds']
     connection.execute(
         'UPDATE study_sessions SET last_seen_at=?,ended_at=?,duration_seconds=?,status=? WHERE id=?',
         (now,now,duration,'completed',row['id']),
@@ -268,26 +274,8 @@ def close_study_session(connection, token):
     return duration
 
 def study_time_summary(connection, user_id, token):
-    now=local_stamp(); current_key=token_hash(token) if token else None
-    rows=connection.execute(
-        'SELECT id,session_key,started_at,last_seen_at,ended_at,duration_seconds,status '
-        'FROM study_sessions WHERE user_id=? ORDER BY started_at DESC',(user_id,)
-    ).fetchall()
-    total=0; current=0; history=[]
-    for row in rows:
-        if row['status']=='active':
-            end=now if row['session_key']==current_key else row['last_seen_at']
-            seconds=elapsed_seconds(row['started_at'],end)
-        else:
-            seconds=max(0,int(row['duration_seconds'] or 0))
-        total+=seconds
-        if row['status']=='active' and row['session_key']==current_key:current=seconds
-        if len(history)<10:
-            history.append({
-                'id':row['id'],'started_at':row['started_at'],'ended_at':row['ended_at'],
-                'duration_seconds':seconds,'status':row['status'],
-            })
-    return {'total_seconds':total,'current_session_seconds':current,'session_count':len(rows),'active':current_key is not None and any(row['status']=='active' and row['session_key']==current_key for row in rows),'sessions':history}
+    return study.study_time(connection, user_id, token_hash(token) if token else None)
+
 
 def document_text(row, connection=None):
     if connection is not None:
@@ -823,6 +811,85 @@ def learning_sources(connection, user_id, payload):
     return docs,dict(subject)
 
 
+def persist_tutor_quiz(connection,user_id,quiz,exercise_id=None):
+    payload=quizzes.normalize_manual({'title':str(quiz.get('topic') or 'Quiz nhanh')[:100],
+      'questions':[{'question':q['question'],'options':q['options'],'correct_index':q['answer_index'],
+                    'explanation':q.get('explanation','')} for q in quiz['questions']]})
+    if exercise_id:payload['tutor_exercise_id']=exercise_id
+    payload['subject']=quiz.get('subject') or quiz.get('topic') or 'Tự học'
+    quiz_id=connection.execute('INSERT INTO chat_sessions(user_id,title) VALUES(?,?)',(user_id,'QUIZ_CARD:'+payload['title'])).lastrowid
+    connection.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(quiz_id,'assistant',json.dumps(payload,ensure_ascii=False)))
+    return quiz_id
+
+
+def exercise_quiz(connection,user_id,exercise_id):
+    if type(exercise_id) is not int:raise ValueError('Mã bài tập không hợp lệ.')
+    exercise=tutor_store.get_exercise(connection,exercise_id)
+    if not exercise or exercise['user_id']!=user_id:raise LookupError('Bài tập không tồn tại.')
+    if exercise['exercise_type']!='multiple_choice':raise ValueError('Bài tập không phải trắc nghiệm.')
+    title=f'Nova exercise {exercise_id}'
+    row=connection.execute('SELECT id FROM chat_sessions WHERE user_id=? AND title=? ORDER BY id DESC LIMIT 1',
+      (user_id,'QUIZ_CARD:'+title)).fetchone()
+    if row:return row['id']
+    options=exercise.get('options') or []
+    if isinstance(options,str):options=json.loads(options)
+    expected=str(exercise.get('expected_answer') or '').strip().casefold()
+    correct=next((i for i,option in enumerate(options) if option.strip().casefold()==expected),None)
+    if correct is None:raise ValueError('Bài tập chưa có đáp án hợp lệ.')
+    return persist_tutor_quiz(connection,user_id,{'topic':title,'subject':exercise['topic'],'questions':[{'question':exercise['prompt'],
+      'options':options,'answer_index':correct}]},exercise_id)
+
+def finish_study_attempt(connection,user_id,attempt_id,payload):
+    result=study.submit(connection,user_id,attempt_id,payload)
+    attempt=study.owned(connection,user_id,attempt_id)
+    quiz=json.loads(attempt['quiz_payload'])
+    for document_id in dict.fromkeys(quiz.get('document_ids',[])):
+        advance_document_progress(connection,user_id,document_id,60+round(result['score']*40/max(result['total'],1)),result['score'])
+    return result
+
+def handle_study_post(handler,path,data):
+    match=re.fullmatch(r'/api/quiz-attempts/(\d+)/(answers|submit)',path)
+    if path not in ('/api/quiz-attempts','/api/study-session/heartbeat') and not match:return False
+    user=require_user(handler)
+    if not user:return True
+    payload=json_body(data)
+    if not isinstance(payload,dict):
+        handler.json({'error':'Dữ liệu học tập không hợp lệ.'},422);return True
+    try:
+        with db() as c:
+            study.lock(c,user['id'])
+            if path=='/api/quiz-attempts':
+                study.migrate(c,user['id'])
+                quiz_id=payload.get('quizId',payload.get('quiz_id'))
+                if payload.get('tutorExerciseId'):
+                    permissions.require_feature(permissions.plan_for(c,user['id']),'personalized_roadmap')
+                    quiz_id=exercise_quiz(c,user['id'],payload['tutorExerciseId'])
+                if payload.get('tutorMessageId'):
+                    row=c.execute('''SELECT m.id,m.payload FROM tutor_messages m JOIN tutor_conversations t ON t.id=m.conversation_id
+                        WHERE m.id=? AND t.user_id=? AND m.role='assistant' ''',(payload['tutorMessageId'],user['id'])).fetchone()
+                    if not row:raise LookupError('Quiz trong Nova không tồn tại.')
+                    tutor_quiz=json.loads(row['payload'] or '{}')
+                    if not tutor_quiz.get('questions'):raise ValueError('Tin nhắn không chứa bài trắc nghiệm.')
+                    quiz_id=tutor_quiz.get('quiz_id')
+                    if not quiz_id:
+                        quiz_id=persist_tutor_quiz(c,user['id'],tutor_quiz)
+                        tutor_quiz['quiz_id']=quiz_id
+                        c.execute('UPDATE tutor_messages SET payload=? WHERE id=?',(json.dumps(tutor_quiz,ensure_ascii=False),row['id']))
+                if type(quiz_id) is not int:raise ValueError('Mã bài trắc nghiệm không hợp lệ.')
+                result=study.start(c,user['id'],quiz_id,payload)
+            elif path=='/api/study-session/heartbeat':
+                token=cookie_value(handler,SESSION_COOKIE)
+                study.heartbeat(c,user['id'],token_hash(token))
+                result=study_time_summary(c,user['id'],token)
+            elif match.group(2)=='answers':result=study.save_answers(c,user['id'],int(match.group(1)),payload)
+            else:result=finish_study_attempt(c,user['id'],int(match.group(1)),payload)
+            c.commit()
+        handler.json(result,201 if path=='/api/quiz-attempts' else 200)
+    except LookupError as error:handler.json({'error':str(error)},404)
+    except ValueError as error:handler.json({'error':str(error)},422)
+    except permissions.PermissionDenied as error:handler.json({'error':str(error),'code':error.code},error.status)
+    return True
+
 def handle_learning_post(handler,path,data):
     match=re.fullmatch(r'/api/(quizzes|flashcards)/([^/]+)/(start|answers|rename)',path)
     if path not in ('/api/quizzes/limits','/api/flashcards/generate','/api/quizzes/manual','/api/flashcards/manual') and not match:return False
@@ -866,8 +933,15 @@ def handle_learning_post(handler,path,data):
                 c.execute('UPDATE flashcard_decks SET payload=? WHERE id=? AND user_id=?',(json.dumps(result,ensure_ascii=False),unquote(match.group(2)),user['id']))
             else:
                 quiz_id=match.group(2)
-                if match.group(3)=='start':result=quiz_store.start(c,user['id'],quiz_id)
-                elif match.group(3)=='answers':result=quiz_store.save_answers(c,user['id'],quiz_id,payload)
+                if match.group(3) in ('start','answers'):
+                    study.lock(c,user['id'])
+                    if match.group(3)=='start':result=study.start(c,user['id'],quiz_id,payload)
+                    else:
+                        quiz_store.owned_quiz(c,user['id'],quiz_id)
+                        study.migrate(c,user['id'])
+                        row=c.execute('SELECT id FROM quiz_attempts WHERE user_id=? AND quiz_id=? AND legacy_run_id=?',(user['id'],quiz_id,payload.get('run_id'))).fetchone()
+                        if not row:raise ValueError('Hãy bắt đầu lượt làm bài trước khi lưu.')
+                        result=study.save_answers(c,user['id'],row['id'],payload)
                 else:
                     row,quiz=quiz_store.owned_quiz(c,user['id'],quiz_id)
                     title=flashcards.text(payload.get('name'),100)
@@ -911,73 +985,12 @@ def _shift_month(year, month, offset):
     return index//12,index%12+1
 
 def quiz_progress_analytics(connection, user_id, now=None):
-    """Aggregate real quiz attempts into day/week/month learning progress.
+    study.lock(connection,user_id)
+    study.migrate(connection,user_id)
+    result=study.analytics(connection,user_id,now)
+    connection.commit()
+    return result
 
-    Learning progress deliberately balances completion (answered questions) and
-    accuracy (correct answers), so submitting an unfinished quiz cannot look the
-    same as completing it with strong results.
-    """
-    current=(now or vietnam_now()).astimezone(VIETNAM_TZ)
-    rows=connection.execute('''SELECT m.content,m.created_at
-      FROM chat_messages m JOIN chat_sessions s ON s.id=m.session_id
-      WHERE s.user_id=? AND s.title LIKE 'QUIZ_CARD:%' AND m.role='user'
-      ORDER BY m.created_at ASC,m.id ASC''',(user_id,)).fetchall()
-    attempts=[]
-    for row in rows:
-        try: payload=json.loads(row['content'])
-        except (TypeError,json.JSONDecodeError): continue
-        if payload.get('kind')!='quiz_attempt': continue
-        total=max(0,int(payload.get('total') or 0))
-        score=max(0,min(total,int(payload.get('score') or 0)))
-        answers=payload.get('answers') if isinstance(payload.get('answers'),dict) else {}
-        answered=min(total,sum(1 for value in answers.values() if value is not None))
-        occurred_at=_parse_activity_time(row['created_at'])
-        if occurred_at and total:
-            attempts.append({'at':occurred_at,'total':total,'answered':answered,'correct':score})
-
-    def metrics(selected):
-        total=sum(item['total'] for item in selected)
-        answered=sum(item['answered'] for item in selected)
-        correct=sum(item['correct'] for item in selected)
-        completion=round(answered*100/total) if total else 0
-        accuracy=round(correct*100/total) if total else 0
-        return {
-            'attempts':len(selected),'questions_total':total,'questions_answered':answered,
-            'correct_answers':correct,'completion_percent':completion,'accuracy_percent':accuracy,
-            'learning_percent':round((completion+accuracy)/2) if total else 0,
-        }
-
-    def bucket(key, label, start, end):
-        values=[item for item in attempts if start<=item['at']<end]
-        return {'key':key,'label':label,**metrics(values)}
-
-    today=current.date()
-    day=[]
-    for offset in range(-6,1):
-        date=today+timedelta(days=offset)
-        start=datetime(date.year,date.month,date.day,tzinfo=VIETNAM_TZ)
-        day.append(bucket(date.isoformat(),date.strftime('%d/%m'),start,start+timedelta(days=1)))
-
-    this_monday=today-timedelta(days=today.weekday())
-    week=[]
-    for offset in range(-7,1):
-        date=this_monday+timedelta(weeks=offset)
-        start=datetime(date.year,date.month,date.day,tzinfo=VIETNAM_TZ)
-        week.append(bucket(date.isoformat(),date.strftime('%d/%m'),start,start+timedelta(days=7)))
-
-    month=[]
-    for offset in range(-5,1):
-        year,month_number=_shift_month(today.year,today.month,offset)
-        next_year,next_month=_shift_month(year,month_number,1)
-        start=datetime(year,month_number,1,tzinfo=VIETNAM_TZ)
-        end=datetime(next_year,next_month,1,tzinfo=VIETNAM_TZ)
-        month.append(bucket(f'{year:04d}-{month_number:02d}',f'{month_number:02d}/{year}',start,end))
-
-    summary=metrics(attempts)
-    summary['xp']=summary['correct_answers']*10+summary['attempts']*5
-    today_start=datetime(today.year,today.month,today.day,tzinfo=VIETNAM_TZ)
-    today_metrics=metrics([item for item in attempts if today_start<=item['at']<today_start+timedelta(days=1)])
-    return {'summary':summary,'today':today_metrics,'ranges':{'day':day,'week':week,'month':month}}
 
 def subscription_effective_at(billing_cycle='month', now=None):
     """Calculate a calendar-month/year boundary without database-specific SQL."""
@@ -1016,6 +1029,10 @@ class H(BaseHTTPRequestHandler):
 
     return origin if origin in allowed else None
  def send(self,status=200,body=b'',ctype='application/json',headers=None):
+  self.plan_response_status=status
+  if status>=400 and getattr(self,'plan_reservation',None):
+   with db() as c: permissions.refund_tutor(c,self.plan_reservation)
+   self.plan_reservation=None
   self.send_response(status); self.send_header('Content-Type',ctype); self.send_header('Cache-Control','no-store');
   origin=self.cors_origin()
   if origin:
@@ -1084,6 +1101,13 @@ class H(BaseHTTPRequestHandler):
  def do_GET(self):
   if not self.gateway_access(): return
   p=urlparse(self.path); path=p.path
+  feature=permissions.request_feature(path,{})
+  if feature:
+   u=require_user(self)
+   if not u:return
+   with db() as c:
+    try: permissions.require_feature(permissions.plan_for(c,u['id']),feature)
+    except permissions.PermissionDenied as error:return self.json({'error':str(error),'code':error.code},error.status)
   if path=='/api/health':
    return self.json({'status':'ok','service':'studyhub-api'})
   if path=='/api/music/search':
@@ -1141,7 +1165,8 @@ class H(BaseHTTPRequestHandler):
    codes={'free':'free','standard':'plus','plus':'plus','premium':'pro','pro':'pro'}
    current=dict(active) if active else {'name':'Free','status':'active'}
    change={'plan':codes.get(str(scheduled['name']).lower(),'free'),'billing_cycle':scheduled['billing_cycle'],'effective_at':scheduled['effective_at']} if scheduled else None
-   return self.json({'plan':codes.get(str(current['name']).lower(),'free'),'status':current['status'],'billing_cycle':'month','scheduled_change':change})
+   with db() as c: access=permissions.snapshot(c,u['id'])
+   return self.json({'plan':codes.get(str(current['name']).lower(),'free'),'status':current['status'],'billing_cycle':'month','scheduled_change':change,'permissions':access})
   if path=='/api/documents':
    u=require_user(self)
    if not u:return
@@ -1174,6 +1199,35 @@ class H(BaseHTTPRequestHandler):
     measured=document_rows if document_rows else rows
     average=round(sum(int(row['progress_percent'] or 0) for row in measured)/len(measured)) if measured else 0
     return self.json({'items':rows,'summary':{'count':len(measured),'completed':sum(1 for row in measured if row['completed']),'average_percent':average},'analytics':analytics})
+  if path in ('/api/progress/summary','/api/progress/timeline','/api/progress/today-tasks'):
+   u=require_user(self)
+   if not u:return
+   with db() as c:analytics=quiz_progress_analytics(c,u['id'])
+   if path.endswith('/summary'):return self.json({**analytics['summary'],'insights':analytics['insights']})
+   if path.endswith('/today-tasks'):return self.json(analytics['tasks'])
+   range_name=parse_qs(p.query).get('range',['7d'])[0]
+   range_key={'7d':'day','8w':'week','6m':'month'}.get(range_name)
+   if not range_key:return self.json({'error':'Khoảng thời gian phải là 7d, 8w hoặc 6m.'},422)
+   return self.json({'range':range_name,'points':analytics['ranges'][range_key]})
+  attempt_match=re.fullmatch(r'/api/quiz-attempts/(\d+)',path)
+  if path=='/api/quiz-attempts/latest':
+   u=require_user(self)
+   if not u:return
+   quiz_id=parse_qs(p.query).get('quiz_id',[''])[0]
+   try:
+    with db() as c:
+     quiz_store.owned_quiz(c,u['id'],quiz_id)
+     row=c.execute('SELECT id FROM quiz_attempts WHERE user_id=? AND quiz_id=? ORDER BY id DESC LIMIT 1',(u['id'],quiz_id)).fetchone()
+     result=study.public_attempt(c,study.owned(c,u['id'],row['id'])) if row else None
+    return self.json({'attempt':result})
+   except LookupError as error:return self.json({'error':str(error)},404)
+  if attempt_match:
+   u=require_user(self)
+   if not u:return
+   try:
+    with db() as c:result=study.public_attempt(c,study.owned(c,u['id'],int(attempt_match.group(1))))
+    return self.json(result)
+   except LookupError as error:return self.json({'error':str(error)},404)
   if path=='/api/study-time':
    u=require_user(self)
    if not u:return
@@ -1210,6 +1264,7 @@ class H(BaseHTTPRequestHandler):
      if not message:continue
      try:payload=json.loads(message['content'])
      except (TypeError,json.JSONDecodeError):continue
+     if payload.get('tutor_exercise_id'):continue  # Internal attempt definition, not another Quiz Card.
      attempts=[]
      for attempt in c.execute("SELECT content,created_at FROM chat_messages WHERE session_id=? AND role='user' ORDER BY id DESC",(session['id'],)).fetchall():
       try:
@@ -1429,6 +1484,15 @@ class H(BaseHTTPRequestHandler):
     self.log_error('document file cleanup failed after delete: %r',error)
   return self.json({'ok':True,'document_id':document['id'],'file_removed':file_removed},200)
  def do_POST(self):
+  self.plan_reservation=None
+  self.plan_response_status=500
+  try:
+   self.post_with_permissions()
+  finally:
+   if self.plan_reservation and self.plan_response_status >= 400:
+    with db() as c: permissions.refund_tutor(c,self.plan_reservation)
+   self.plan_reservation=None
+ def post_with_permissions(self):
   if not self.gateway_access(): return
   try:
    content_length=int(self.headers.get('Content-Length','0'))
@@ -1442,6 +1506,21 @@ class H(BaseHTTPRequestHandler):
    p=urlparse(self.path); path=p.path; data=self.body()
   except ValueError:
    return self.json({'error':'Content-Length không hợp lệ'},400)
+  feature=permissions.request_feature(path,{})
+  if feature or path in permissions.CHAT_PATHS:
+   u=require_user(self)
+   if not u:return
+   x={} if path=='/api/flashcards/preview' else json_body(data)
+   if not isinstance(x,dict):return self.json({'error':'Dữ liệu yêu cầu không hợp lệ'},400)
+   with db() as c:
+    plan=permissions.plan_for(c,u['id'])
+    try:
+     feature=permissions.request_feature(path,x)
+     if feature: permissions.require_feature(plan,feature)
+     if path in permissions.CHAT_PATHS and str(x.get('message') or x.get('question') or '').strip():
+      self.plan_reservation=permissions.reserve_tutor(c,u['id'],plan)
+    except permissions.PermissionDenied as error:return self.json({'error':str(error),'code':error.code},error.status)
+  if handle_study_post(self,path,data):return
   if handle_learning_post(self,path,data):return
   if path in ('/api/flashcards/preview','/api/documents/preview'):
    u=require_user(self)
@@ -1477,7 +1556,15 @@ class H(BaseHTTPRequestHandler):
    try:deck=flashcards.normalize_deck(json_body(data))
    except ValueError as error:return self.json({'error':str(error)},400)
    with db() as c:
+    study.lock(c,u['id'])
     existing=c.execute('SELECT id FROM flashcard_decks WHERE id=? AND user_id=?',(deck['id'],u['id'])).fetchone()
+    if existing:
+     original=c.execute('SELECT payload FROM flashcard_decks WHERE id=? AND user_id=?',(deck['id'],u['id'])).fetchone()
+     original_cards={card['id']:card for card in json.loads(original['payload'])['cards']}
+     for card in deck['cards']:
+      if card['id'] in original_cards:
+       previous=original_cards[card['id']]
+       card.update(remembered=previous.get('remembered',False),rememberedAt=previous.get('rememberedAt'))
     payload=json.dumps(deck,ensure_ascii=False)
     if existing:c.execute('UPDATE flashcard_decks SET payload=? WHERE id=? AND user_id=?',(payload,deck['id'],u['id']))
     else:c.execute('INSERT INTO flashcard_decks(id,user_id,payload) VALUES(?,?,?)',(deck['id'],u['id'],payload))
@@ -1488,18 +1575,17 @@ class H(BaseHTTPRequestHandler):
    u=require_user(self)
    if not u:return
    x=json_body(data)
-   if not isinstance(x,dict) or x.get('rating') not in ('known','again'):
-    return self.json({'error':'Đánh giá không hợp lệ'},400)
-   with db() as c:
-    row=c.execute('SELECT payload FROM flashcard_decks WHERE id=? AND user_id=?',(unquote(match.group(1)),u['id'])).fetchone()
-    if not row:return self.json({'error':'Bộ thẻ không tồn tại'},404)
-    deck=json.loads(row['payload'])
-    card=next((card for card in deck['cards'] if card['id']==x.get('card_id')),None)
-    if not card:return self.json({'error':'Thẻ không tồn tại'},404)
-    card['remembered']=x['rating']=='known'
-    c.execute('UPDATE flashcard_decks SET payload=? WHERE id=? AND user_id=?',(json.dumps(deck,ensure_ascii=False),deck['id'],u['id']))
-    streak=update_streak(c,u['id'],record=True);c.commit()
-   return self.json({'deck':deck,'streak':streak})
+   if not isinstance(x,dict):return self.json({'error':'Đánh giá không hợp lệ'},422)
+   try:
+    with db() as c:
+     study.lock(c,u['id'])
+     card_id=x.get('card_id') or unquote(match.group(1))
+     if x.get('card_id'):x={**x,'deckId':unquote(match.group(1))}
+     result=study.review(c,u['id'],card_id,x);c.commit()
+    return self.json(result)
+   except LookupError as error:return self.json({'error':str(error)},404)
+   except ValueError as error:return self.json({'error':str(error)},422)
+
   if path=='/api/quizzes/generate':
    u=require_user(self)
    if not u:return
@@ -1512,7 +1598,10 @@ class H(BaseHTTPRequestHandler):
     with db() as c:docs,subject=learning_sources(c,u['id'],x)
     limits=quizzes.content_limits(docs)
     if count>limits['max_questions']:raise ValueError(f"Tối đa {limits['max_questions']} câu dựa trên tài liệu đã chọn.")
-    questions=quizzes.generate(docs,count,get_engine(),difficulty)
+    engine=get_engine()
+    if not engine.uses_model:
+     return self.json({'error':'Nova AI chưa được kết nối. Bạn có thể tạo bài ở chế độ Thủ công hoặc thử lại khi AI sẵn sàng.','code':'ai_not_configured','retryable':False},503)
+    questions=quizzes.generate(docs,count,engine,difficulty)
    except LookupError as error:return self.json({'error':str(error)},404)
    except quizzes.QuizGenerationError as error:return self.json({'error':str(error),'code':'quiz_quality_failed'},422)
    except ValueError as error:return self.json({'error':str(error)},400)
@@ -1531,53 +1620,23 @@ class H(BaseHTTPRequestHandler):
    if not u:return
    x=json_body(data)
    if not isinstance(x,dict):return self.json({'error':'Đáp án không hợp lệ'},400)
-   answers=x.get('answers',{}) if isinstance(x,dict) else {}
-   if not isinstance(answers,dict):return self.json({'error':'Đáp án không hợp lệ'},400)
-   with db() as c:
-    quiz=c.execute("SELECT id FROM chat_sessions WHERE id=? AND user_id=? AND title LIKE 'QUIZ_CARD:%'",(m.group(1),u['id'])).fetchone()
-    if not quiz:return self.json({'error':'Quiz không tồn tại'},404)
-    message=c.execute("SELECT content FROM chat_messages WHERE session_id=? AND role='assistant' ORDER BY id DESC LIMIT 1",(quiz['id'],)).fetchone()
-    if not message:return self.json({'error':'Quiz chưa có câu hỏi'},422)
-    quiz_payload=json.loads(message['content']); rows=quiz_payload.get('questions',[])
-    try:answers=quiz_store.validate_answers(quiz_payload,answers)
-    except ValueError as error:return self.json({'error':str(error)},400)
-    run_row=None;run=None;duration=0
-    if x.get('run_id') is not None or quiz_payload.get('time_limit'):
-     try:run_row,run=quiz_store.load_run(c,quiz['id'],x.get('run_id'))
-     except (ValueError,LookupError) as error:return self.json({'error':str(error)},400)
-     if run.get('result'):return self.json(run['result'])
-     now=time.time();duration=max(0,int(now-run['started_at']))
-     if run.get('deadline') and now>=run['deadline']:
-      answers=run.get('answers',{});duration=max(0,int(run['deadline']-run['started_at']))
+   try:
+    with db() as c:
+     study.lock(c,u['id'])
+     _,quiz=quiz_store.owned_quiz(c,u['id'],m.group(1))
+     study.migrate(c,u['id'])
+     if x.get('run_id') is not None:
+      row=c.execute('SELECT id FROM quiz_attempts WHERE user_id=? AND quiz_id=? AND legacy_run_id=?',(u['id'],m.group(1),x['run_id'])).fetchone()
+      if not row:raise ValueError('Lượt làm bài không tồn tại.')
+      attempt_id=row['id']
+     else:
+      if quiz.get('time_limit'):raise ValueError('Hãy bắt đầu lượt làm bài trước khi nộp.')
+      attempt_id=study.start(c,u['id'],m.group(1),x)['attemptId']
+     result=finish_study_attempt(c,u['id'],attempt_id,x);c.commit()
+    return self.json(result)
+   except LookupError as error:return self.json({'error':str(error)},404)
+   except ValueError as error:return self.json({'error':str(error)},400)
 
-    if not rows:return self.json({'error':'Quiz chưa có câu hỏi'},422)
-    items=[]; score=0
-    for row in rows:
-     raw=answers.get(str(row['id']),answers.get(row['id']))
-     try:selected=int(raw)
-     except (TypeError,ValueError):selected=None
-     correct=selected is not None and selected==row['correct_index']
-     score += int(correct)
-     items.append({'id':row['id'],'question':row['question'],'selected_index':selected,'correct_index':row['correct_index'],'correct':correct,'explanation':row['explanation'],'source_document_id':row['document_id'],'source_title':row.get('source_title'),'source_locator':row['source_locator'],'options':row['options']})
-    total=len(rows)
-    result={'score':score,'total':total,'correct_count':score,'wrong_count':total-score,'duration':duration,'score_30':round(score*30/total,2),'score_10':round(score*10/total,2),'weak_count':total-score,'weak_items':[item for item in items if not item['correct']],'items':items}
-    if run is not None:
-     run['result']=result
-     if not quiz_store.replace_run(c,run_row,run):return self.json({'error':'Lượt làm bài đang được nộp. Vui lòng thử lại.'},409)
-    update_streak(c,u['id'],record=True)
-    attempt_payload={'kind':'quiz_attempt','quiz_id':quiz['id'],'user_id':u['id'],'score':score,'total':total,'correct_count':score,'wrong_count':total-score,'duration':duration,'answers':answers}
-
-    attempt_id=c.execute('INSERT INTO chat_messages(session_id,role,content) VALUES(?,?,?)',(quiz['id'],'user',json.dumps(attempt_payload,ensure_ascii=False))).lastrowid
-    result['attempt_id']=attempt_id
-    if run is not None:
-     run['result']=result
-     c.execute('UPDATE chat_messages SET content=? WHERE id=?',(json.dumps(run,ensure_ascii=False),run_row['id']))
-    automatic_progress=60+round((score/max(len(rows),1))*40)
-    document_ids=quiz_payload.get('document_ids') or [item['source_document_id'] for item in items]
-    for source_document_id in dict.fromkeys(document_ids):
-     advance_document_progress(c,u['id'],source_document_id,automatic_progress,score)
-    c.commit()
-   return self.json(result,200)
   if path in ('/api/login','/api/auth/login'):
    try:
     x=json.loads(data or '{}')
@@ -1876,7 +1935,7 @@ class H(BaseHTTPRequestHandler):
     conversation=tutor_store.conversation_for(c,u['id'],conversation_key,mode=mode,title=message[:60])
     conversation_id=int(conversation['id']); conversation_title=str(conversation['title'] or '')
     history=tutor_store.history(c,conversation_id,8)
-    memory_profile=tutor_memory.profile(c,u['id'])
+    memory_profile=tutor_memory.profile(c,u['id']) if permissions.allowed(permissions.plan_for(c,u['id']),'ai_analytics') else {}
     profile_summary=str(memory_profile.get('summary') or '')
     if 'Chưa đủ dữ liệu' in profile_summary:
      profile_summary=''
@@ -1914,6 +1973,7 @@ class H(BaseHTTPRequestHandler):
      return self.json({'conversation_id':conversation_key,'role':'assistant','content':'',
        'discarded':True,'reason':'conversation_deleted'},200)
     tutor_store.add_message(c,conversation_id,'user',message,mode)
+    if quiz:quiz['quiz_id']=persist_tutor_quiz(c,u['id'],quiz)
     message_id=tutor_store.add_message(c,conversation_id,'assistant',answer,mode,payload=quiz)
     tutor_memory.observe_question(c,u['id'],message)
     tutor_memory.consolidate(c,u['id'])
@@ -1972,6 +2032,9 @@ class H(BaseHTTPRequestHandler):
    if not isinstance(x,dict): return self.json({'error':'Dữ liệu lộ trình không hợp lệ'},400)
    with db() as c:
     assessment=tutor_store.latest_assessment(c,u['id'])
+    if str(x.get('target_level') or assessment.get('target_level') or '').strip().lower()=='advanced':
+     try: permissions.require_feature(permissions.plan_for(c,u['id']),'advanced_roadmap')
+     except permissions.PermissionDenied as error:return self.json({'error':str(error),'code':error.code},error.status)
    subject=str(x.get('subject') or assessment.get('subject') or '').strip()
    goal=str(x.get('goal') or assessment.get('goal') or '').strip()
    if not subject or not goal:
@@ -2026,19 +2089,43 @@ class H(BaseHTTPRequestHandler):
     return self.json({'error':f'Không chấm được bài làm: {error}','retryable':True},422)
    adapted=None; progress={'total_exercises':0,'graded':0,'average_percentage':0,'completed':False}
    with db() as c:
-    update_streak(c,u['id'],record=True)
-    submission_id=tutor_store.add_submission(c,exercise['id'],u['id'],answer=answer,answer_type=answer_type,result=result)
+    choice=exercise['exercise_type']=='multiple_choice'
+    if choice:
+     try:
+      study.lock(c,u['id'])
+      attempt_id=x.get('attemptId')
+      if attempt_id is None:
+       run=study.start(c,u['id'],exercise_quiz(c,u['id'],exercise['id']),x)
+       attempt_id=run['attemptId']
+      if type(attempt_id) is not int:raise ValueError('Mã lượt làm bài không hợp lệ.')
+      attempt=study.owned(c,u['id'],attempt_id)
+      quiz=json.loads(attempt['quiz_payload'])
+      if quiz.get('tutor_exercise_id')!=exercise['id']:raise LookupError('Lượt làm bài không thuộc bài tập này.')
+      cached=json.loads(attempt['result'] or '{}').get('exercise_response')
+      if cached:return self.json(cached,201)
+      if attempt['status']=='submitted':raise ValueError('Lượt làm bài đã nộp. Hãy bắt đầu lượt mới.')
+      options=quiz['questions'][0]['options']
+      selected=next((i for i,option in enumerate(options) if option.casefold()==answer.casefold()),None)
+      quiz_result=study.submit(c,u['id'],attempt_id,{**x,'answers':{'q1':selected} if selected is not None else {}})
+     except LookupError as error:return self.json({'error':str(error)},404)
+     except ValueError as error:return self.json({'error':str(error)},422)
+    if not choice:update_streak(c,u['id'],record=True)
+    submission_id=tutor_store.add_submission(c,exercise['id'],u['id'],answer=answer,answer_type=answer_type,result=result,commit=not choice)
     submissions=tutor_store.submissions_for_roadmap(c,exercise['roadmap_id'],u['id'])
     progress=tutor_store.progress_for_roadmap(c,exercise['roadmap_id'],u['id'])
     if roadmap_row:
      stored=json.loads(roadmap_row['payload']) if roadmap_row['payload'] else {}
      if stored:
       adapted=adapt_roadmap(stored,submissions)
-      tutor_store.update_roadmap(c,exercise['roadmap_id'],adapted,adapted.get('adaptation_note'))
-   response=tutor_store.submission_payload(submission_id,exercise,result)
-   if adapted:
-    response['adaptation']={'note':adapted.get('adaptation_note'),'average_score':adapted.get('average_score')}
-   response['progress']=progress
+      tutor_store.update_roadmap(c,exercise['roadmap_id'],adapted,adapted.get('adaptation_note'),commit=not choice)
+    response=tutor_store.submission_payload(submission_id,exercise,result)
+    if adapted:
+     response['adaptation']={'note':adapted.get('adaptation_note'),'average_score':adapted.get('average_score')}
+    response['progress']=progress
+    if choice:
+     response['attemptId']=attempt_id
+     c.execute('UPDATE quiz_attempts SET result=? WHERE id=?',(json.dumps({**quiz_result,'exercise_response':response},ensure_ascii=False),attempt_id))
+    c.commit()
    return self.json(response,201)
   if path=='/api/upload':
    u=user_from(self)
@@ -2073,6 +2160,9 @@ class H(BaseHTTPRequestHandler):
     c.close(); return self.json({'error':'Không thể kiểm tra môn học'},500)
    if not subject:
     c.close(); return self.json({'error':'Môn học không tồn tại'},400)
+   try: permissions.check_upload(c,u['id'],len(content))
+   except permissions.PermissionDenied as error:
+    c.rollback(); c.close(); return self.json({'error':str(error),'code':error.code},error.status)
    safe=re.sub(r'[^A-Za-z0-9._-]','_',filename); stored=f'{secrets.token_hex(8)}_{safe}'
    target=os.path.join(UP,stored)
    ext=extension.lstrip('.')

@@ -7,7 +7,7 @@ const LEVEL_LABEL = { beginner: 'Mới bắt đầu', intermediate: 'Trung bình
 const STEPS = [['goal', '1 · Mục tiêu'], ['quiz', '2 · Đánh giá'], ['result', '3 · Trình độ'], ['roadmap', '4 · Lộ trình']];
 const numberField = (value) => Number(String(value).replace(/[^\d]/g, '')) || 0;
 
-export default function AITutorJourney({ onPractice }) {
+export default function AITutorJourney({ onPractice, canAdvanced = false }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -17,6 +17,7 @@ export default function AITutorJourney({ onPractice }) {
   const [roadmap, setRoadmap] = useState(null);
   const [answers, setAnswers] = useState({});
   const [form, setForm] = useState({ subject: '', goal: '', learner_type: 'Tự học', deadline_weeks: 4, constraints: '', target_level: 'intermediate', pace: 'steady', study_time: 240, topics: '' });
+  const advancedLocked = form.target_level === 'advanced' && !canAdvanced;
 
   useEffect(() => {
     let alive = true;
@@ -46,6 +47,7 @@ export default function AITutorJourney({ onPractice }) {
   const payloadBase = () => ({ subject: form.subject.trim(), goal: form.goal.trim(), learner_type: form.learner_type.trim(), deadline_weeks: numberField(form.deadline_weeks), constraints: form.constraints.trim(), target_level: form.target_level, pace: form.pace, study_time: numberField(form.study_time), topics: form.topics.split(',').map((item) => item.trim()).filter(Boolean) });
 
   const beginQuiz = async () => {
+    if (advancedLocked) return;
     if (!form.subject.trim() || !form.goal.trim()) { setError('Hãy nhập môn học và mục tiêu học tập trước khi đánh giá.'); return; }
     setBusy('quiz'); setError('');
     try {
@@ -57,6 +59,7 @@ export default function AITutorJourney({ onPractice }) {
   };
 
   const submitQuiz = async () => {
+    if (advancedLocked) return;
     setBusy('submit'); setError('');
     try {
       const result = await submitTutorAssessment({ ...payloadBase(), answers: questions.map((question) => ({ key: question.key, answer: String(answers[question.key] ?? '').trim() })) });
@@ -66,6 +69,7 @@ export default function AITutorJourney({ onPractice }) {
   };
 
   const buildRoadmap = async () => {
+    if (advancedLocked) return;
     setBusy('roadmap'); setError('');
     try {
       const data = await generateTutorRoadmap({ ...payloadBase(), assessment_id: assessment?.assessment_id });
@@ -98,12 +102,12 @@ export default function AITutorJourney({ onPractice }) {
         <label>Ràng buộc / tài liệu (không bắt buộc)<input value={form.constraints} onChange={(event) => setForm({ ...form, constraints: event.target.value })} placeholder="Giáo trình, lịch thi, công cụ đang dùng…" /></label>
         <label>Môn học / chủ đề<input value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} placeholder="Ví dụ: Java OOP" /></label>
         <label>Mục tiêu<input value={form.goal} onChange={(event) => setForm({ ...form, goal: event.target.value })} placeholder="Ví dụ: làm chủ kế thừa và đa hình" /></label>
-        <label>Trình độ mong muốn<select value={form.target_level} onChange={(event) => setForm({ ...form, target_level: event.target.value })}>{LEVELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label>Trình độ mong muốn<select value={form.target_level} onChange={(event) => setForm({ ...form, target_level: event.target.value })}>{LEVELS.map(([value, label]) => <option key={value} value={value} disabled={value === 'advanced' && !canAdvanced} title={value === 'advanced' && !canAdvanced ? 'Nâng cấp để sử dụng' : undefined}>{label}</option>)}</select></label>
         <label>Nhịp học<select value={form.pace} onChange={(event) => setForm({ ...form, pace: event.target.value })}>{PACES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label>Thời gian mỗi tuần (phút)<input value={form.study_time} onChange={(event) => setForm({ ...form, study_time: event.target.value })} inputMode="numeric" placeholder="240" /></label>
         <label>Chủ đề ưu tiên<input value={form.topics} onChange={(event) => setForm({ ...form, topics: event.target.value })} placeholder="Kế thừa, Đa hình, Mảng" /></label>
       </div>
-      <div className="tutor-card-actions"><button type="button" className="tutor-primary" onClick={beginQuiz} disabled={busy !== ''}>{busy === 'quiz' ? 'Đang tạo bài đánh giá…' : 'Bắt đầu đánh giá'}</button></div>
+      <div className="tutor-card-actions"><button type="button" className="tutor-primary" onClick={beginQuiz} title={advancedLocked ? 'Nâng cấp để sử dụng' : undefined} disabled={advancedLocked || busy !== ''}>{busy === 'quiz' ? 'Đang tạo bài đánh giá…' : 'Bắt đầu đánh giá'}</button></div>
     </section> : null}
 
     {step === 'quiz' ? <section className="tutor-card">
@@ -117,7 +121,7 @@ export default function AITutorJourney({ onPractice }) {
             ? <input className="tutor-answer-input" value={answers[question.key] || ''} onChange={(event) => setAnswers({ ...answers, [question.key]: event.target.value })} inputMode="decimal" placeholder="Nhập kết quả bằng số" />
             : <textarea className="tutor-answer-input" rows="3" value={answers[question.key] || ''} onChange={(event) => setAnswers({ ...answers, [question.key]: event.target.value })} placeholder="Viết câu trả lời ngắn (3–5 câu)…" />}
       </li>)}</ol>
-      <div className="tutor-card-actions"><span className="tutor-hint">Đã trả lời {answered}/{questions.length}</span><button type="button" className="tutor-primary" onClick={submitQuiz} disabled={busy !== '' || answered < questions.length}>{busy === 'submit' ? 'Đang chấm…' : 'Nộp bài đánh giá'}</button></div>
+      <div className="tutor-card-actions"><span className="tutor-hint">Đã trả lời {answered}/{questions.length}</span><button type="button" className="tutor-primary" onClick={submitQuiz} title={advancedLocked ? 'Nâng cấp để sử dụng' : undefined} disabled={advancedLocked || busy !== '' || answered < questions.length}>{busy === 'submit' ? 'Đang chấm…' : 'Nộp bài đánh giá'}</button></div>
     </section> : null}
 
     {step === 'result' ? (assessment ? <section className="tutor-card">
@@ -131,7 +135,7 @@ export default function AITutorJourney({ onPractice }) {
         <div className="tutor-grade-block warn"><h4>Cần ôn lại</h4><ul>{(assessment.weaknesses?.length ? assessment.weaknesses : ['Không có điểm yếu nổi bật']).map((item) => <li key={item}>{item}</li>)}</ul></div>
       </div>
       <div className="tutor-card-actions">
-        <button type="button" className="tutor-primary" onClick={buildRoadmap} disabled={busy !== ''}>{busy === 'roadmap' ? 'Đang dựng lộ trình…' : roadmap ? 'Tạo lại lộ trình' : 'Tạo lộ trình học'}</button>
+        <button type="button" className="tutor-primary" onClick={buildRoadmap} title={advancedLocked ? 'Nâng cấp để sử dụng' : undefined} disabled={advancedLocked || busy !== ''}>{busy === 'roadmap' ? 'Đang dựng lộ trình…' : roadmap ? 'Tạo lại lộ trình' : 'Tạo lộ trình học'}</button>
         {roadmap ? <button type="button" className="tutor-secondary" onClick={() => setStep('roadmap')}>Xem lộ trình hiện tại</button> : null}
       </div>
     </section> : <section className="tutor-card"><p className="tutor-hint">Chưa có kết quả đánh giá. Hãy hoàn thành bài đánh giá trước.</p></section>) : null}

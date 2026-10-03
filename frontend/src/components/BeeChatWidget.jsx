@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ArrowRightIcon, XMarkIcon } from "@heroicons/react/24/outline";
-import ReactMarkdown from "react-markdown";
 import beeMascot from "../assets/bee-kawaii.png";
 import { askAiTutor, askWebAssistant, getWebAssistantStarters } from "../api";
 import { newId } from "./ai-tutor/conversationStore";
+import { planPermissions } from '../utils/planPermissions';
 import "./BeeChatWidget.css";
 import { Sparkles } from "lucide-react";
+
+const ReactMarkdown = lazy(() => import('react-markdown'));
 
 const STARTERS = [
   { icon: "📚", label: "Giải thích bài học", prompt: "Giải thích giúp mình một bài học đang ôn." },
@@ -31,7 +33,10 @@ const GUEST_STARTERS = [
   { icon: "💬", label: "Liên hệ hỗ trợ", prompt: "Thanh toán và liên hệ hỗ trợ" },
 ];
 
-export default function BeeChatWidget({ visible, user, onNavigate, variant = "default" }) {
+export default function BeeChatWidget({ visible, user, subscription, onNavigate, variant = "default" }) {
+  const permissions = planPermissions(subscription);
+  const tutorLocked = Boolean(user) && !permissions.canAskTutor;
+  const starterLocked = (starter) => Boolean(user) && (starter.route ? !permissions.personalizedRoadmap : tutorLocked);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -73,7 +78,7 @@ export default function BeeChatWidget({ visible, user, onNavigate, variant = "de
   const send = async (event) => {
     event?.preventDefault();
     const content = draft.trim();
-    if (!content || sending) return;
+    if (!content || sending || tutorLocked) return;
     const history = messages.filter((item) => item.id !== "welcome").slice(-6).map((item) => ({ role: item.role, content: item.content }));
     setDraft("");
     setMessages((current) => [...current, { id: newId(), role: "user", content }]);
@@ -100,6 +105,7 @@ export default function BeeChatWidget({ visible, user, onNavigate, variant = "de
   };
 
   const chooseStarter = (starter) => {
+    if (starterLocked(starter)) return;
     if (starter.route) {
       onNavigate(starter.route);
       return;
@@ -115,7 +121,7 @@ export default function BeeChatWidget({ visible, user, onNavigate, variant = "de
       {open && (
         <section className="bee-chat-panel" role="dialog" aria-label={COPY.chatLabel}>
           <header className="bee-chat-header">
-            <img className="bee-chat-avatar" src={beeMascot} alt="" />
+            <img className="bee-chat-avatar" src={beeMascot} alt="" loading="eager" decoding="async" />
             <div className="bee-chat-identity">
               <strong>{variant === "roadmap" ? COPY.novaName : COPY.beeName}</strong>
               <span><i aria-hidden="true" />{COPY.ready}</span>
@@ -129,10 +135,10 @@ export default function BeeChatWidget({ visible, user, onNavigate, variant = "de
             {messages.map((message) => (
               <div className={`bee-chat-message bee-chat-message--${message.role}`} key={message.id}>
                 {message.role === "assistant" && (
-                  <img className="bee-chat-message-avatar" src={beeMascot} alt="" />
+                  <img className="bee-chat-message-avatar" src={beeMascot} alt="" loading="lazy" decoding="async" />
                 )}
                 <div className={message.error ? "bee-chat-bubble is-error" : "bee-chat-bubble"}>
-                  <ReactMarkdown>{message.content}</ReactMarkdown>
+                  <Suspense fallback={message.content}><ReactMarkdown>{message.content}</ReactMarkdown></Suspense>
                 </div>
               </div>
             ))}
@@ -145,7 +151,7 @@ export default function BeeChatWidget({ visible, user, onNavigate, variant = "de
               <p>{COPY.suggestions}</p>
               <div>
                 {(user ? STARTERS : guestStarters).map((starter) => (
-                  <button key={starter.label} type="button" onClick={() => chooseStarter(starter)}>
+                  <button key={starter.label} type="button" disabled={starterLocked(starter)} title={starterLocked(starter) ? 'Nâng cấp để sử dụng' : undefined} onClick={() => chooseStarter(starter)}>
                     <span aria-hidden="true">{starter.icon}</span>{starter.label}
                   </button>
                 ))}
@@ -161,8 +167,10 @@ export default function BeeChatWidget({ visible, user, onNavigate, variant = "de
               placeholder={COPY.placeholder}
               aria-label={COPY.questionLabel}
               maxLength={4000}
+              disabled={tutorLocked}
+              title={tutorLocked ? 'Nâng cấp để sử dụng' : undefined}
             />
-            <button type="submit" aria-label={COPY.send} disabled={!draft.trim() || sending}>
+            <button type="submit" aria-label={COPY.send} title={tutorLocked ? 'Nâng cấp để sử dụng' : undefined} disabled={tutorLocked || !draft.trim() || sending}>
               <ArrowRightIcon aria-hidden="true" />
             </button>
           </form>
@@ -179,7 +187,7 @@ export default function BeeChatWidget({ visible, user, onNavigate, variant = "de
           aria-expanded={open}
           onClick={() => setOpen((current) => !current)}
         >
-          {variant === "roadmap" ? <><span className="bee-chat-launcher-icon"><Sparkles aria-hidden="true" /></span><span className="bee-chat-launcher-copy"><strong>{COPY.launcherTitle}</strong><small>{COPY.launcherSubtitle}</small></span></> : <img src={beeMascot} alt="" />}
+          {variant === "roadmap" ? <><span className="bee-chat-launcher-icon"><Sparkles aria-hidden="true" /></span><span className="bee-chat-launcher-copy"><strong>{COPY.launcherTitle}</strong><small>{COPY.launcherSubtitle}</small></span></> : <img src={beeMascot} alt="" loading="eager" decoding="async" />}
         </button>
       </div>
     </aside>

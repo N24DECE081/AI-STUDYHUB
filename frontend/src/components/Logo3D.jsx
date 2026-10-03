@@ -157,7 +157,7 @@ export default function Logo3D({ quote, pickNext, onNotify }) {
             event.key === 'ArrowLeft' ? -30 : event.key === 'ArrowRight' ? 30 : 0);
         }}>
         <div className="logo-3d">
-          <img key={clickCount} className={"logo-artwork" + (bubbleOpen ? " logo-artwork--clicked" : "")} src={studyHubLogo} alt="" draggable="false" />
+          <img key={clickCount} className={"logo-artwork" + (bubbleOpen ? " logo-artwork--clicked" : "")} src={studyHubLogo} alt="" draggable="false" loading="eager" decoding="async" fetchPriority="high" />
         </div>
       </button>
       <span className="logo-3d-hint" id="logo-3d-hint">{COPY.hint}</span>

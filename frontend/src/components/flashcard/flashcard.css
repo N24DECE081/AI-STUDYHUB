@@ -42,10 +42,10 @@
   opacity: .16;
 }
 .flashcard-deck.is-lines::before {
-  background-image: repeating-linear-gradient(0deg, transparent 0 27px, #fff 27px 28px);
+  background-image: repeating-linear-gradient(0deg, transparent 0 27px, var(--card) 27px 28px);
 }
 .flashcard-deck.is-grid::before {
-  background-image: linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px);
+  background-image: linear-gradient(var(--card) 1px, transparent 1px), linear-gradient(90deg, var(--card) 1px, transparent 1px);
   background-size: 28px 28px;
 }
 .flashcard-deck-emblem {
@@ -91,8 +91,8 @@
   transition: background .15s ease;
 }
 .flashcard-deck-actions button svg { width: 18px; height: 18px; flex-shrink: 0; }
-.flashcard-deck-actions .flashcard-deck-study { background: #0f172a; border-color: #0f172a; color: #fff; }
+.flashcard-deck-actions .flashcard-deck-study { background: var(--primary); border-color: var(--mint-ink); color: var(--primary-foreground); }
 .flashcard-deck-actions button:hover { background: color-mix(in srgb, var(--deck-color) 72%, var(--deck-ink)); }
-.flashcard-deck-actions .flashcard-deck-study:hover { background: #24334c; }
-.flashcard-deck-actions .flashcard-deck-delete:hover { background: #991b1b; border-color: #991b1b; color: #fff; }
+.flashcard-deck-actions .flashcard-deck-study:hover { background: var(--secondary-mint-hover); }
+.flashcard-deck-actions .flashcard-deck-delete:hover { background: var(--accent); border-color: var(--pink-ink); color: var(--accent-foreground); }
 .flashcard-deck-actions button:focus-visible { outline: 2px solid var(--deck-ink); outline-offset: 3px; }

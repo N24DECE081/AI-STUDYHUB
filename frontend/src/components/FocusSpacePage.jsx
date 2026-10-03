@@ -160,7 +160,7 @@ export default function FocusSpacePage({ user, onBack, active = true, theme, onT
           font-variant-numeric: tabular-nums;
           line-height: 1;
           letter-spacing: -1.5px;
-          color: #ffffff;
+          color: var(--focus-session-fg);
           text-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
         }
         .pip-progress {
@@ -191,7 +191,7 @@ export default function FocusSpacePage({ user, onBack, active = true, theme, onT
           border: 1px solid rgba(255, 255, 255, 0.2);
           border-radius: 999px;
           background: rgba(255, 255, 255, 0.08);
-          color: #ffffff;
+          color: var(--focus-session-fg);
           font-size: 12px;
           font-weight: 700;
           cursor: pointer;
@@ -365,7 +365,7 @@ export default function FocusSpacePage({ user, onBack, active = true, theme, onT
     )}
     {active && (sessionOpen ? (
     <main className="focus-session" aria-label="Focus Space session">
-      {sceneSource && !sceneError && <img className="focus-session__scene" src={sceneSource} alt="" onError={() => setSceneError(true)} />}
+      {sceneSource && !sceneError && <img className="focus-session__scene" src={sceneSource} alt="" loading="eager" decoding="async" onError={() => setSceneError(true)} />}
       <header className="focus-session__top">
         {!isLocked ? (
           <button type="button" className="focus-session__back" onClick={returnToSetup}>
@@ -508,7 +508,7 @@ export default function FocusSpacePage({ user, onBack, active = true, theme, onT
   ) : (
     <main className="focus-space-page" aria-labelledby="focus-space-title">
       <header className="focus-space-header">
-        <button type="button" className="focus-space-brand" onClick={onBack} aria-label="Về StudyHub"><img src={focusLogo} alt="" /><span><strong>StudyHub</strong><small>Focus Space</small></span></button>
+        <button type="button" className="focus-space-brand" onClick={onBack} aria-label="Về StudyHub"><img src={focusLogo} alt="" loading="eager" decoding="async" /><span><strong>StudyHub</strong><small>Focus Space</small></span></button>
         <div className="focus-space-presence">
           <button type="button" onClick={onToggleTheme} aria-label="Đổi giao diện sáng tối" title="Đổi giao diện">{theme === 'dark' ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}</button>
           <button
@@ -569,7 +569,7 @@ export default function FocusSpacePage({ user, onBack, active = true, theme, onT
           </section>
 
           <section className="focus-space-step" aria-labelledby="background-title"><h2 id="background-title"><span>04</span> Study background</h2>
-            {customScene && <div className="focus-space-scene-options"><img src={customScene.url} alt={customScene.name} /><button type="button" onClick={() => { setCustomScene(null); setSceneError(false); }} aria-label="Xóa ảnh nền đã chọn"><X aria-hidden="true" /></button></div>}
+            {customScene && <div className="focus-space-scene-options"><img src={customScene.url} alt={customScene.name} loading="lazy" decoding="async" /><button type="button" onClick={() => { setCustomScene(null); setSceneError(false); }} aria-label="Xóa ảnh nền đã chọn"><X aria-hidden="true" /></button></div>}
             <button type="button" className="focus-space-upload" onClick={() => sceneInputRef.current?.click()}><Plus aria-hidden="true" /><span>Upload from device</span></button>
             <input ref={sceneInputRef} className="focus-space-file-input" type="file" accept="image/*" onChange={uploadScene} aria-label="Chọn ảnh nền" />
           </section>
@@ -583,7 +583,7 @@ export default function FocusSpacePage({ user, onBack, active = true, theme, onT
         </section>
 
         <aside className="focus-space-preview" aria-label="Live preview"><div className="focus-space-preview__heading"><div><span>LIVE PREVIEW</span><h2>Your little corner</h2></div><span className="focus-space-preview__music"><Headphones aria-hidden="true" />{musicName}</span></div>
-          <div className="focus-space-preview__scene">{sceneSource && !sceneError ? <img src={sceneSource} alt={customScene.name} onError={() => setSceneError(true)} /> : <p>{sceneError ? "Không tải được ảnh nền. Hãy chọn ảnh khác." : "Chưa chọn ảnh nền"}</p>}</div>
+          <div className="focus-space-preview__scene">{sceneSource && !sceneError ? <img src={sceneSource} alt={customScene.name} loading="lazy" decoding="async" onError={() => setSceneError(true)} /> : <p>{sceneError ? "Không tải được ảnh nền. Hãy chọn ảnh khác." : "Chưa chọn ảnh nền"}</p>}</div>
           <dl className="focus-space-preview__stats"><div><dt>FOCUS</dt><dd>{studyMinutes || 0} min</dd></div><div><dt>BREAK</dt><dd>{breakMinutes ? `${breakMinutes} min` : "None"}</dd></div><div><dt>AMBIENCE</dt><dd>{music === "stream" ? mediaEmbed?.provider || "Link" : !isMuted && ambientEnabled && music !== "silent" ? `${volume}%` : "Off"}</dd></div></dl>
           <p>A calm space is ready whenever you are.</p>
           {completed > 0 && <small className="focus-space-preview__completed">{completed} focus session{completed > 1 ? "s" : ""} completed</small>}

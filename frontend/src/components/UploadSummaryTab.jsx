@@ -51,14 +51,14 @@ function UploadSummaryTab({ onUploadSuccess, currentDocument, setCurrentDocument
       
       {/* KHUNG FORM UPLOAD */}
       <div style={{
-        background: '#fbf9ff',
+        background: 'var(--card)',
         border: '2px dashed #c4b5fd',
         borderRadius: '16px',
         padding: '32px',
         textAlign: 'center'
       }}>
-        <h3 style={{ fontSize: '18px', color: '#4c1d95', marginBottom: '8px' }}>Tải lên tài liệu học tập (PDF, DOCX, TXT)</h3>
-        <p style={{ fontSize: '13px', color: '#6b7280', marginBottom: '20px' }}>Hệ thống sẽ tự động rút trích nội dung và tạo bản tóm tắt bằng Gemini AI</p>
+        <h3 style={{ fontSize: '18px', color: 'var(--foreground)', marginBottom: '8px' }}>Tải lên tài liệu học tập (PDF, DOCX, TXT)</h3>
+        <p style={{ fontSize: '13px', color: 'var(--foreground)', marginBottom: '20px' }}>Hệ thống sẽ tự động rút trích nội dung và tạo bản tóm tắt bằng Gemini AI</p>
 
         <form onSubmit={handleUpload} style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <input
@@ -67,11 +67,11 @@ function UploadSummaryTab({ onUploadSuccess, currentDocument, setCurrentDocument
             accept=".pdf,.docx,.txt"
             style={{
               padding: '10px 16px',
-              background: '#ffffff',
+              background: 'var(--card)',
               border: '1px solid #ddd6fe',
               borderRadius: '10px',
               fontSize: '14px',
-              color: '#4b5563',
+              color: 'var(--foreground)',
               cursor: 'pointer'
             }}
           />
@@ -80,8 +80,8 @@ function UploadSummaryTab({ onUploadSuccess, currentDocument, setCurrentDocument
             disabled={loading}
             style={{
               padding: '12px 24px',
-              background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
-              color: '#ffffff',
+              background: 'var(--accent)',
+              color: 'var(--foreground)',
               border: 'none',
               borderRadius: '10px',
               fontWeight: '600',
@@ -97,23 +97,23 @@ function UploadSummaryTab({ onUploadSuccess, currentDocument, setCurrentDocument
       {/* KHUNG HIỂN THỊ NỘI DUNG TÓM TẮT */}
       {currentDocument ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <h3 style={{ fontSize: '16px', color: '#5b21b6', borderBottom: '2px solid #f3e8ff', paddingBottom: '8px' }}>
+          <h3 style={{ fontSize: '16px', color: 'var(--foreground)', borderBottom: '2px solid #f3e8ff', paddingBottom: '8px' }}>
             Bản tóm tắt: {currentDocument.fileName}
           </h3>
           <div style={{
-            background: '#faf8ff',
+            background: 'var(--card)',
             padding: '20px 24px',
             borderRadius: '12px',
             border: '1px solid #ede9fe',
             lineHeight: '1.7',
             fontSize: '14px',
-            color: '#374151'
+            color: 'var(--foreground)'
           }}>
             <ReactMarkdown>{currentDocument.summary}</ReactMarkdown>
           </div>
         </div>
       ) : (
-        <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af' }}>
+        <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--foreground)' }}>
           Chưa có tài liệu nào được chọn để hiển thị tóm tắt.
         </div>
       )}

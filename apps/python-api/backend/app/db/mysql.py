@@ -135,7 +135,7 @@ class MySQLDatabase:
         for column, mysql_type in indexed_varchars.items():
             schema = re.sub(rf"(\b{column}\s+)LONGTEXT\b", rf"\g<1>{mysql_type}", schema)
         schema = re.sub(
-            r"\b(created_at|updated_at|last_seen_at|applied_at|started_at|ended_at|expires_at|last_login_at|effective_at|enrolled_at|completed_at)\s+LONGTEXT\b",
+            r"\b(created_at|updated_at|last_seen_at|applied_at|started_at|submitted_at|answered_at|reviewed_at|ended_at|expires_at|last_login_at|effective_at|enrolled_at|completed_at)\s+LONGTEXT\b",
             lambda match: f"{match.group(1)} DATETIME",
             schema,
         )

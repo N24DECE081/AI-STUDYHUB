@@ -14,7 +14,7 @@ test('homepage: centered pill, aligned hero, Vietnamese copy and contrast in bot
   const nav = page.getByRole('navigation', { name: 'Điều hướng chính' });
   await expect(page.locator('.hero-section')).toBeVisible();
   await expect(nav.getByRole('button', { name: 'Trang chủ', exact: true })).toHaveAttribute('aria-current', 'page');
-  await expect(page.getByRole('heading', { name: 'Học nhiều nhưng không nhớ', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Học nhiều nhưng không nhớ', exact: true })).toHaveCount(0);
   await expect(page.locator('html')).toHaveAttribute('lang', 'vi');
   expect(await page.locator('link[rel="stylesheet"][href*="fonts.googleapis.com"]').getAttribute('href')).toContain('subset=vietnamese');
   for (const width of [1920, 1440, 1024, 768, 390]) {
@@ -26,7 +26,7 @@ test('homepage: centered pill, aligned hero, Vietnamese copy and contrast in bot
       const layout = await page.evaluate(() => {
         const rect = selector => document.querySelector(selector).getBoundingClientRect();
         const intersects = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-        const hero = rect('.hero-section'), section = rect('.pain-points-section'), nav = rect('.nav-menu');
+        const hero = rect('.hero-section'), section = rect('.streak-habit-section'), nav = rect('.nav-menu');
         const notes = [...document.querySelectorAll('.hero-note')].map(el => el.getBoundingClientRect());
         const heading = getComputedStyle(document.querySelector('.hero-copy h1'));
         const navStyle = getComputedStyle(document.querySelector('.nav-menu'));

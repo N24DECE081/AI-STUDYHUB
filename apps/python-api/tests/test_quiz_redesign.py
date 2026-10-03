@@ -87,6 +87,9 @@ class QuizRedesignHTTPTests(unittest.TestCase):
         doc=self.upload()
         status,_,quiz=self.request('/api/quizzes/generate','POST',{'subject_id':self.subject,'document_ids':[doc],'question_count':2,'difficulty':'hard','time_limit':1},self.headers)
         self.assertEqual(status,201,quiz);self.assertTrue(all(q['difficulty']=='analyze' for q in quiz['questions']))
+        saved=self.request(f"/api/quizzes/{quiz['id']}",headers=self.headers)[2]
+        self.assertEqual(saved['questions'],quiz['questions'])
+        self.assertEqual(saved['subject_id'],self.subject);self.assertEqual(saved['difficulty'],'hard')
         prefix=f"/api/quizzes/{quiz['id']}"
         self.assertEqual(self.request(prefix+'/submit','POST',{'answers':{}},self.headers)[0],400)
         status,_,run=self.request(prefix+'/start','POST',{},self.headers);self.assertEqual(status,200,run)
@@ -129,6 +132,20 @@ class ManualLearningHTTPTests(unittest.TestCase):
         self.cookie=self.login_cookie('student@studyhub.local','Student123!')
         self.headers={'Cookie':self.cookie}
         self.subject=self.create_subject(self.cookie,'MAN')['id']
+
+    def test_unconfigured_ai_keeps_manual_creation_available(self):
+        question={'question':'2 + 2?', 'options':['1','2','3','4'], 'correct_index':3}
+        status,_,quiz=self.request('/api/quizzes/manual','POST',{'subject_id':self.subject,'title':'Offline manual','questions':[question]},self.headers)
+        self.assertEqual(status,201,quiz)
+        with sqlite3.connect(Path(self.tmp.name)/'integration.db') as conn:
+            conn.execute("INSERT INTO subscriptions(user_id,plan_id,status) SELECT u.id,p.id,'active' FROM users u CROSS JOIN plans p WHERE p.name='Standard' AND u.email='student@studyhub.local'")
+        doc=QuizRedesignHTTPTests.upload(self,words=1)
+        status,_,error=self.request('/api/quizzes/generate','POST',{'subject_id':self.subject,'document_ids':[doc],'question_count':1},self.headers)
+        self.assertEqual(status,503,error);self.assertEqual(error['code'],'ai_not_configured')
+        self.assertFalse(error['retryable'])
+        history=self.request('/api/quizzes/history',headers=self.headers)[2]['items']
+        self.assertTrue(any(item['id']==quiz['id'] for item in history))
+        self.assertFalse(any(item['document_ids']==[doc] for item in history))
 
     def test_manual_creation_grading_validation_and_ownership(self):
         question={'question':'2 + 2?', 'options':['1','2','3','4'], 'correct_index':3}

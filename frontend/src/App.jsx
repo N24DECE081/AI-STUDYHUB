@@ -1,16 +1,17 @@
 import './components/streak/streak.css';
 import { getFlashcardDecks, saveFlashcardDeck, deleteFlashcardDeck } from './api';
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import "./Logo3D.css";
-import Logo3D from "./components/Logo3D.jsx";
+import { GuestHome, MemberHome, HomeSkeleton } from "./components/HomePage";
+import useAuth from "./hooks/useAuth";
+import useStudySync from "./hooks/useStudySync";
 import useRandomQuote from "./hooks/useRandomQuote";
-import LandingExtras from "./components/LandingExtras.jsx";
 import BeeChatWidget from "./components/BeeChatWidget.jsx";
+import { planPermissions } from './utils/planPermissions';
 import FocusSpaceLogo from "./components/FocusSpaceLogo.jsx";
-import FocusSpacePage from "./components/FocusSpacePage.jsx";
 import studyHubLogo from "./assets/studyhub-logo.png";
-import { FOOTER_COPY, HOME_COPY, NAV_ITEMS, STREAK_COPY } from "./homeContent";
+import { FOOTER_COPY, HOME_COPY, NAV_ITEMS } from "./homeContent";
 
 import {
   checkoutSubscription,
@@ -24,6 +25,7 @@ import {
   getOAuthLoginUrl,
   getOAuthStatus,
   getProgress,
+  studyHeartbeat,
   getStudyTime,
   getStreak,
   getSubscription,
@@ -37,17 +39,9 @@ import {
   previewDocumentMetadata,
   verifyPasswordOtp,
 } from "./api";
-import AITutorPage from "./components/ai-tutor/AITutorPage";
-import QuizCardPage from "./components/quiz-card/QuizCardPage";
-import LearningRoadmapPage from "./components/LearningRoadmapPage";
-import PaymentCheckout from "./components/PaymentCheckout";
-import ProgressDashboard from "./components/progress/ProgressDashboard";
 import { EMPTY_PROGRESS_ANALYTICS } from "./components/progress/progressDefaults";
-import StudyDeckSession from "./components/StudyDeckSession";
-import FlashcardDeckForm from "./components/flashcard/FlashcardDeckForm";
 import { buildSubjectHashMap, findSubject, quickSortSubjects } from "./utils/subjectAlgorithms";
 import {
-  ArrowRightIcon,
   ArrowLeftIcon,
   AcademicCapIcon,
   BookOpenIcon,
@@ -58,7 +52,6 @@ import {
   MagnifyingGlassIcon,
   PlusIcon,
   BoltIcon,
-  RectangleStackIcon,
   XMarkIcon,
   SparklesIcon,
   TrashIcon,
@@ -67,6 +60,16 @@ import {
   EyeIcon,
   EyeSlashIcon,
 } from "@heroicons/react/24/outline";
+
+const AITutorPage = lazy(() => import('./components/ai-tutor/AITutorPage'));
+const QuizCardPage = lazy(() => import('./components/quiz-card/QuizCardPage'));
+const LearningRoadmapPage = lazy(() => import('./components/LearningRoadmapPage'));
+const FocusSpacePage = lazy(() => import('./components/FocusSpacePage'));
+const ProgressDashboard = lazy(() => import('./components/progress/ProgressDashboard'));
+const PaymentCheckout = lazy(() => import('./components/PaymentCheckout'));
+const StudyDeckSession = lazy(() => import('./components/StudyDeckSession'));
+const FlashcardDeckForm = lazy(() => import('./components/flashcard/FlashcardDeckForm'));
+const loadingPage = <div className="auth-checking" role="status" aria-label="Đang tải nội dung"><span /></div>;
 
 export const PLANS = {
   free: {
@@ -102,7 +105,7 @@ export const PLANS = {
     pricePeriod: " / tháng",
     subtitle: "Cá nhân hóa việc học mỗi ngày",
     badge: "Phổ biến nhất",
-    ribbon: "KHUYÊN DÙNG CHO SINH VIÊN",
+    ribbon: "Khuyến dùng cho sinh viên",
     maxDocs: 50,
     maxStorageMb: 2048,
     aiTutorMonthlyLimit: 200,
@@ -184,14 +187,7 @@ const PATH_VIEWS = {
 };
 const viewForPath = (path) => PATH_VIEWS[path] || "home";
 const isAuthPath = (path) => path === "/login" || path === "/register";
-const isProtectedPath = (path) => path !== "/" && !isAuthPath(path) && (path in PATH_VIEWS || path.startsWith("/app/"));
-
-const VIETNAM_TIME_ZONE = "Asia/Ho_Chi_Minh";
-const vietnamDateKey = (date = new Date()) => {
-  const values = new Intl.DateTimeFormat("en", { timeZone: VIETNAM_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
-  const part = (type) => values.find((item) => item.type === type)?.value;
-  return `${part("year")}-${part("month")}-${part("day")}`;
-};
+const isProtectedPath = (path) => path !== "/" && path !== "/dashboard" && !isAuthPath(path) && (path in PATH_VIEWS || path.startsWith("/app/"));
 
 function mapDocumentProgress(result) {
   return (result.items || [])
@@ -209,59 +205,6 @@ function ThemeToggle({ theme, onToggle }) {
   return <button type="button" className="theme-toggle" onClick={onToggle} aria-label={theme === 'light' ? HOME_COPY.enableDark : HOME_COPY.enableLight} title={theme === 'light' ? HOME_COPY.dark : HOME_COPY.light} aria-pressed={theme === 'dark'}>
     {theme === 'light' ? <MoonIcon aria-hidden="true" /> : <SunIcon aria-hidden="true" />}
   </button>;
-}
-
-function StreakCard({ user, streak, onLogin }) {
-  const today = streak.today || vietnamDateKey();
-  const todayActive = Boolean(user && streak.last_activity_date === today);
-  const days = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(new Date(`${today}T12:00:00+07:00`).getTime() - (6 - index) * 86400000);
-    return {
-      date: vietnamDateKey(date),
-      label: date.toLocaleDateString("vi-VN", { weekday: "short", timeZone: VIETNAM_TIME_ZONE }).replace(".", ""),
-      number: Number(date.toLocaleDateString("en", { day: "numeric", timeZone: VIETNAM_TIME_ZONE })),
-    };
-  });
-  return (
-    <section className="streak-card" aria-labelledby="streak-title">
-      <div className="streak-card-heading">
-        <div className={`streak-symbol fire-level-${user ? Math.min(streak.current_streak, 3) : 0}`}>{user && streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}</div>
-        <div>
-          <span className="eyebrow">{STREAK_COPY.eyebrow}</span>
-          <h2 id="streak-title">{STREAK_COPY.title}</h2>
-        </div>
-        <div className="streak-total">
-          <strong>{user ? streak.current_streak : "—"}</strong>
-          <span>{STREAK_COPY.dayUnit}</span>
-        </div>
-      </div>
-      <p className="streak-description">
-        {user
-          ? todayActive
-            ? STREAK_COPY.active
-            : STREAK_COPY.inactive
-          : STREAK_COPY.guest}
-      </p>
-      <div className="streak-week" aria-label={STREAK_COPY.activityLabel}>
-        {days.map((day) => {
-          const active = user && (streak.activity_dates || [streak.last_activity_date]).includes(day.date);
-          return (
-            <div className={`streak-day ${active ? "is-active" : ""}`} key={day.date}>
-              <span>{day.label}</span>
-              <strong>{day.number}</strong>
-              <i aria-hidden="true">{active ? "✓" : "·"}</i>
-            </div>
-          );
-        })}
-      </div>
-      <footer className="streak-card-footer">
-        <span><CalendarDaysIcon aria-hidden="true" /> {STREAK_COPY.today} {todayActive ? STREAK_COPY.recorded : STREAK_COPY.unrecorded}</span>
-        <span>{STREAK_COPY.rule}</span>
-        <span>{STREAK_COPY.timezone}</span>
-        {!user && <button className="text-link" onClick={onLogin}>{HOME_COPY.login} <ArrowRightIcon aria-hidden="true" className="link-icon" /></button>}
-      </footer>
-    </section>
-  );
 }
 
 function Modal({ title, children, onClose, icon, subtitle, className = "" }) {
@@ -335,7 +278,7 @@ function StudyHubAuthScreen({ mode, user, oauthStatus, error, identifier, onBack
         </button>
         <div className="studyhub-auth__brand" aria-label="StudyHub">
           {mode === "login" || mode === "register"
-            ? <img className="studyhub-auth__logo-image" src={studyHubLogo} alt="" />
+            ? <img className="studyhub-auth__logo-image" src={studyHubLogo} alt="" loading="eager" decoding="async" />
             : <span className="studyhub-auth__logo" aria-hidden="true"><b>S</b><i>H</i></span>}
         </div>
         <header className="studyhub-auth__heading">
@@ -541,26 +484,13 @@ function useRevealOnScroll(dependencyKey) {
 export default function App() {
   const randomQuote = useRandomQuote();
   const [view, setView] = useState(() => viewForPath(window.location.pathname));
-  const [authReady, setAuthReady] = useState(false);
-  const [user, setUser] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("studyhub-user"));
-    } catch {
-      return null;
-    }
-  });
+  const [focusSpaceMounted, setFocusSpaceMounted] = useState(view === 'focusSpace');
+  const { user, setUser, isAuthenticated, isLoading } = useAuth();
+  const authReady = !isLoading;
   const [documents, setDocuments] = useState([]);
   const [editingDeck, setEditingDeck] = useState(null);
   const [decksLoading, setDecksLoading] = useState(false);
-  const [quizDecks, setQuizDecks] = useState(() => {
-    try {
-      const storedUser = JSON.parse(localStorage.getItem("studyhub-user"));
-      const userKey = storedUser && String(storedUser.id || storedUser.email || "");
-      return userKey ? JSON.parse(localStorage.getItem(`studyhub-quiz-decks:${userKey}`)) || [] : [];
-    } catch {
-      return [];
-    }
-  });
+  const [quizDecks, setQuizDecks] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -617,6 +547,24 @@ export default function App() {
     status: "active",
   });
   const [pendingPlan, setPendingPlan] = useState(null);
+  const permissions = planPermissions(subscription);
+  useEffect(() => {
+    if (!user) return undefined;
+    let active = true;
+    const refresh = () => getSubscription().then((value) => {
+      if (active) setSubscription(value);
+    }).catch(() => {});
+    window.addEventListener('studyhub:permissions-changed', refresh);
+    window.addEventListener('focus', refresh);
+    // The server owns quota rollover, including midnight in Vietnam.
+    const timer = window.setInterval(refresh, 60000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener('studyhub:permissions-changed', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [user]);
   const [activeStudyDeck, setActiveStudyDeck] = useState(null);
   const [billingCycle] = useState("month");
   const subjectOptions = useMemo(() => quickSortSubjects(subjects), [subjects]);
@@ -674,10 +622,7 @@ export default function App() {
     }
     userRef.current = next;
     setUser(next);
-    next
-      ? localStorage.setItem("studyhub-user", JSON.stringify(next))
-      : localStorage.removeItem("studyhub-user");
-  }, []);
+  }, [setUser]);
   const saveSubscription = (next) => {
     setSubscription(next);
     if (user) {
@@ -715,6 +660,37 @@ export default function App() {
     }
   };
   const userKey = user ? String(user.id || user.email || "") : "";
+  const studySync = useStudySync(userKey);
+  useEffect(() => {
+    if (!userKey) return undefined;
+    let active = true, revision = 0;
+    const refresh = async () => {
+      const request = ++revision;
+      try {
+        const [result, nextStreak, decks, time] = await Promise.all([getProgress(), getStreak(), getFlashcardDecks(), getStudyTime()]);
+        if (active && request === revision) {
+          setProgress(mapDocumentProgress(result)); setProgressAnalytics(result.analytics || EMPTY_PROGRESS_ANALYTICS);
+          setStreak(nextStreak); setQuizDecks(decks); setStudyTime(time);
+        }
+      } catch (failure) { if (active) notify(`Chưa tải được tiến độ mới: ${failure.message}`); }
+    };
+    window.addEventListener('studyhub:progress-changed', refresh);
+    return () => { active = false; window.removeEventListener('studyhub:progress-changed', refresh); };
+  }, [userKey]);
+  useEffect(() => {
+    if (!userKey || !(['quiz','tutor','focusSpace'].includes(view) || view === 'library' && modal === 'document-preview')) return undefined;
+    let active = true, lastActivity = Date.now(), failed = false;
+    const touch = () => { lastActivity = Date.now(); };
+    const heartbeat = async () => {
+      if (document.visibilityState !== 'visible' || Date.now() - lastActivity > 120000 || !navigator.onLine) return;
+      try { const result = await studyHeartbeat(); if (active) { setStudyTime(result); failed = false; } }
+      catch (failure) { if (active && !failed) { failed = true; notify(`Chưa đồng bộ thời gian học: ${failure.message}`); } }
+    };
+    window.addEventListener('pointerdown', touch); window.addEventListener('keydown', touch);
+    const timer = window.setInterval(heartbeat, 30000);
+    void heartbeat();
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener('pointerdown', touch); window.removeEventListener('keydown', touch); };
+  }, [userKey, view, modal]);
   useEffect(() => {
     if (!authReady || !userKey) return undefined;
     let active = true;
@@ -804,18 +780,10 @@ export default function App() {
   }, [authReady, userKey]);
   useEffect(() => {
     if (!authReady || !userKey) return undefined;
-    const clock = window.setInterval(() => {
-      setStudyTime((current) => current.active ? {
-        ...current,
-        total_seconds: current.total_seconds + 1,
-        current_session_seconds: current.current_session_seconds + 1,
-      } : current);
-    }, 1000);
     const sync = window.setInterval(() => {
       getStudyTime().then(setStudyTime).catch(() => {});
     }, 15000);
     return () => {
-      window.clearInterval(clock);
       window.clearInterval(sync);
     };
   }, [authReady, userKey]);
@@ -834,31 +802,7 @@ export default function App() {
     void refresh();
     return () => { active = false; };
   }, [authReady, userKey, view]);
-  useRevealOnScroll(`${view}-${documents.length}-${quizDecks.length}`);
-  useEffect(() => {
-    let active = true;
-    getCurrentUser()
-      .then((result) => {
-        if (active && result.user) {
-          saveUser(result.user);
-          getStreak().then(setStreak).catch(() => {});
-          if (!result.user.profile_completed) {
-            setAuthMode("profile");
-            setModal("auth");
-          }
-        }
-        if (active && !result.user) saveUser(null);
-      })
-      .catch(() => {
-        if (active) saveUser(null);
-      })
-      .finally(() => {
-        if (active) setAuthReady(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, [saveUser]);
+  useRevealOnScroll(`${authReady}-${userKey}-${view}-${documents.length}-${quizDecks.length}`);
   useEffect(() => {
     if (!authReady) return undefined;
     const syncRoute = () => {
@@ -870,7 +814,8 @@ export default function App() {
         window.setTimeout(() => setToast(""), 3200);
         return;
       }
-      if (user && !user.profile_completed && authMode === "profile") {
+      if (user && !user.profile_completed) {
+        setAuthMode("profile");
         setModal("auth");
         return;
       }
@@ -894,6 +839,7 @@ export default function App() {
         return;
       }
       if (user && path === "/") window.history.replaceState({}, "", "/dashboard");
+      if (viewForPath(path) === 'focusSpace') setFocusSpaceMounted(true);
       setView(viewForPath(path));
       if (modal === "auth") setModal(null);
     };
@@ -973,6 +919,7 @@ export default function App() {
     }
     if (next !== "home" && requireLogin()) return false;
     if (next === "dashboard" && user) void loadProgress();
+    if (next === 'focusSpace') setFocusSpaceMounted(true);
     setView(next);
     const nextPath = next === "home" && !user ? "/" : VIEW_PATHS[next];
     if (nextPath && window.location.pathname !== nextPath) window.history.pushState({}, "", nextPath);
@@ -1085,7 +1032,7 @@ export default function App() {
     if (requireLogin()) return;
     const planConfig = PLANS[subscription?.plan] || PLANS.free;
     const maxDocs = planConfig.maxDocs || 10;
-    if (documents.length >= maxDocs) {
+    if (documents.length >= maxDocs || !permissions.canUpload) {
       notify(
         `Bạn đã tải lên ${documents.length}/${maxDocs} tài liệu (đạt giới hạn của ${planConfig.name}). Vui lòng nâng cấp gói để tiếp tục tải thêm!`,
         "warning"
@@ -1127,6 +1074,9 @@ export default function App() {
     if (!subjectCode) return fail("Hãy chọn hoặc thêm môn học trước.");
     if (file.size === 0) return fail("File không được rỗng.");
     if (file.size > 10 * 1024 * 1024) return fail("File tối đa 10MB.");
+    if (!permissions.canUpload || permissions.storage_used_bytes + file.size > permissions.storage_bytes) {
+      return fail('Đã đạt giới hạn tài liệu hoặc dung lượng của gói. Nâng cấp để sử dụng.');
+    }
     if (![".pdf", ".txt", ".md", ".csv", ".doc", ".docx", ".ppt", ".pptx"].includes(extension)) {
       return fail("Định dạng file chưa được hỗ trợ.");
     }
@@ -1286,7 +1236,7 @@ export default function App() {
       notify(`Không thể hủy gia hạn: ${error.message}`);
     }
   };
-  if (!authReady) return <div className="auth-checking" role="status" aria-label="Đang kiểm tra phiên đăng nhập"><span /></div>;
+  if (!authReady) return view === "home" && !isAuthPath(window.location.pathname) ? <HomeSkeleton /> : loadingPage;
   if ((modal === "auth" && (!user || authMode === "profile")) || (!user && isProtectedPath(window.location.pathname))) {
     return (
       <>
@@ -1318,7 +1268,9 @@ export default function App() {
   }
   return (
     <>
-    <FocusSpacePage key={userKey || 'guest'} active={view === 'focusSpace'} user={user} onBack={() => go("home")} theme={theme} onToggleTheme={() => setTheme(theme === 'light' ? 'dark' : 'light')} />
+    <Suspense fallback={loadingPage}>
+      {(view === 'focusSpace' || focusSpaceMounted) && <FocusSpacePage key={userKey || 'guest'} active={view === 'focusSpace'} user={user} onBack={() => go("home")} theme={theme} onToggleTheme={() => setTheme(theme === 'light' ? 'dark' : 'light')} />}
+    </Suspense>
     <div className={`studyhub-app ${theme}`} hidden={view === 'focusSpace'}>
       <header className="topbar">
         <button className="brand-wrap" onClick={() => go("home")} aria-label={HOME_COPY.brandLabel}>
@@ -1370,152 +1322,15 @@ export default function App() {
           )}
         </div>
       </header>
+      {studySync.pending.length > 0 && <p className="study-sync-notice" role="status">
+        {studySync.pending.some(item => item.blocked) ? `Không đồng bộ được: ${studySync.pending.find(item => item.blocked).error}` : `Chưa đồng bộ, sẽ thử lại · ${studySync.pending.length} hoạt động`}
+        <button type="button" className="text-link" onClick={() => void studySync.retry()}>Thử lại</button>
+      </p>}
       <main className="main-shell">
-        {view === "home" && (
-          <div className="home-page">
-            <section className={`hero-section ${!user ? 'landing-hero' : ''}`}>
-              <div className="hero-copy">
-                <span className="eyebrow">
-                  {HOME_COPY.eyebrow}
-                </span>
-                <h1>
-                  {HOME_COPY.headline[0]}
-                  <br />
-                  <span>{HOME_COPY.headline[1]}</span>
-                </h1>
-                <p className="hero-tagline">
-                  {HOME_COPY.description}
-                </p>
-                <div className="hero-actions">
-                  <button
-                    className="btn btn-primary large"
-                    onClick={() => user ? go("tutor") : openAuth("login")}
-                  >
-                    <SparklesIcon aria-hidden="true" className="btn-icon" />
-                    {HOME_COPY.askNova}
-                  </button>
-                  <button
-                    className="btn btn-outline large"
-                    onClick={() => user ? go("library") : openAuth("login")}
-                  >
-                    <BookOpenIcon aria-hidden="true" className="btn-icon" />
-                    {HOME_COPY.openLibrary}
-                  </button>
-                </div>
-                <div className="hero-badges">
-                  <button type="button" className="hero-badge" onClick={() => go("quiz")}><RectangleStackIcon aria-hidden="true" /> {HOME_COPY.chips[0]}</button>
-                  <button type="button" className="hero-badge" onClick={() => go("roadmap")}><SparklesIcon aria-hidden="true" /> {HOME_COPY.chips[1]}</button>
-                  <button type="button" className="hero-badge" onClick={() => go("dashboard")}><BoltIcon aria-hidden="true" /> {HOME_COPY.chips[2]}</button>
-                </div>
-              </div>
-              <div className="hero-visual">
-                <Logo3D {...randomQuote} onNotify={notify} />
-                {user ? <>
-                  <div className="hero-note hero-note--one"><BookOpenIcon aria-hidden="true" /><div><strong>{documents.length} {HOME_COPY.documentUnit}</strong><small>{HOME_COPY.stats[0]}</small></div></div>
-                  <div className="hero-note hero-note--two"><SparklesIcon aria-hidden="true" /><div><strong>{progress.length ? `${average}%` : "—"}</strong><small>{HOME_COPY.stats[1]}</small></div></div>
-                  <div className="hero-note hero-note--three">{streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}<div><strong>{streak.current_streak} {HOME_COPY.dayUnit}</strong><small>{HOME_COPY.stats[2]}</small></div></div>
-                </> : <>
-                  <div className="hero-note hero-note--one"><BookOpenIcon aria-hidden="true" /><div><strong>{HOME_COPY.guestStats[0][0]}</strong><small>{HOME_COPY.guestStats[0][1]}</small></div></div>
-                  <div className="hero-note hero-note--two"><SparklesIcon aria-hidden="true" /><div><strong>{HOME_COPY.guestStats[1][0]}</strong><small>{HOME_COPY.guestStats[1][1]}</small></div></div>
-                  <div className="hero-note hero-note--three">{streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}<div><strong>{HOME_COPY.guestStats[2][0]}</strong><small>{HOME_COPY.guestStats[2][1]}</small></div></div>
-                </>}
-              </div>
-            </section>
-            <section className="content-section pain-points-section">
-              <span className="eyebrow">{HOME_COPY.painEyebrow}</span>
-              <h2>{HOME_COPY.painTitle}</h2>
-              <div className="pain-grid">
-                {HOME_COPY.painPoints.map(([icon, title, desc], i) => (
-                  <article className="pain-card" key={i}>
-                    <span className="pain-icon">{icon}</span>
-                    <h3>{title}</h3>
-                    <p>{desc}</p>
-                  </article>
-                ))}
-              </div>
-              <p className="pain-conclusion">
-                <strong>{HOME_COPY.painConclusion[0]}</strong><br/>
-                {HOME_COPY.painConclusion[1]}
-              </p>
-            </section>
-            {user && <StreakCard
-              user={user}
-              streak={streak}
-              onLogin={() => openAuth("login")}
-            />}
-            <section className="content-section workflow-section" id="studyhub-workflow">
-              <span className="eyebrow">{HOME_COPY.workflowEyebrow}</span>
-              <h2>{HOME_COPY.workflowTitle[0]}<br />{HOME_COPY.workflowTitle[1]}</h2>
-              <div className="workflow-grid reveal-stagger">
-                {HOME_COPY.workflow.map(([num, title, detail, target]) => (
-                  <article className="workflow-card" key={num}>
-                    <span className="step-tag">{num}</span>
-                    <h3>{title}</h3>
-                    <p>{detail}</p>
-                <button className="text-link" onClick={() => go(target)}>
-                      {HOME_COPY.openFeature}{" "}
-                      <ArrowRightIcon
-                        aria-hidden="true"
-                        className="link-icon"
-                      />
-                    </button>
-                  </article>
-                ))}
-              </div>
-            </section>
-            <section className="content-section roadmap-sample-section">
-              <span className="eyebrow">{HOME_COPY.roadmapEyebrow}</span>
-              <h2>{HOME_COPY.roadmapTitle}</h2>
-              <p>{HOME_COPY.roadmapDescription}</p>
-              <div className="roadmap-cards">
-                {HOME_COPY.roadmapWeeks.map((w, i) => (
-                  <article className={`roadmap-week-card${w.active ? ' active' : ''}`} key={i}>
-                    <div className="roadmap-week-header">
-                      <span className="week-dot" />
-                      <span className="week-label">{w.week}</span>
-                      {w.active && <span className="week-badge">{HOME_COPY.studying}</span>}
-                    </div>
-                    <h3>{w.title}</h3>
-                    <p className="week-sub">{w.sub}</p>
-                    <ul>{w.items.map((item, j) => <li key={j}>{item}</li>)}</ul>
-                    <div className="week-progress">
-                      <span>{HOME_COPY.progress}</span>
-                      <strong>{w.progress}%</strong>
-                    </div>
-                    <div className="progress-bar"><span style={{ width: `${w.progress}%` }} /></div>
-                  </article>
-                ))}
-              </div>
-              <div className="roadmap-cta">
-                <p><strong>{HOME_COPY.roadmapCtaTitle}</strong></p>
-                <p>{HOME_COPY.roadmapCtaDescription}</p>
-                <button className="btn btn-primary" onClick={() => go("roadmap")}>{HOME_COPY.roadmapCta}</button>
-              </div>
-            </section>
-            <section className="content-section streak-habit-section">
-              <span className="eyebrow">{HOME_COPY.habitEyebrow}</span>
-              <h2>{HOME_COPY.habitTitle}</h2>
-              <p>{HOME_COPY.habitDescription}</p>
-              {user ? <StreakCard user={user} streak={streak} onLogin={() => openAuth("login")} /> : <div className="streak-calendar-card">
-                <div className="streak-cal-header">
-                  <span>{user ? new Date().toLocaleDateString('vi-VN', { month: 'long', year: 'numeric', timeZone: VIETNAM_TIME_ZONE }) : HOME_COPY.calendarExample}</span>
-                  <span>✔ {user ? `${HOME_COPY.currentStreak} ${streak.current_streak} ${HOME_COPY.dayUnit}` : HOME_COPY.calendarCaption}</span>
-                </div>
-                <div className="streak-week">
-                  {HOME_COPY.weekdays.map((day, i) => (
-                    <div className={`streak-day${i < (user ? streak.current_streak : 5) ? ' done' : ''}${i === new Date().getDay() - 1 ? ' today' : ''}`} key={i}>
-                      <span className="day-label">{day}</span>
-                      <span className="day-num">{12 + i}</span>
-                      {i < (user ? streak.current_streak : 5) && <span className="day-check">✔</span>}
-                      {user && i === new Date().getDay() - 1 && <span className="day-today">{HOME_COPY.today}</span>}
-                    </div>
-                  ))}
-                </div>
-              </div>}
-            </section>
-            {!user && <LandingExtras plans={PLANS} onStart={() => openAuth("register")} onExplore={go} />}
-          </div>
-        )}
+        <Suspense fallback={loadingPage}>
+        {view === "home" && (isAuthenticated
+          ? <MemberHome user={user} documentCount={documents.length} average={average} streak={streak} go={go} openAuth={openAuth} randomQuote={randomQuote} notify={notify} />
+          : <GuestHome go={go} openAuth={openAuth} randomQuote={randomQuote} notify={notify} plans={PLANS} />)}
         {view === "library" && (
           <section className="library-page" aria-labelledby="library-title">
             <header className="library-hero reveal">
@@ -1526,6 +1341,8 @@ export default function App() {
               </div>
               <button
                 className="btn btn-primary hero-upload"
+                disabled={Boolean(user) && !permissions.canUpload}
+                title={user && !permissions.canUpload ? 'Nâng cấp để sử dụng' : undefined}
                 onClick={() => openUpload()}
               >
                 <CloudArrowUpIcon aria-hidden="true" />
@@ -1649,7 +1466,7 @@ export default function App() {
           </section>
         )}
         {view === "quiz" && (
-          <QuizCardPage key={userKey || 'guest'} user={user} decks={quizDecks} decksLoading={decksLoading}
+          <QuizCardPage key={userKey || 'guest'} user={user} subscription={subscription} decks={quizDecks} decksLoading={decksLoading}
             onDeckSaved={(saved) => setQuizDecks((current) => current.some((item) => item.id === saved.id) ? current.map((item) => item.id === saved.id ? saved : item) : [...current,saved])}
             onDeleteDeck={removeFlashcardDeck} onStudy={setActiveStudyDeck}
             onEdit={(deck) => {setEditingDeck(deck);setModal('quiz-create');}}
@@ -1658,13 +1475,13 @@ export default function App() {
         )}
         {view === "roadmap" && (
           <LearningRoadmapPage
+            subscription={subscription}
             key={String(user?.id || user?.email || "guest")}
             documents={documents}
             subjects={subjects}
             progress={progress}
             onOpenDocument={openDocumentPreview}
             onTakeQuiz={(document) => { setSelectedDocument(document); go("quiz"); }}
-            onUpload={openUpload}
             onAskNova={(document) => { setSelectedDocument(document); go("tutor"); }}
             user={user}
             streak={streak}
@@ -1674,11 +1491,7 @@ export default function App() {
         {view === "dashboard" && (
           <ProgressDashboard
             user={user}
-            analytics={progressAnalytics}
             progress={progress}
-            studyTime={studyTime}
-            streak={streak}
-            quizDecks={quizDecks}
             subscription={subscription}
             onUpgrade={() => go("pricing")}
             onLogin={() => openAuth("login")}
@@ -1705,7 +1518,7 @@ export default function App() {
                 </p>
               </div>
             </div>
-            <div className="price-grid reveal-stagger">
+            <div className="price-grid">
               {Object.entries(PLANS).map(([id, plan]) => {
                 const isCurrent = subscription.plan === id;
                 return (
@@ -1717,7 +1530,7 @@ export default function App() {
                       <div className="pricing-ribbon-badge">{plan.ribbon}</div>
                     )}
                     <div className="price-card-topline">
-                      <span className="plan-badge">{plan.badge}</span>
+                      {!plan.ribbon && <span className="plan-badge">{plan.badge}</span>}
                       {isCurrent && (
                         <span className="current-plan-indicator">
                           <CheckIcon aria-hidden="true" /> Gói hiện tại
@@ -1750,7 +1563,7 @@ export default function App() {
                         </div>
                         <ul className="price-limits-list">
                           {plan.excluded.map((item) => (
-                            <li key={item} className="is-excluded">
+                            <li key={item}>
                               <XMarkIcon aria-hidden="true" className="limit-cross-icon" />
                               <span>{item}</span>
                             </li>
@@ -1802,9 +1615,10 @@ export default function App() {
             )}
           </section>
         )}
+        </Suspense>
       </main>
       {view === "home" && <FocusSpaceLogo onOpen={() => go("focusSpace")} />}
-      <BeeChatWidget visible={view === "home" || view === "roadmap"} variant={view === "roadmap" ? "roadmap" : "default"} key={String(user?.id || user?.email || "guest")} user={user} onNavigate={go} />
+      <BeeChatWidget visible={view === "home" || view === "roadmap"} variant={view === "roadmap" ? "roadmap" : "default"} key={String(user?.id || user?.email || "guest")} user={user} subscription={subscription} onNavigate={go} />
       {modal === "document-preview" && documentPreview && (
         <Modal
           title={documentPreview.document.title || "Nội dung tài liệu"}
@@ -1950,7 +1764,7 @@ export default function App() {
               >
                 Hủy bỏ
               </button>
-              <button className="btn btn-primary" disabled={uploadSuggestionBusy || ["validating", "uploading", "processing"].includes(uploadPhase)}>Tải lên & Xử lý</button>
+              <button className="btn btn-primary" title={!permissions.canUpload || permissions.storage_used_bytes + (uploadFile?.size || 0) > permissions.storage_bytes ? 'Nâng cấp để sử dụng' : undefined} disabled={!permissions.canUpload || permissions.storage_used_bytes + (uploadFile?.size || 0) > permissions.storage_bytes || uploadSuggestionBusy || ["validating", "uploading", "processing"].includes(uploadPhase)}>Tải lên & Xử lý</button>
             </footer>
           </form>
         </Modal>
@@ -1995,7 +1809,7 @@ export default function App() {
       )}
       {modal === "quiz-create" && (
         <Modal title={editingDeck ? "Chỉnh sửa bộ thẻ" : "Tạo bộ thẻ ghi nhớ mới"} onClose={() => { setModal(null); setEditingDeck(null); }}>
-          <FlashcardDeckForm key={editingDeck?.id || "new"} userKey={userKey} initialDeck={editingDeck} onCreate={submitQuizDeck} onCancel={() => { setModal(null); setEditingDeck(null); }} />
+          <Suspense fallback={loadingPage}><FlashcardDeckForm key={editingDeck?.id || "new"} userKey={userKey} canGenerate={permissions.advancedQuiz} initialDeck={editingDeck} onCreate={submitQuizDeck} onCancel={() => { setModal(null); setEditingDeck(null); }} /></Suspense>
         </Modal>
       )}
       {modal === "plan" && (
@@ -2016,7 +1830,7 @@ export default function App() {
       )}
       {modal === "payment" && pendingPlan && (
         <Modal title="Thanh toán gói học" subtitle="Thanh toán QR hiện đại · trạng thái xác nhận an toàn" onClose={() => setModal(null)}>
-          <PaymentCheckout planId={pendingPlan} plan={PLANS[pendingPlan]} qrImage="/payment/momo-vietqr.jpg" onClose={() => setModal(null)} />
+          <Suspense fallback={loadingPage}><PaymentCheckout planId={pendingPlan} plan={PLANS[pendingPlan]} qrImage="/payment/momo-vietqr.jpg" onClose={() => setModal(null)} /></Suspense>
         </Modal>
       )}
       {modal === "account" && (
@@ -2040,7 +1854,7 @@ export default function App() {
       <footer className="site-footer">
         <div className="footer-inner">
           <div className="footer-brand">
-            <button className="brand-wrap" onClick={() => go("home")}>
+            <button className="footer-brand-wrap" onClick={() => go("home")}>
               <span className="brand-mark"><AcademicCapIcon aria-hidden="true" /></span>
               <span className="brand-text">Study<span>Hub</span></span>
             </button>
@@ -2069,7 +1883,7 @@ export default function App() {
         </div>
       </footer>
       {toast && <div className="toast">{toast}</div>}
-      {activeStudyDeck && <StudyDeckSession key={activeStudyDeck.id} deck={activeStudyDeck} onUpdateDeck={updateStudyDeck} onClose={() => setActiveStudyDeck(null)} />}
+      {activeStudyDeck && <Suspense fallback={loadingPage}><StudyDeckSession key={activeStudyDeck.id} deck={activeStudyDeck} onUpdateDeck={updateStudyDeck} onClose={() => setActiveStudyDeck(null)} /></Suspense>}
     </div>
     </>
   );

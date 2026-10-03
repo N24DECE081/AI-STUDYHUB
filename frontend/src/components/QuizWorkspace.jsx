@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Clock, ArrowLeft, RotateCcw } from 'lucide-react';
-import { saveQuizAnswers, submitQuiz } from '../api';
+import { mutateStudy } from '../utils/studySync';
 import QuizFlashCard from './QuizFlashCard';
 import QuizResultSummary from './QuizResultSummary';
 
 export default function QuizWorkspace({ quiz, onBack, onRetake }) {
-  const [answers, setAnswers] = useState({});
-  const [result, setResult] = useState(null);
+  const [answers, setAnswers] = useState(quiz.run.answers || {});
+  const [result, setResult] = useState(quiz.run.result || null);
   const [review, setReview] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -14,11 +14,19 @@ export default function QuizWorkspace({ quiz, onBack, onRetake }) {
   const [current, setCurrent] = useState(0);
   const [now, setNow] = useState(() => quiz.run.server_now);
   const [clockOffset] = useState(() => Date.now()/1000 - quiz.run.server_now);
-  const revision = useRef(0);
+  const revision = useRef(quiz.run.revision || 0);
   const submitting = useRef(false);
   const autoSubmitted = useRef(false);
   const remaining = quiz.run.deadline ? Math.max(0,Math.ceil(quiz.run.deadline-now)) : null;
   const expired = remaining===0;
+  useEffect(() => {
+    const saved = (event) => {
+      if (event.detail.path === `/quiz-attempts/${quiz.run.attemptId}/answers`) setError('');
+      if (event.detail.path === `/quiz-attempts/${quiz.run.attemptId}/submit`) { setResult(event.detail.result); setError(''); }
+    };
+    window.addEventListener('studyhub:mutation-saved', saved);
+    return () => window.removeEventListener('studyhub:mutation-saved', saved);
+  }, [quiz.run.attemptId]);
   useEffect(() => {
     if (!quiz.run.deadline || result) return;
     const timer=setInterval(() => setNow(Date.now()/1000-clockOffset),500);
@@ -27,10 +35,13 @@ export default function QuizWorkspace({ quiz, onBack, onRetake }) {
   const submit = useCallback(async () => {
     if (submitting.current || result) return;
     submitting.current=true;setLoading(true);setError('');
-    try {setResult(await submitQuiz(quiz.id,answers,quiz.run.run_id));}
-    catch {setError('Chưa nộp được bài. Đáp án đang giữ nguyên, vui lòng bấm nộp lại.');}
+    try {
+      const value = await mutateStudy(`/quiz-attempts/${quiz.run.attemptId}/submit`, { answers });
+      if (value.pending) setError('Chưa đồng bộ, sẽ thử lại khi có mạng.'); else setResult(value);
+    }
+    catch (failure) {setError(failure.message);}
     finally {submitting.current=false;setLoading(false);}
-  },[quiz.id,quiz.run.run_id,answers,result]);
+  },[quiz.run.attemptId,answers,result]);
   useEffect(() => {
     if (!expired || result || autoSubmitted.current) return;
     autoSubmitted.current=true;
@@ -41,8 +52,11 @@ export default function QuizWorkspace({ quiz, onBack, onRetake }) {
   const answer = async (id,index) => {
     if (expired || result || submitting.current) return;
     const next={...answers,[id]:index};setAnswers(next);setSaving((n) => n+1);
-    try {await saveQuizAnswers(quiz.id,quiz.run.run_id,next,++revision.current);}
-    catch {setError('Chưa đồng bộ được đáp án. Kiểm tra kết nối; đáp án trên màn hình vẫn được giữ.');}
+    try {
+      const value = await mutateStudy(`/quiz-attempts/${quiz.run.attemptId}/answers`, { answers: next, revision: ++revision.current });
+      setError(value.pending ? 'Chưa đồng bộ, sẽ thử lại khi có mạng.' : '');
+    }
+    catch (failure) {setError(failure.message);}
     finally {setSaving((n) => n-1);}
   };
   return <section className="qc-taking" aria-label="Làm bài trắc nghiệm">

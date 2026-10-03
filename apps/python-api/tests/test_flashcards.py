@@ -1,5 +1,7 @@
 import io
 import json
+import sqlite3
+from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 from backend.app.flashcards import service
@@ -85,6 +87,11 @@ class FlashcardHTTPTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         integration.ServerIntegrationTest.setUpClass.__func__(cls)
+        # Preview is a paid AI feature; ownership/auth tests below remain unchanged.
+        with sqlite3.connect(Path(cls.tmp.name) / 'integration.db') as conn:
+            conn.execute("DELETE FROM subscriptions WHERE user_id IN (SELECT id FROM users WHERE email IN ('student@studyhub.local','teacher@studyhub.local'))")
+            conn.execute("INSERT INTO subscriptions(user_id,plan_id,status) SELECT u.id,p.id,'active' FROM users u,plans p WHERE u.email IN ('student@studyhub.local','teacher@studyhub.local') AND p.name='Premium'")
+        conn.close()
     @classmethod
     def tearDownClass(cls):
         integration.ServerIntegrationTest.tearDownClass.__func__(cls)

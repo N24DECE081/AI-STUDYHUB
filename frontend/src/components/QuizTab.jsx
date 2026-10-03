@@ -49,15 +49,15 @@ function QuizTab({ currentDocument }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #2e264d', paddingBottom: '16px' }}>
         <div>
-          <h2 style={{ fontSize: '20px', color: '#ffffff', margin: 0 }}>📝 Bài Trắc Nghiệm Ôn Tập</h2>
-          <p style={{ fontSize: '13px', color: '#a78bfa', margin: '4px 0 0 0' }}>Tài liệu: {currentDocument ? currentDocument.fileName : 'Chưa chọn'}</p>
+          <h2 style={{ fontSize: '20px', color: 'var(--foreground)', margin: 0 }}>📝 Bài Trắc Nghiệm Ôn Tập</h2>
+          <p style={{ fontSize: '13px', color: 'var(--foreground)', margin: '4px 0 0 0' }}>Tài liệu: {currentDocument ? currentDocument.fileName : 'Chưa chọn'}</p>
         </div>
         <button
           onClick={handleGenerateQuiz}
           disabled={!currentDocument || loading}
           style={{
-            padding: '12px 20px', background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
-            color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer'
+            padding: '12px 20px', background: 'var(--accent)',
+            color: 'var(--accent-foreground)', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer'
           }}
         >
           {loading ? 'Đang khởi tạo câu hỏi...' : '✨ Tạo Bài Trắc Nghiệm'}
@@ -66,13 +66,13 @@ function QuizTab({ currentDocument }) {
 
       {loading && (
         <div style={{ textAlign: 'center', padding: '40px' }}>
-          <img src={robotImg} alt="AI Bot" style={{ width: '80px', height: '80px', marginBottom: '12px' }} />
-          <p style={{ color: '#a78bfa' }}>AI đang đọc tài liệu và phân tích câu hỏi...</p>
+          <img src={robotImg} alt="AI Bot" loading="lazy" decoding="async" style={{ width: '80px', height: '80px', marginBottom: '12px' }} />
+          <p style={{ color: 'var(--foreground)' }}>AI đang đọc tài liệu và phân tích câu hỏi...</p>
         </div>
       )}
 
       {!loading && quizzes.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--foreground)' }}>
           Nhấn nút <strong>"Tạo Bài Trắc Nghiệm"</strong> để AI sinh bộ câu hỏi ôn tập tự động!
         </div>
       )}
@@ -80,8 +80,8 @@ function QuizTab({ currentDocument }) {
       {!loading && quizzes.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {quizzes.map((q, index) => (
-            <div key={q.id || index} style={{ background: '#1e1838', padding: '20px', borderRadius: '12px', border: '1px solid #362a5b' }}>
-              <h4 style={{ color: '#ffffff', margin: '0 0 14px 0', fontSize: '15px' }}>
+            <div key={q.id || index} style={{ background: 'var(--card)', padding: '20px', borderRadius: '12px', border: '1px solid #362a5b' }}>
+              <h4 style={{ color: 'var(--foreground)', margin: '0 0 14px 0', fontSize: '15px' }}>
                 Câu {index + 1}: {q.question}
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -111,7 +111,7 @@ function QuizTab({ currentDocument }) {
                       onClick={() => handleSelectOption(q.id, optIdx)}
                       style={{
                         padding: '12px 16px', borderRadius: '8px', background: optionBg, border: `1px solid ${borderColor}`,
-                        color: '#e2e8f0', cursor: showResults ? 'default' : 'pointer', transition: 'all 0.2s', fontSize: '14px'
+                        color: 'var(--foreground)', cursor: showResults ? 'default' : 'pointer', transition: 'all 0.2s', fontSize: '14px'
                       }}
                     >
                       <strong>{String.fromCharCode(65 + optIdx)}.</strong> {opt}
@@ -121,7 +121,7 @@ function QuizTab({ currentDocument }) {
               </div>
 
               {showResults && (
-                <div style={{ marginTop: '12px', padding: '10px 14px', background: '#110d21', borderRadius: '8px', borderLeft: '4px solid #a855f7', fontSize: '13px', color: '#cbd5e1' }}>
+                <div style={{ marginTop: '12px', padding: '10px 14px', background: 'var(--card)', borderRadius: '8px', borderLeft: '4px solid #a855f7', fontSize: '13px', color: 'var(--foreground)' }}>
                   💡 <strong>Giải thích:</strong> {q.explanation}
                 </div>
               )}
@@ -133,16 +133,16 @@ function QuizTab({ currentDocument }) {
               onClick={() => setShowResults(true)}
               disabled={Object.keys(userAnswers).length < quizzes.length}
               style={{
-                padding: '14px', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                color: '#fff', border: 'none', borderRadius: '10px', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', marginTop: '10px'
+                padding: '14px', background: 'var(--accent)',
+                color: 'var(--accent-foreground)', border: 'none', borderRadius: '10px', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', marginTop: '10px'
               }}
             >
               Nộp Bài & Xem Kết Quả
             </button>
           ) : (
-            <div style={{ textAlign: 'center', background: '#261d44', padding: '20px', borderRadius: '12px', border: '1px solid #7c3aed' }}>
-              <h3 style={{ color: '#ffffff', margin: '0 0 8px 0' }}>🎉 Kết Quả: {calculateScore()} / {quizzes.length} Câu Đúng</h3>
-              <p style={{ color: '#a78bfa', margin: 0 }}>
+            <div style={{ textAlign: 'center', background: 'var(--card)', padding: '20px', borderRadius: '12px', border: '1px solid #7c3aed' }}>
+              <h3 style={{ color: 'var(--foreground)', margin: '0 0 8px 0' }}>🎉 Kết Quả: {calculateScore()} / {quizzes.length} Câu Đúng</h3>
+              <p style={{ color: 'var(--foreground)', margin: 0 }}>
                 {calculateScore() === quizzes.length ? 'Xuất sắc! Bạn đã nắm vững tài liệu này.' : 'Hãy tiếp tục ôn tập để cải thiện kết quả nhé!'}
               </p>
             </div>

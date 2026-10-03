@@ -23,10 +23,10 @@ const COPY = {
 
 export default function LandingExtras({ plans, onStart, onExplore }) {
   return <>
-    <section className="content-section landing-tutor">
+    <section className="content-section landing-tutor" aria-labelledby="landing-tutor-title">
       <div className="landing-tutor-copy">
         <span className="eyebrow">{COPY.tutorEyebrow}</span>
-        <h2>{COPY.tutorTitle[0]}<br />{COPY.tutorTitle[1]}</h2>
+        <h2 id="landing-tutor-title">{COPY.tutorTitle[0]}<br />{COPY.tutorTitle[1]}</h2>
         <p>{COPY.tutorDescription}</p>
         <button className="btn btn-primary" onClick={onStart}>{COPY.tutorCta} <ArrowRightIcon aria-hidden="true" /></button>
       </div>
@@ -37,9 +37,9 @@ export default function LandingExtras({ plans, onStart, onExplore }) {
         <button className="landing-chat-input" onClick={onStart}>{COPY.chatPlaceholder} <ArrowRightIcon aria-hidden="true" /></button>
       </div>
     </section>
-    <section className="content-section landing-pricing">
+    <section className="content-section landing-pricing" aria-labelledby="landing-pricing-title">
       <span className="eyebrow">{COPY.pricingEyebrow}</span>
-      <h2>{COPY.pricingTitle}</h2>
+      <h2 id="landing-pricing-title">{COPY.pricingTitle}</h2>
       <p>{COPY.pricingDescription}</p>
       <div className="price-grid">
         {Object.entries(plans).map(([id, plan]) => <article className={`price-card ${id === 'plus' ? 'featured' : ''}`} key={id}>
@@ -51,10 +51,10 @@ export default function LandingExtras({ plans, onStart, onExplore }) {
       </div>
       <button className="text-link landing-all-plans" onClick={() => onExplore('pricing')}>{COPY.comparePlans} <ArrowRightIcon aria-hidden="true" /></button>
     </section>
-    <section className="content-section landing-faq">
-      <span className="eyebrow">{COPY.faqEyebrow}</span><h2>{COPY.faqTitle}</h2>
+    <section className="content-section landing-faq" aria-labelledby="landing-faq-title">
+      <span className="eyebrow">{COPY.faqEyebrow}</span><h2 id="landing-faq-title">{COPY.faqTitle}</h2>
       <div>{FAQ.map(([question, answer]) => <details key={question}><summary>{question}<span aria-hidden="true">+</span></summary><p>{answer}</p></details>)}</div>
     </section>
-    <section className="landing-final"><span className="eyebrow">{COPY.finalEyebrow}</span><h2>{COPY.finalTitle}</h2><p>{COPY.finalDescription}</p><button className="btn btn-primary large" onClick={onStart}>{COPY.finalCta} <ArrowRightIcon aria-hidden="true" /></button></section>
+    <section className="landing-final" aria-labelledby="landing-final-title"><span className="eyebrow">{COPY.finalEyebrow}</span><h2 id="landing-final-title">{COPY.finalTitle}</h2><p>{COPY.finalDescription}</p><button className="btn btn-primary large" onClick={onStart}>{COPY.finalCta} <ArrowRightIcon aria-hidden="true" /></button></section>
   </>;
 }

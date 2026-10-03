@@ -9,15 +9,15 @@ export function RoadmapStatChips({ items }) {
   )}</dl>;
 }
 
-export function RoadmapBanner({ hasRoadmap, completed, topics, hours, documents, onCreate, onUpload }) {
+export function RoadmapBanner({ hasRoadmap, completed, topics, hours, documents, onCreate, onUpload, canCreate = true, canUpload = true }) {
   return <section className="roadmap-banner" aria-labelledby="learning-roadmap-title">
     <div className="roadmap-banner-content">
       <span className="roadmap-banner-badge"><Sparkles size={15} aria-hidden="true" /> LỘ TRÌNH TỪ TÀI LIỆU</span>
       <h1 id="learning-roadmap-title">Lộ trình học<span>Từ tài liệu đến mục tiêu</span></h1>
       <p>Biến tài liệu của bạn thành một hành trình học tập rõ ràng và phù hợp với thời gian của bạn.</p>
       <div className="roadmap-banner-actions">
-        <button type="button" className="lr-btn roadmap-create-button" onClick={onCreate}><Plus size={18} /> Tạo lộ trình mới</button>
-        {onUpload && <button type="button" className="lr-btn roadmap-upload-button" onClick={onUpload}><Upload size={17} /> Upload tài liệu</button>}
+        <button type="button" className="lr-btn roadmap-create-button" disabled={!canCreate} title={!canCreate ? 'Nâng cấp để sử dụng' : undefined} onClick={onCreate}><Plus size={18} /> Tạo lộ trình mới</button>
+        {onUpload && <button type="button" className="lr-btn roadmap-upload-button" disabled={!canUpload} title={!canUpload ? 'Nâng cấp để sử dụng' : undefined} onClick={onUpload}><Upload size={17} /> Upload tài liệu</button>}
       </div>
       <RoadmapStatChips items={[
         { icon: Map, value: hasRoadmap ? 1 : 0, label: "lộ trình học" },
@@ -39,7 +39,7 @@ export function DocumentThumbnail({ fileType, title }) {
   </div>;
 }
 
-export function CurrentRoadmapCard({ title, description, fileType, completed, topics, documents, completedHours, totalHours, remainingHours, percentage, streak, progress, onRename, onContinue }) {
+export function CurrentRoadmapCard({ title, description, fileType, completed, topics, documents, completedHours, totalHours, remainingHours, percentage, streak, progress, onRename, onContinue, disabled }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
@@ -75,7 +75,7 @@ export function CurrentRoadmapCard({ title, description, fileType, completed, to
         { icon: CheckCircle2, value: completed + " / " + topics, label: "chủ đề hoàn thành" },
         { icon: Clock3, value: "Còn khoảng " + remainingHours + " giờ", label: "thời gian dự kiến" },
       ]} />
-      <button type="button" className="lr-btn roadmap-continue-button" onClick={onContinue} disabled={!topics}>Tiếp tục học <ArrowRight size={16} /></button>
+      <button type="button" className="lr-btn roadmap-continue-button" onClick={onContinue} title={disabled ? 'Nâng cấp để sử dụng' : undefined} disabled={disabled || !topics}>Tiếp tục học <ArrowRight size={16} /></button>
     </div>
   </article>;
 }

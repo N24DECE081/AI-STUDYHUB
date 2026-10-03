@@ -25,7 +25,7 @@ export default function RoadmapLogo({ size = "md", eager = false, className = ""
     <div className={`roadmap-logo roadmap-logo--${size}${bare ? " is-bare" : ""}${debug ? " is-debug" : ""} ${className}`}>
       <div className="roadmap-logo-glow" aria-hidden="true" />
       <img className="roadmap-logo-base" src={roadmapLogo} alt="Lộ trình học" loading={eager ? "eager" : "lazy"}
-        width={dimensions[size]} height={dimensions[size]} draggable="false" />
+        decoding="async" width={dimensions[size]} height={dimensions[size]} draggable="false" />
       {hotspots.map((spot) => {
         const isActive = active === spot.id;
         return <button
@@ -45,7 +45,7 @@ export default function RoadmapLogo({ size = "md", eager = false, className = ""
             if (event.target === event.currentTarget) setActive((current) => current === spot.id ? "" : current);
           }}
         >
-          <img src={roadmapLogo} alt="" aria-hidden="true" draggable="false" />
+          <img src={roadmapLogo} alt="" aria-hidden="true" draggable="false" loading={eager ? 'eager' : 'lazy'} decoding="async" />
           <span className="roadmap-logo-burst" aria-hidden="true" />
         </button>;
       })}
