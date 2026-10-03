@@ -114,6 +114,43 @@ if not os.environ.get('MYSQL_DATABASE') and os.environ.get('STUDYHUB_DB_PATH'):
 def db():
  return get_runtime_database().open_connection()
 
+def get_admin_emails():
+    configured = os.environ.get('STUDYHUB_ADMIN_EMAILS', 'phantienvy130920026@gmail.com,admin@studyhub.local,phantienvy13092006@gmail.com')
+    single = os.environ.get('STUDYHUB_ADMIN_EMAIL', '')
+    emails = {e.strip().lower() for e in configured.split(',') if e.strip()}
+    if single.strip():
+        emails.add(single.strip().lower())
+    return emails
+
+def ensure_admin_accounts(database):
+    admin_emails = get_admin_emails()
+    default_pass = os.environ.get('STUDYHUB_ADMIN_PASSWORD', 'Admin123!')
+    with database.connect() as conn:
+        plan_row = conn.execute("SELECT id FROM plans WHERE lower(name) in ('premium', 'pro') ORDER BY id ASC LIMIT 1").fetchone()
+        master_plan_id = plan_row['id'] if isinstance(plan_row, dict) else (plan_row[0] if plan_row else None)
+        for email in admin_emails:
+            user = conn.execute("SELECT id, role FROM users WHERE lower(email)=?", (email,)).fetchone()
+            if not user:
+                full_name = 'StudyHub Admin' if 'admin' in email else 'Nguyen Duy'
+                conn.execute(
+                    "INSERT INTO users(full_name, email, password_hash, role, status, profile_completed) VALUES(?,?,?,?,?,?)",
+                    (full_name, email, hash_password(default_pass), 'admin', 'active', 1)
+                )
+                user = conn.execute("SELECT id, role FROM users WHERE lower(email)=?", (email,)).fetchone()
+            else:
+                uid = user['id'] if isinstance(user, dict) else user[0]
+                conn.execute("UPDATE users SET role='admin' WHERE id=?", (uid,))
+            if master_plan_id:
+                uid = user['id'] if isinstance(user, dict) else user[0]
+                conn.execute("UPDATE subscription_changes SET status='cancelled' WHERE user_id=? AND status='scheduled'", (uid,))
+                sub = conn.execute("SELECT id FROM subscriptions WHERE user_id=? AND status='active' ORDER BY id DESC LIMIT 1", (uid,)).fetchone()
+                if sub:
+                    sub_id = sub['id'] if isinstance(sub, dict) else sub[0]
+                    conn.execute("UPDATE subscriptions SET plan_id=? WHERE id=?", (master_plan_id, sub_id))
+                else:
+                    conn.execute("INSERT INTO subscriptions(user_id, plan_id, status) VALUES(?, ?, 'active')", (uid, master_plan_id))
+        conn.commit()
+
 def init_db():
  database=get_runtime_database()
  database.initialize()
@@ -125,9 +162,10 @@ def init_db():
   has_users=connection.execute('SELECT 1 FROM users LIMIT 1').fetchone()
  if not has_users:
   production=os.environ.get('STUDYHUB_ENV','development').strip().lower() in ('production','prod')
-  # Public deployments must never receive the well-known demo passwords.
-  # Keep the public catalog/plans seed while omitting demo accounts.
-  seed_database(database,include_demo_users=not production)
+  # Public deployments must never receive the well-known demo passwords unless requested.
+  seed_demo = os.environ.get('STUDYHUB_SEED_DEMO_USERS', '').lower() in ('1', 'true', 'yes') or not production
+  seed_database(database,include_demo_users=seed_demo)
+ ensure_admin_accounts(database)
 
 def cookie_value(handler, name):
     raw = handler.headers.get('Cookie', '')

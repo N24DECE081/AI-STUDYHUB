@@ -29,3 +29,7 @@ services:
         value: gpt-4o-mini
       - key: STUDYHUB_AI_API_KEY
         sync: false
+      - key: STUDYHUB_SEED_DEMO_USERS
+        value: "1"
+      - key: STUDYHUB_ADMIN_EMAILS
+        value: phantienvy130920026@gmail.com,admin@studyhub.local,phantienvy13092006@gmail.com
