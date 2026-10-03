@@ -57,7 +57,7 @@ export default function FocusSpaceLogo({ onOpen }) {
         onClick={open}
         disabled={busy}
       >
-        <img src={focusSpaceLogo} alt="" draggable="false" />
+        <img src={focusSpaceLogo} alt="" draggable="false" loading="eager" decoding="async" />
       </button>
       <span className="focus-space-logo__bee focus-space-logo__bee--one" aria-hidden="true" />
       <span className="focus-space-logo__bee focus-space-logo__bee--two" aria-hidden="true" />

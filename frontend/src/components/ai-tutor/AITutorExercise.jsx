@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getTutorExercises, getTutorRoadmap, getTutorSubmissions, submitTutorExercise } from '../../api';
 import AITutorGrading from './AITutorGrading';
+import { mutateStudy } from '../../utils/studySync';
 
 const ANSWER_TYPE = { multiple_choice: 'choice', math: 'math', code: 'code', short_answer: 'text', essay: 'text' };
 const TYPE_LABEL = { multiple_choice: 'Trắc nghiệm', short_answer: 'Trả lời ngắn', essay: 'Tự luận', code: 'Lập trình', math: 'Tính toán' };
@@ -19,6 +20,40 @@ export default function AITutorExercise({ onNeedJourney }) {
   const [results, setResults] = useState({});
   const [openId, setOpenId] = useState(null);
   const [filter, setFilter] = useState('todo');
+  const runs = useRef({});
+  useEffect(() => {
+    const saved = (event) => {
+      const { path, payload, result } = event.detail;
+      if (path === '/quiz-attempts' && payload.tutorExerciseId) runs.current[payload.tutorExerciseId] = result;
+      const match = path.match(/^\/ai-tutor\/exercises\/(\d+)\/submit$/);
+      if (!match) return;
+      runs.current[match[1]] = { attemptId: result.attemptId, status: 'submitted' };
+      setResults(current => ({ ...current, [match[1]]: result })); setError('');
+      if (result.progress) setProgress(result.progress);
+      if (result.adaptation?.note) setRoadmap(current => current ? { ...current, adaptation_note: result.adaptation.note, progress: result.progress || current.progress } : current);
+      setFilter(current => current === 'todo' ? 'all' : current);
+      void getTutorSubmissions().then(data => setHistory(data?.items || [])).catch(failure => setError(failure.message));
+    };
+    window.addEventListener('studyhub:mutation-saved', saved);
+    return () => window.removeEventListener('studyhub:mutation-saved', saved);
+  }, []);
+  const ensureRun = (exercise) => {
+    if (!runs.current[exercise.id] || runs.current[exercise.id].status === 'submitted') {
+      runs.current[exercise.id] = mutateStudy('/quiz-attempts', { tutorExerciseId: exercise.id, resume: true }).then(run => {
+        runs.current[exercise.id] = run; return run;
+      }).catch(failure => { delete runs.current[exercise.id]; throw failure; });
+    }
+    return Promise.resolve(runs.current[exercise.id]);
+  };
+  const choose = async (exercise, option, index) => {
+    setDrafts(current => ({ ...current, [exercise.id]: option }));
+    try {
+      const run = await ensureRun(exercise);
+      const id = run.pending ? `:attempt:${run.idempotencyKey}` : run.attemptId;
+      const saved = await mutateStudy(`/quiz-attempts/${id}/answers`, { answers: { q1: index } });
+      setError(saved.pending ? 'Chưa đồng bộ, sẽ thử lại khi có mạng.' : '');
+    } catch (failure) { setError(failure.message); }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -72,6 +107,14 @@ export default function AITutorExercise({ onNeedJourney }) {
     if (!answer) { setError('Hãy nhập câu trả lời trước khi nộp bài.'); return; }
     setBusy(String(exercise.id)); setError('');
     try {
+      if (exercise.exercise_type === 'multiple_choice') {
+        const run = await ensureRun(exercise);
+        const saved = await mutateStudy(`/ai-tutor/exercises/${exercise.id}/submit`, {
+          attemptId: run.pending ? `:attempt:${run.idempotencyKey}` : run.attemptId, answer, answer_type: 'choice',
+        });
+        if (saved.pending) setError('Chưa đồng bộ, sẽ thử lại khi có mạng.');
+        return;
+      }
       const result = await submitTutorExercise(exercise.id, { answer, answerType: ANSWER_TYPE[exercise.exercise_type] || 'text' });
       setResults((current) => ({ ...current, [String(exercise.id)]: result }));
       if (result.progress) setProgress(result.progress);
@@ -96,6 +139,7 @@ export default function AITutorExercise({ onNeedJourney }) {
 
   const restart = (exercise) => {
     const key = String(exercise.id);
+    runs.current[exercise.id] = { status: 'submitted' };
     setDrafts((current) => ({ ...current, [key]: '' }));
     setResults((current) => { const next = { ...current }; delete next[key]; return next; });
     setError('');
@@ -141,7 +185,7 @@ export default function AITutorExercise({ onNeedJourney }) {
             {isOpen ? <div className="tutor-exercise-body">
               <p className="tutor-exercise-prompt">{exercise.prompt}</p>
               {exercise.exercise_type === 'multiple_choice' && exercise.options?.length
-                ? <div className="tutor-options">{exercise.options.map((option, optionIndex) => <label key={`${exercise.id}-${optionIndex}`} className={String(drafts[exercise.id] || '') === option ? 'active' : ''}><input type="radio" name={`exercise-${exercise.id}`} checked={String(drafts[exercise.id] || '') === option} onChange={() => setDrafts({ ...drafts, [exercise.id]: option })} /><span>{option}</span></label>)}</div>
+                ? <div className="tutor-options">{exercise.options.map((option, optionIndex) => <label key={`${exercise.id}-${optionIndex}`} className={String(drafts[exercise.id] || '') === option ? 'active' : ''}><input type="radio" name={`exercise-${exercise.id}`} checked={String(drafts[exercise.id] || '') === option} onChange={() => choose(exercise, option, optionIndex)} /><span>{option}</span></label>)}</div>
                 : exercise.exercise_type === 'math'
                   ? <input className="tutor-answer-input" value={drafts[exercise.id] || ''} onChange={(event) => setDrafts({ ...drafts, [exercise.id]: event.target.value })} inputMode="decimal" placeholder="Nhập kết quả bằng số" />
                   : <textarea className={`tutor-answer-input ${exercise.exercise_type === 'code' ? 'code' : ''}`} rows={exercise.exercise_type === 'code' ? 8 : 5} value={drafts[exercise.id] || ''} onChange={(event) => setDrafts({ ...drafts, [exercise.id]: event.target.value })} placeholder={exercise.exercise_type === 'code' ? 'Viết mã của bạn ở đây…' : 'Viết câu trả lời của bạn…'} />}

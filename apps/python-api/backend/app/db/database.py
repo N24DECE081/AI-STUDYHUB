@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from pathlib import Path
 from typing import Iterable, Optional
@@ -78,7 +79,10 @@ class Database:
         """Rebuild tables left pointing at temporary legacy tables by migration."""
         stale = conn.execute(
             "SELECT name, sql FROM sqlite_master "
-            "WHERE type='table' AND sql LIKE '%legacy_%'"
+            "WHERE type='table' AND ("
+            "sql LIKE '%legacy_users%' OR "
+            "sql LIKE '%legacy_subjects%' OR "
+            "sql LIKE '%legacy_documents%')"
         ).fetchall()
         if not stale:
             return
@@ -94,7 +98,15 @@ class Database:
             fixed_sql = fixed_sql.replace("legacy_users", "users")
             fixed_sql = fixed_sql.replace("legacy_subjects", "subjects")
             fixed_sql = fixed_sql.replace("legacy_documents", "documents")
-            fixed_sql = fixed_sql.replace(f"CREATE TABLE {table}", f"CREATE TABLE {repaired}", 1)
+            if fixed_sql == create_sql:
+                continue
+            fixed_sql = re.sub(
+                r"^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?[\"`]?" + re.escape(table) + r"[\"`]?",
+                f"CREATE TABLE {repaired}",
+                fixed_sql,
+                count=1,
+                flags=re.IGNORECASE,
+            )
             conn.execute(fixed_sql)
             columns = [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
             names = ",".join(columns)

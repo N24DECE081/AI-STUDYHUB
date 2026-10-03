@@ -7,7 +7,7 @@ import "./flashcard.css";
 const newCard = () => ({ id: crypto.randomUUID(), front: "", back: "", color: null, language: "", pronunciation: "", audioUrl: "", remembered: false });
 const emptyDeck = () => ({ id: crypto.randomUUID(), name: "", subject: "", description: "", keywords: [], difficulty: "beginner", color: DEFAULT_FLASHCARD_COLOR, cover: "lines", cards: [newCard()] });
 
-export default function FlashcardDeckForm({ onCreate, onCancel, userKey, initialDeck }) {
+export default function FlashcardDeckForm({ onCreate, onCancel, userKey, initialDeck, canGenerate = false }) {
   const draftKey = `studyhub-flashcard-draft:${userKey}:${initialDeck?.id || 'new'}`;
   const [deck, setDeck] = useState(() => {
     try { const saved = JSON.parse(localStorage.getItem(draftKey)); if (saved && Array.isArray(saved.cards) && saved.cards.length) return saved; } catch { /* Invalid local draft is ignored. */ }
@@ -23,6 +23,7 @@ export default function FlashcardDeckForm({ onCreate, onCancel, userKey, initial
   const update = (change) => setDeck((current) => ({ ...current, ...change }));
   const updateCard = (id, change) => setDeck((current) => ({ ...current, cards: current.cards.map((card) => card.id === id ? { ...card, ...change } : card) }));
   const suggest = async (event) => {
+    if (!canGenerate) return;
     const file = event.target.files?.[0]; event.target.value = '';
     if (!file) return;
     if ((deck.name || deck.cards.some((card) => card.front || card.back)) && !window.confirm('Thay bản nháp hiện tại bằng gợi ý từ tài liệu mới?')) return;
@@ -45,7 +46,7 @@ export default function FlashcardDeckForm({ onCreate, onCancel, userKey, initial
   };
   const swatches = (value, change) => <div className="flashcard-swatches">{FLASHCARD_COLORS.map((option) => <button type="button" key={option.value} className={normalizeFlashcardColor(value) === option.value ? 'is-selected' : ''} style={{ '--flashcard-color': option.value }} onClick={() => change(option.value)} aria-label={option.name} aria-pressed={normalizeFlashcardColor(value) === option.value} title={option.name} />)}</div>;
   return <form className="auth-form flashcard-deck-form" onSubmit={submit}>
-    <label>Tự điền từ tài liệu<input type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xlsx,.txt,.md,.csv" disabled={busy} onChange={suggest} /></label>
+    <label title={!canGenerate ? 'Nâng cấp để sử dụng' : undefined}>Tự điền từ tài liệu<input type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xlsx,.txt,.md,.csv" disabled={busy || !canGenerate} title={!canGenerate ? 'Nâng cấp để sử dụng' : undefined} onChange={suggest} /></label>
     {busy && <p role="status">Đang xử lý…</p>}{error && <p role="alert">{error}</p>}{warning && <p role="status">{warning}</p>}
     <fieldset className="flashcard-editor" disabled={busy}>
       <label>Tên bộ thẻ<input required maxLength={100} value={deck.name} onChange={(e) => update({ name: e.target.value })} /></label>

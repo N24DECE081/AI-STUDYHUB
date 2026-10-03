@@ -183,13 +183,13 @@ def latest_roadmap(conn, user_id: int) -> dict:
     return data
 
 
-def update_roadmap(conn, roadmap_id: int, payload: dict, adaptation_note: str | None = None) -> None:
+def update_roadmap(conn, roadmap_id: int, payload: dict, adaptation_note: str | None = None, *, commit=True) -> None:
     conn.execute(
         """UPDATE tutor_roadmaps SET payload=?, adaptation_note=?, version=version+1,
                updated_at=CURRENT_TIMESTAMP WHERE id=?""",
         (json.dumps(payload, ensure_ascii=False), adaptation_note, roadmap_id),
     )
-    conn.commit()
+    if commit: conn.commit()
 
 
 # ---------------------------------------------------------------- exercises ---
@@ -244,7 +244,7 @@ def to_public(row: dict) -> dict:
 
 
 # -------------------------------------------------------------- submissions ---
-def add_submission(conn, exercise_id: int, user_id: int, *, answer: str, answer_type: str, result: dict) -> int:
+def add_submission(conn, exercise_id: int, user_id: int, *, answer: str, answer_type: str, result: dict, commit=True) -> int:
     cursor = conn.execute(
         """INSERT INTO tutor_submissions(
                exercise_id,user_id,answer,answer_type,score,max_score,percentage,grade,is_correct,
@@ -258,7 +258,7 @@ def add_submission(conn, exercise_id: int, user_id: int, *, answer: str, answer_
          str(result['suggested_answer']),
          json.dumps(result['recommended_review'], ensure_ascii=False)),
     )
-    conn.commit()
+    if commit: conn.commit()
     return int(cursor.lastrowid)
 
 

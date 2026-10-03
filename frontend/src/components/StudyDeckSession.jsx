@@ -1,5 +1,6 @@
 import Pronunciation from './flashcard/Pronunciation';
-import { reviewFlashcard } from '../api';
+import './flashcard/flashcard.css';
+import { mutateStudy } from '../utils/studySync';
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Flame } from "lucide-react";
 import { normalizeFlashcardColor, FLASHCARD_COLORS } from "./flashcard/flashcardTheme";
@@ -17,6 +18,16 @@ export default function StudyDeckSession({ deck, onUpdateDeck, onClose }) {
   const advanceTimer = useRef(null);
   const card = cards[index];
   useEffect(() => () => window.clearTimeout(advanceTimer.current), []);
+  useEffect(() => {
+    const saved = (event) => {
+      if (event.detail.path.endsWith('/review') && event.detail.result.deck?.id === deck.id) {
+        setError('');
+        void onUpdateDeck(event.detail.result.deck, true).catch(failure => setError(failure.message));
+      }
+    };
+    window.addEventListener('studyhub:mutation-saved', saved);
+    return () => window.removeEventListener('studyhub:mutation-saved', saved);
+  }, [deck.id, onUpdateDeck]);
 
   const updateCard = async (change) => {
     if (saving) return;
@@ -29,8 +40,8 @@ export default function StudyDeckSession({ deck, onUpdateDeck, onClose }) {
     if (saving || celebrating) return;
     setSaving(true); setError('');
     try {
-      const result = await reviewFlashcard(deck.id, card.id, value);
-      await onUpdateDeck(result.deck, true);
+      const result = await mutateStudy(`/flashcards/${encodeURIComponent(card.id)}/review`, { deckId: deck.id, result: value === 'known' ? 'remembered' : 'not_remembered' });
+      if (result.pending) setError('Chưa đồng bộ, sẽ thử lại khi có mạng.');
       setRatings((current) => ({ ...current, [index]: value }));
       if (value === 'known') setCelebrating(true);
       advanceTimer.current = window.setTimeout(() => {

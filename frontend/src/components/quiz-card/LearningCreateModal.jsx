@@ -5,9 +5,9 @@ import { STUDYHUB_FLASHCARD_COLORS } from '../flashcard/flashcardTheme';
 import LearningDialog from './LearningDialog';
 import ManualLearningForm from './ManualLearningForm';
 
-export default function LearningCreateModal({ kind, onClose, onCreated, onLibrary }) {
-  const [manualVisited, setManualVisited] = useState(false);
-  const [mode, setMode] = useState('auto');
+export default function LearningCreateModal({ kind, canGenerate = false, onClose, onCreated, onLibrary }) {
+  const [manualVisited, setManualVisited] = useState(!canGenerate);
+  const [mode, setMode] = useState(canGenerate ? 'auto' : 'manual');
   const isFlashcard = kind === 'flashcard';
   const [subjects, setSubjects] = useState([]);
   const [subject, setSubject] = useState('');
@@ -62,6 +62,7 @@ export default function LearningCreateModal({ kind, onClose, onCreated, onLibrar
   const validTime = !timed || /^\d+$/.test(minutes) && Number(minutes) >= 1 && Number(minutes) <= 240;
   const submit = async (event) => {
     event.preventDefault();
+    if (!canGenerate) return;
     if (inFlight.current || !limits || !validCount || !validTime || !ids.length || isFlashcard && !name.trim()) return;
     inFlight.current = true; setBusy(true); setError('');
     try {
@@ -74,10 +75,10 @@ export default function LearningCreateModal({ kind, onClose, onCreated, onLibrar
     finally { inFlight.current = false; setBusy(false); }
   };
   return <LearningDialog title={isFlashcard ? 'Tạo bộ Flashcard mới' : 'Tạo bài trắc nghiệm'} onClose={onClose} busy={busy} eyebrow={mode === 'manual' ? 'STUDYHUB · TỰ TẠO' : 'STUDYHUB · NOVA AI'}>
-    <div className="qc-create-modes" aria-label="Cách tạo"><button type="button" disabled={busy} aria-pressed={mode === 'auto'} onClick={() => setMode('auto')}>Tự động</button><button type="button" disabled={busy} aria-pressed={mode === 'manual'} onClick={() => { setManualVisited(true); setMode('manual'); }}>Thủ công</button></div>
+    <div className="qc-create-modes" aria-label="Cách tạo"><button type="button" disabled={busy || !canGenerate} title={!canGenerate ? 'Nâng cấp để sử dụng' : undefined} aria-pressed={mode === 'auto'} onClick={() => setMode('auto')}>Tự động</button><button type="button" disabled={busy} aria-pressed={mode === 'manual'} onClick={() => { setManualVisited(true); setMode('manual'); }}>Thủ công</button></div>
     {manualVisited && <div hidden={mode !== 'manual'}><ManualLearningForm kind={kind} subjects={subjects} loadingSubjects={loadingSubjects} onLibrary={onLibrary} onCreated={onCreated} busy={busy} setBusy={setBusy} /></div>}
     {mode === 'auto' && <div><form className="qc-create" onSubmit={submit}>
-      <fieldset disabled={busy}>
+      <fieldset disabled={busy || !canGenerate}>
         <label><span><b>01</b> Môn học</span><select aria-label="Môn học" value={subject} onChange={(e) => chooseSubject(e.target.value)} disabled={loadingSubjects}>
           <option value="">{loadingSubjects ? 'Đang tải môn học…' : 'Chọn môn học'}</option>
           {subjects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -104,7 +105,7 @@ export default function LearningCreateModal({ kind, onClose, onCreated, onLibrar
       </fieldset>
       {busy && <div className="qc-nova" role="status"><Sparkles className="qc-spin" /><strong>Nova đang tạo {isFlashcard ? 'Flashcard' : 'bài trắc nghiệm'} cho bạn…</strong><p>Đang đọc tài liệu và tạo nội dung ôn tập phù hợp.</p></div>}
       {error && <p className="form-error" role="alert">{error}</p>}
-      <footer><small>Nova AI sẽ đọc các tài liệu đã chọn. Bạn có thể ôn tập ngay sau khi tạo.</small><button type="submit" className={`btn ${isFlashcard ? 'btn-primary' : 'qc-mint'}`} disabled={busy || !limits || limitsBusy || !ids.length || !validCount || !validTime || isFlashcard && !name.trim()}><Sparkles size={18}/>{error ? 'Thử lại' : isFlashcard ? 'Tạo với Nova AI' : 'Tạo bài với Nova AI'}</button></footer>
+      <footer><small>Nova AI sẽ đọc các tài liệu đã chọn. Bạn có thể ôn tập ngay sau khi tạo.</small><button type="submit" className={`btn ${isFlashcard ? 'btn-primary' : 'qc-mint'}`} title={!canGenerate ? 'Nâng cấp để sử dụng' : undefined} disabled={!canGenerate || busy || !limits || limitsBusy || !ids.length || !validCount || !validTime || isFlashcard && !name.trim()}><Sparkles size={18}/>{error ? 'Thử lại' : isFlashcard ? 'Tạo với Nova AI' : 'Tạo bài với Nova AI'}</button></footer>
     </form></div>}
   </LearningDialog>;
 }

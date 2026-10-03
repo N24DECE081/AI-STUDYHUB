@@ -1,14 +1,17 @@
 import './components/streak/streak.css';
 import { getFlashcardDecks, saveFlashcardDeck, deleteFlashcardDeck } from './api';
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import "./Logo3D.css";
-import Logo3D from "./components/Logo3D.jsx";
-import LandingExtras from "./components/LandingExtras.jsx";
+import { GuestHome, MemberHome, HomeSkeleton } from "./components/HomePage";
+import useAuth from "./hooks/useAuth";
+import useStudySync from "./hooks/useStudySync";
+import useRandomQuote from "./hooks/useRandomQuote";
 import BeeChatWidget from "./components/BeeChatWidget.jsx";
+import { planPermissions } from './utils/planPermissions';
 import FocusSpaceLogo from "./components/FocusSpaceLogo.jsx";
-import FocusSpacePage from "./components/FocusSpacePage.jsx";
 import studyHubLogo from "./assets/studyhub-logo.png";
+import { FOOTER_COPY, HOME_COPY, NAV_ITEMS } from "./homeContent";
 
 import {
   checkoutSubscription,
@@ -22,6 +25,7 @@ import {
   getOAuthLoginUrl,
   getOAuthStatus,
   getProgress,
+  studyHeartbeat,
   getStudyTime,
   getStreak,
   getSubscription,
@@ -35,17 +39,9 @@ import {
   previewDocumentMetadata,
   verifyPasswordOtp,
 } from "./api";
-import AITutorPage from "./components/ai-tutor/AITutorPage";
-import QuizCardPage from "./components/quiz-card/QuizCardPage";
-import LearningRoadmapPage from "./components/LearningRoadmapPage";
-import PaymentCheckout from "./components/PaymentCheckout";
-import ProgressDashboard from "./components/progress/ProgressDashboard";
 import { EMPTY_PROGRESS_ANALYTICS } from "./components/progress/progressDefaults";
-import StudyDeckSession from "./components/StudyDeckSession";
-import FlashcardDeckForm from "./components/flashcard/FlashcardDeckForm";
 import { buildSubjectHashMap, findSubject, quickSortSubjects } from "./utils/subjectAlgorithms";
 import {
-  ArrowRightIcon,
   ArrowLeftIcon,
   AcademicCapIcon,
   BookOpenIcon,
@@ -56,7 +52,6 @@ import {
   MagnifyingGlassIcon,
   PlusIcon,
   BoltIcon,
-  RectangleStackIcon,
   XMarkIcon,
   SparklesIcon,
   TrashIcon,
@@ -66,60 +61,92 @@ import {
   EyeSlashIcon,
 } from "@heroicons/react/24/outline";
 
+const AITutorPage = lazy(() => import('./components/ai-tutor/AITutorPage'));
+const QuizCardPage = lazy(() => import('./components/quiz-card/QuizCardPage'));
+const LearningRoadmapPage = lazy(() => import('./components/LearningRoadmapPage'));
+const FocusSpacePage = lazy(() => import('./components/FocusSpacePage'));
+const ProgressDashboard = lazy(() => import('./components/progress/ProgressDashboard'));
+const PaymentCheckout = lazy(() => import('./components/PaymentCheckout'));
+const StudyDeckSession = lazy(() => import('./components/StudyDeckSession'));
+const FlashcardDeckForm = lazy(() => import('./components/flashcard/FlashcardDeckForm'));
+const loadingPage = <div className="auth-checking" role="status" aria-label="Đang tải nội dung"><span /></div>;
+
 const PLANS = {
   free: {
+    id: "free",
     name: "Gói Khởi Động",
     price: "0đ",
-    subtitle: "Miễn phí vĩnh viễn cho mọi sinh viên",
-    badge: "Cơ bản",
+    pricePeriod: "",
+    subtitle: "Dành cho sinh viên mới bắt đầu",
+    badge: "Miễn phí vĩnh viễn",
+    maxDocs: 10,
+    maxStorageMb: 200,
+    aiTutorDailyLimit: 5,
     items: [
-      "Tối đa 5 tài liệu tải lên",
-      "Tạo đến 20 thẻ Quiz Card 3D",
-      "2 đề trắc nghiệm cơ bản",
-      "Nova AI Tutor (giới hạn 10 câu/ngày)",
-      "Lộ trình học tập sinh viên tiêu chuẩn",
+      "Tải lên tối đa 10 tài liệu",
+      "200 MB dung lượng lưu trữ",
+      "Quiz Card và Flashcard cơ bản",
+      "AI Tutor 5 lượt mỗi ngày",
+      "Theo dõi tiến độ cơ bản",
+      "Đầy đủ tính năng Deep Focus",
     ],
+    hasLimits: true,
+    limitsTitle: "GIỚI HẠN",
     excluded: [
-      "Không giới hạn tài liệu & thẻ",
-      "Tự động tạo Quiz/Thẻ từ tài liệu AI 1-click",
-      "Luyện thi Mock Exam phân tích 1-1",
-      "Nova AI Voice đọc tài liệu không giới hạn",
+      "Giới hạn số tài liệu và dung lượng",
+      "Không gồm các tính năng AI nâng cao",
     ],
+    cta: "Gói hiện tại",
   },
   plus: {
+    id: "plus",
     name: "Gói Pro Sinh Viên",
     price: "199.000đ",
-    subtitle: "199.000đ / tháng (hoặc 199đ tương đương)",
+    pricePeriod: " / tháng",
+    subtitle: "Cá nhân hóa việc học mỗi ngày",
     badge: "Phổ biến nhất",
+    ribbon: "Khuyến dùng cho sinh viên",
+    maxDocs: 50,
+    maxStorageMb: 2048,
+    aiTutorMonthlyLimit: 200,
     items: [
-      "Không giới hạn tài liệu tải lên (PDF, DOC, MD)",
-      "Không giới hạn bộ thẻ Quiz Card 3D Spaced Repetition",
-      "Không giới hạn bài thi trắc nghiệm & chấm điểm tức thì",
-      "Nova AI Tutor trực tiếp về tài liệu KHÔNG GIỚI HẠN",
-      "Tự động trích xuất Thẻ & Trắc nghiệm từ tài liệu chỉ với 1 click",
-      "Lộ trình học cá nhân hóa theo chuyên ngành",
-      "Lưu lịch sử ôn tập đồng bộ đa thiết bị",
+      "Tải lên tối đa 50 tài liệu",
+      "2 GB dung lượng lưu trữ",
+      "Quiz Card và Flashcard nâng cao",
+      "AI Tutor 200 lượt mỗi tháng",
+      "Phân tích học tập bằng AI",
+      "Lộ trình học cá nhân hóa",
     ],
+    hasLimits: true,
+    limitsTitle: "GIỚI HẠN",
     excluded: [
-      "Luyện thi Mock Exam chuyên sâu 1-1",
-      "Nova AI cố vấn đồ án tốt nghiệp & CV xin việc",
+      "Dung lượng tối đa 2 GB",
+      "Một số tính năng AI chuyên sâu cần gói Master",
     ],
+    cta: "Chọn Gói Pro Sinh Viên",
   },
   pro: {
+    id: "pro",
     name: "Gói Master Thủ Khoa",
     price: "299.000đ",
-    subtitle: "299.000đ / tháng (hoặc 299đ tương đương)",
-    badge: "Vip Học Bổng",
+    pricePeriod: " / tháng",
+    subtitle: "Dành cho học chuyên sâu và luyện thi",
+    badge: "Nâng cấp học bổng VIP",
+    maxDocs: 200,
+    maxStorageMb: 5120,
+    aiTutorLimit: "Hạn mức AI Tutor cao hơn",
     items: [
-      "Tất cả quyền lợi của Gói Pro 199đ",
-      "Phòng luyện thi Mock Exam mô phỏng đề thi thật đại học",
-      "Nova AI phân tích lỗ hổng kiến thức 1-1 & gợi ý khắc phục",
-      "Nova AI cố vấn chuyên sâu Đồ án tốt nghiệp & Review CV thực tập",
-      "Huy hiệu Thủ Khoa StudyHub độc quyền trên hồ sơ",
-      "Hỗ trợ học tập ưu tiên 24/7 trực tiếp qua Zalo / Hotline VIP",
-      "Tải toàn bộ bộ thẻ và đề thi offline",
+      "Tải lên tối đa 200 tài liệu",
+      "5 GB dung lượng lưu trữ",
+      "Tất cả quyền lợi của gói Pro Sinh Viên",
+      "Sử dụng nhiều mô hình AI",
+      "Phân tích tài liệu chuyên sâu",
+      "Hạn mức AI Tutor cao hơn",
+      "Lộ trình học nâng cao",
     ],
+    hasLimits: false,
     excluded: [],
+    cta: "Chọn Gói Master Thủ Khoa",
   },
 };
 
@@ -160,14 +187,7 @@ const PATH_VIEWS = {
 };
 const viewForPath = (path) => PATH_VIEWS[path] || "home";
 const isAuthPath = (path) => path === "/login" || path === "/register";
-const isProtectedPath = (path) => path !== "/" && !isAuthPath(path) && (path in PATH_VIEWS || path.startsWith("/app/"));
-
-const VIETNAM_TIME_ZONE = "Asia/Ho_Chi_Minh";
-const vietnamDateKey = (date = new Date()) => {
-  const values = new Intl.DateTimeFormat("en", { timeZone: VIETNAM_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
-  const part = (type) => values.find((item) => item.type === type)?.value;
-  return `${part("year")}-${part("month")}-${part("day")}`;
-};
+const isProtectedPath = (path) => path !== "/" && path !== "/dashboard" && !isAuthPath(path) && (path in PATH_VIEWS || path.startsWith("/app/"));
 
 function mapDocumentProgress(result) {
   return (result.items || [])
@@ -182,62 +202,9 @@ function mapDocumentProgress(result) {
 }
 
 function ThemeToggle({ theme, onToggle }) {
-  return <button type="button" className="theme-toggle" onClick={onToggle} aria-label={theme === 'light' ? 'Bật chế độ tối' : 'Bật chế độ sáng'} title={theme === 'light' ? 'Chế độ tối' : 'Chế độ sáng'} aria-pressed={theme === 'dark'}>
+  return <button type="button" className="theme-toggle" onClick={onToggle} aria-label={theme === 'light' ? HOME_COPY.enableDark : HOME_COPY.enableLight} title={theme === 'light' ? HOME_COPY.dark : HOME_COPY.light} aria-pressed={theme === 'dark'}>
     {theme === 'light' ? <MoonIcon aria-hidden="true" /> : <SunIcon aria-hidden="true" />}
   </button>;
-}
-
-function StreakCard({ user, streak, onLogin }) {
-  const today = streak.today || vietnamDateKey();
-  const todayActive = Boolean(user && streak.last_activity_date === today);
-  const days = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(new Date(`${today}T12:00:00+07:00`).getTime() - (6 - index) * 86400000);
-    return {
-      date: vietnamDateKey(date),
-      label: date.toLocaleDateString("vi-VN", { weekday: "short", timeZone: VIETNAM_TIME_ZONE }).replace(".", ""),
-      number: Number(date.toLocaleDateString("en", { day: "numeric", timeZone: VIETNAM_TIME_ZONE })),
-    };
-  });
-  return (
-    <section className="streak-card" aria-labelledby="streak-title">
-      <div className="streak-card-heading">
-        <div className={`streak-symbol fire-level-${user ? Math.min(streak.current_streak, 3) : 0}`}>{user && streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}</div>
-        <div>
-          <span className="eyebrow">THÓI QUEN HỌC TẬP</span>
-          <h2 id="streak-title">Giữ chuỗi mỗi ngày</h2>
-        </div>
-        <div className="streak-total">
-          <strong>{user ? streak.current_streak : "—"}</strong>
-          <span>ngày</span>
-        </div>
-      </div>
-      <p className="streak-description">
-        {user
-          ? todayActive
-            ? "Bạn đã học hôm nay. Hãy duy trì nhịp học của mình."
-            : "Ôn flashcard hoặc hoàn thành bài tập để ghi nhận ngày học."
-          : "Đăng nhập và học mỗi ngày để bắt đầu chuỗi học tập của bạn."}
-      </p>
-      <div className="streak-week" aria-label="Hoạt động học tập 7 ngày gần nhất">
-        {days.map((day) => {
-          const active = user && (streak.activity_dates || [streak.last_activity_date]).includes(day.date);
-          return (
-            <div className={`streak-day ${active ? "is-active" : ""}`} key={day.date}>
-              <span>{day.label}</span>
-              <strong>{day.number}</strong>
-              <i aria-hidden="true">{active ? "✓" : "·"}</i>
-            </div>
-          );
-        })}
-      </div>
-      <footer className="streak-card-footer">
-        <span><CalendarDaysIcon aria-hidden="true" /> Hôm nay: {todayActive ? "đã ghi nhận" : "chưa ghi nhận"}</span>
-        <span>Chuỗi chỉ tính những ngày học liên tiếp</span>
-        <span>GMT+7</span>
-        {!user && <button className="text-link" onClick={onLogin}>Đăng nhập <ArrowRightIcon aria-hidden="true" className="link-icon" /></button>}
-      </footer>
-    </section>
-  );
 }
 
 function Modal({ title, children, onClose, icon, subtitle, className = "" }) {
@@ -311,7 +278,7 @@ function StudyHubAuthScreen({ mode, user, oauthStatus, error, identifier, onBack
         </button>
         <div className="studyhub-auth__brand" aria-label="StudyHub">
           {mode === "login" || mode === "register"
-            ? <img className="studyhub-auth__logo-image" src={studyHubLogo} alt="" />
+            ? <img className="studyhub-auth__logo-image" src={studyHubLogo} alt="" loading="eager" decoding="async" />
             : <span className="studyhub-auth__logo" aria-hidden="true"><b>S</b><i>H</i></span>}
         </div>
         <header className="studyhub-auth__heading">
@@ -515,27 +482,15 @@ function useRevealOnScroll(dependencyKey) {
 }
 
 export default function App() {
+  const randomQuote = useRandomQuote();
   const [view, setView] = useState(() => viewForPath(window.location.pathname));
-  const [authReady, setAuthReady] = useState(false);
-  const [user, setUser] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("studyhub-user"));
-    } catch {
-      return null;
-    }
-  });
+  const [focusSpaceMounted, setFocusSpaceMounted] = useState(view === 'focusSpace');
+  const { user, setUser, isAuthenticated, isLoading } = useAuth();
+  const authReady = !isLoading;
   const [documents, setDocuments] = useState([]);
   const [editingDeck, setEditingDeck] = useState(null);
   const [decksLoading, setDecksLoading] = useState(false);
-  const [quizDecks, setQuizDecks] = useState(() => {
-    try {
-      const storedUser = JSON.parse(localStorage.getItem("studyhub-user"));
-      const userKey = storedUser && String(storedUser.id || storedUser.email || "");
-      return userKey ? JSON.parse(localStorage.getItem(`studyhub-quiz-decks:${userKey}`)) || [] : [];
-    } catch {
-      return [];
-    }
-  });
+  const [quizDecks, setQuizDecks] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -579,6 +534,7 @@ export default function App() {
   const userRef = useRef(user);
   const uploadInput = useRef(null);
   const uploadInFlight = useRef(false);
+  const uploadSavedCallback = useRef(null);
   const uploadSuggestionRequest = useRef(null);
   const uploadTitleEdited = useRef(false);
   const uploadDescriptionEdited = useRef(false);
@@ -591,6 +547,24 @@ export default function App() {
     status: "active",
   });
   const [pendingPlan, setPendingPlan] = useState(null);
+  const permissions = planPermissions(subscription);
+  useEffect(() => {
+    if (!user) return undefined;
+    let active = true;
+    const refresh = () => getSubscription().then((value) => {
+      if (active) setSubscription(value);
+    }).catch(() => {});
+    window.addEventListener('studyhub:permissions-changed', refresh);
+    window.addEventListener('focus', refresh);
+    // The server owns quota rollover, including midnight in Vietnam.
+    const timer = window.setInterval(refresh, 60000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener('studyhub:permissions-changed', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [user]);
   const [activeStudyDeck, setActiveStudyDeck] = useState(null);
   const [billingCycle] = useState("month");
   const subjectOptions = useMemo(() => quickSortSubjects(subjects), [subjects]);
@@ -648,10 +622,7 @@ export default function App() {
     }
     userRef.current = next;
     setUser(next);
-    next
-      ? localStorage.setItem("studyhub-user", JSON.stringify(next))
-      : localStorage.removeItem("studyhub-user");
-  }, []);
+  }, [setUser]);
   const saveSubscription = (next) => {
     setSubscription(next);
     if (user) {
@@ -689,6 +660,37 @@ export default function App() {
     }
   };
   const userKey = user ? String(user.id || user.email || "") : "";
+  const studySync = useStudySync(userKey);
+  useEffect(() => {
+    if (!userKey) return undefined;
+    let active = true, revision = 0;
+    const refresh = async () => {
+      const request = ++revision;
+      try {
+        const [result, nextStreak, decks, time] = await Promise.all([getProgress(), getStreak(), getFlashcardDecks(), getStudyTime()]);
+        if (active && request === revision) {
+          setProgress(mapDocumentProgress(result)); setProgressAnalytics(result.analytics || EMPTY_PROGRESS_ANALYTICS);
+          setStreak(nextStreak); setQuizDecks(decks); setStudyTime(time);
+        }
+      } catch (failure) { if (active) notify(`Chưa tải được tiến độ mới: ${failure.message}`); }
+    };
+    window.addEventListener('studyhub:progress-changed', refresh);
+    return () => { active = false; window.removeEventListener('studyhub:progress-changed', refresh); };
+  }, [userKey]);
+  useEffect(() => {
+    if (!userKey || !(['quiz','tutor','focusSpace'].includes(view) || view === 'library' && modal === 'document-preview')) return undefined;
+    let active = true, lastActivity = Date.now(), failed = false;
+    const touch = () => { lastActivity = Date.now(); };
+    const heartbeat = async () => {
+      if (document.visibilityState !== 'visible' || Date.now() - lastActivity > 120000 || !navigator.onLine) return;
+      try { const result = await studyHeartbeat(); if (active) { setStudyTime(result); failed = false; } }
+      catch (failure) { if (active && !failed) { failed = true; notify(`Chưa đồng bộ thời gian học: ${failure.message}`); } }
+    };
+    window.addEventListener('pointerdown', touch); window.addEventListener('keydown', touch);
+    const timer = window.setInterval(heartbeat, 30000);
+    void heartbeat();
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener('pointerdown', touch); window.removeEventListener('keydown', touch); };
+  }, [userKey, view, modal]);
   useEffect(() => {
     if (!authReady || !userKey) return undefined;
     let active = true;
@@ -778,18 +780,10 @@ export default function App() {
   }, [authReady, userKey]);
   useEffect(() => {
     if (!authReady || !userKey) return undefined;
-    const clock = window.setInterval(() => {
-      setStudyTime((current) => current.active ? {
-        ...current,
-        total_seconds: current.total_seconds + 1,
-        current_session_seconds: current.current_session_seconds + 1,
-      } : current);
-    }, 1000);
     const sync = window.setInterval(() => {
       getStudyTime().then(setStudyTime).catch(() => {});
     }, 15000);
     return () => {
-      window.clearInterval(clock);
       window.clearInterval(sync);
     };
   }, [authReady, userKey]);
@@ -808,31 +802,7 @@ export default function App() {
     void refresh();
     return () => { active = false; };
   }, [authReady, userKey, view]);
-  useRevealOnScroll(`${view}-${documents.length}-${quizDecks.length}`);
-  useEffect(() => {
-    let active = true;
-    getCurrentUser()
-      .then((result) => {
-        if (active && result.user) {
-          saveUser(result.user);
-          getStreak().then(setStreak).catch(() => {});
-          if (!result.user.profile_completed) {
-            setAuthMode("profile");
-            setModal("auth");
-          }
-        }
-        if (active && !result.user) saveUser(null);
-      })
-      .catch(() => {
-        if (active) saveUser(null);
-      })
-      .finally(() => {
-        if (active) setAuthReady(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, [saveUser]);
+  useRevealOnScroll(`${authReady}-${userKey}-${view}-${documents.length}-${quizDecks.length}`);
   useEffect(() => {
     if (!authReady) return undefined;
     const syncRoute = () => {
@@ -844,7 +814,8 @@ export default function App() {
         window.setTimeout(() => setToast(""), 3200);
         return;
       }
-      if (user && !user.profile_completed && authMode === "profile") {
+      if (user && !user.profile_completed) {
+        setAuthMode("profile");
         setModal("auth");
         return;
       }
@@ -868,6 +839,7 @@ export default function App() {
         return;
       }
       if (user && path === "/") window.history.replaceState({}, "", "/dashboard");
+      if (viewForPath(path) === 'focusSpace') setFocusSpaceMounted(true);
       setView(viewForPath(path));
       if (modal === "auth") setModal(null);
     };
@@ -947,6 +919,7 @@ export default function App() {
     }
     if (next !== "home" && requireLogin()) return false;
     if (next === "dashboard" && user) void loadProgress();
+    if (next === 'focusSpace') setFocusSpaceMounted(true);
     setView(next);
     const nextPath = next === "home" && !user ? "/" : VIEW_PATHS[next];
     if (nextPath && window.location.pathname !== nextPath) window.history.pushState({}, "", nextPath);
@@ -1055,6 +1028,33 @@ export default function App() {
       setAuthError(error.message || "Không thể thực hiện yêu cầu.");
     }
   };
+  const openUpload = (subjectCode = "", onSaved = null) => {
+    if (requireLogin()) return;
+    const planConfig = PLANS[subscription?.plan] || PLANS.free;
+    const maxDocs = planConfig.maxDocs || 10;
+    if (documents.length >= maxDocs || !permissions.canUpload) {
+      notify(
+        `Bạn đã tải lên ${documents.length}/${maxDocs} tài liệu (đạt giới hạn của ${planConfig.name}). Vui lòng nâng cấp gói để tiếp tục tải thêm!`,
+        "warning"
+      );
+      setView("pricing");
+      return;
+    }
+    uploadSavedCallback.current = onSaved;
+    setUploadPhase("idle");
+    setUploadError("");
+    setUploadFile(null);
+    setUploadFileName("");
+    setUploadTitle("");
+    uploadTitleEdited.current = false;
+    uploadDescriptionEdited.current = false;
+    setUploadSuggestionNote("");
+    setSuggestedUploadTitle("");
+    setUploadSuggestionBusy(false);
+    setUploadDescription("");
+    setUploadSubject(subjectCode);
+    setModal("upload");
+  };
   const submitUpload = async (event) => {
     event.preventDefault();
     if (uploadInFlight.current || uploadSuggestionBusy) return;
@@ -1074,13 +1074,16 @@ export default function App() {
     if (!subjectCode) return fail("Hãy chọn hoặc thêm môn học trước.");
     if (file.size === 0) return fail("File không được rỗng.");
     if (file.size > 10 * 1024 * 1024) return fail("File tối đa 10MB.");
+    if (!permissions.canUpload || permissions.storage_used_bytes + file.size > permissions.storage_bytes) {
+      return fail('Đã đạt giới hạn tài liệu hoặc dung lượng của gói. Nâng cấp để sử dụng.');
+    }
     if (![".pdf", ".txt", ".md", ".csv", ".doc", ".docx", ".ppt", ".pptx"].includes(extension)) {
       return fail("Định dạng file chưa được hỗ trợ.");
     }
     uploadInFlight.current = true;
     try {
       setUploadPhase("uploading");
-      await uploadDocument({
+      const uploaded = await uploadDocument({
         file,
         title,
         description: uploadDescription,
@@ -1088,6 +1091,8 @@ export default function App() {
       });
       setUploadPhase("processing");
       await loadDocumentsAndProgress();
+      uploadSavedCallback.current?.({ id: uploaded.id, subjectId: uploaded.subject_id || subjectOptions.find((item) => item.code === subjectCode)?.id });
+      uploadSavedCallback.current = null;
       setUploadPhase("success");
       notify("Đã tải tài liệu vào kho học liệu.");
       window.setTimeout(() => {
@@ -1231,7 +1236,7 @@ export default function App() {
       notify(`Không thể hủy gia hạn: ${error.message}`);
     }
   };
-  if (!authReady) return <div className="auth-checking" role="status" aria-label="Đang kiểm tra phiên đăng nhập"><span /></div>;
+  if (!authReady) return view === "home" && !isAuthPath(window.location.pathname) ? <HomeSkeleton /> : loadingPage;
   if ((modal === "auth" && (!user || authMode === "profile")) || (!user && isProtectedPath(window.location.pathname))) {
     return (
       <>
@@ -1263,30 +1268,25 @@ export default function App() {
   }
   return (
     <>
-    <FocusSpacePage key={userKey || 'guest'} active={view === 'focusSpace'} user={user} onBack={() => go("home")} theme={theme} onToggleTheme={() => setTheme(theme === 'light' ? 'dark' : 'light')} />
+    <Suspense fallback={loadingPage}>
+      {(view === 'focusSpace' || focusSpaceMounted) && <FocusSpacePage key={userKey || 'guest'} active={view === 'focusSpace'} user={user} onBack={() => go("home")} theme={theme} onToggleTheme={() => setTheme(theme === 'light' ? 'dark' : 'light')} />}
+    </Suspense>
     <div className={`studyhub-app ${theme}`} hidden={view === 'focusSpace'}>
       <header className="topbar">
-        <button className="brand-wrap" onClick={() => go("home")} aria-label="StudyHub - Trang chủ">
+        <button className="brand-wrap" onClick={() => go("home")} aria-label={HOME_COPY.brandLabel}>
           <span className="brand-mark"><BookOpenIcon aria-hidden="true" /></span>
           <span className="brand-text">
             Study<span>Hub</span>
           </span>
         </button>
-        <nav className="nav-menu" aria-label="Điều hướng chính">
-          {[
-            ["home", "Trang chủ"],
-            ["library", "Kho học liệu"],
-            ["quiz", "Quiz Card"],
-            ["roadmap", "Lộ trình học"],
-            ["dashboard", "Tiến độ"],
-            ["tutor", "AI Tutor"],
-            ["pricing", "Gói học"],
-          ].map(([id, label]) => (
+        <nav className="nav-menu" aria-label={HOME_COPY.navigation}>
+          {NAV_ITEMS.map(([id, label]) => (
             <button
               key={id}
               type="button"
               className={view === id ? "nav-item active" : "nav-item"}
               onClick={() => go(id)}
+              aria-current={view === id ? "page" : undefined}
             >
               {label}
             </button>
@@ -1298,218 +1298,39 @@ export default function App() {
             <>
               <button
                 className="streak-pill"
-                title="Số ngày học liên tiếp"
+                title={HOME_COPY.streakTooltip}
               >
                 {streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}
                 <strong>{streak.current_streak}</strong>
-                <span>ngày</span>
+                <span>{HOME_COPY.dayUnit}</span>
               </button>
-              <button className="user-pill" onClick={() => setModal("account")}>
+              <button className="user-pill" onClick={() => setModal("account")} title={user.name}>
                 <span className="user-avatar">
                   {user.name?.[0]?.toUpperCase() || "U"}
                 </span>
-                {user.name}
+                <span className="user-name">{user.name}</span>
               </button>
               <button className="btn btn-ghost" onClick={signOut}>
-                Đăng xuất
+                {HOME_COPY.logout}
               </button>
             </>
           ) : (
             <>
-              <button className="btn btn-ghost" onClick={() => openAuth("login")}>Đăng nhập</button>
-              <button className="btn btn-primary" onClick={() => openAuth("register")}>Đăng ký</button>
+              <button className="btn btn-ghost" onClick={() => openAuth("login")}>{HOME_COPY.login}</button>
+              <button className="btn btn-primary" onClick={() => openAuth("register")}>{HOME_COPY.register}</button>
             </>
           )}
         </div>
       </header>
+      {studySync.pending.length > 0 && <p className="study-sync-notice" role="status">
+        {studySync.pending.some(item => item.blocked) ? `Không đồng bộ được: ${studySync.pending.find(item => item.blocked).error}` : `Chưa đồng bộ, sẽ thử lại · ${studySync.pending.length} hoạt động`}
+        <button type="button" className="text-link" onClick={() => void studySync.retry()}>Thử lại</button>
+      </p>}
       <main className="main-shell">
-        {view === "home" && (
-          <>
-            <section className={`hero-section ${!user ? 'landing-hero' : ''}`}>
-              <div className="hero-copy">
-                <span className="eyebrow">
-                  STUDYHUB · NỀN TẢNG HỌC CÁ NHÂN CÓ ĐỊNH HƯỚNG
-                </span>
-                <h1>
-                  Học sâu hơn.
-                  <br />
-                  <span>Tiến bộ rõ hơn.</span>
-                </h1>
-                <p className="hero-tagline">
-                  Nền tảng AI giúp sinh viên tổ chức tài liệu, tạo Quiz thông minh, xây dựng lộ trình học cá nhân hóa và trao đổi trực tiếp với Nova AI Tutor 24/7.
-
-                </p>
-                <div className="hero-actions">
-                  <button
-                    className="btn btn-primary large"
-                    onClick={() => user ? go("tutor") : openAuth("login")}
-                  >
-                    <SparklesIcon aria-hidden="true" className="btn-icon" />
-                    Hỏi Nova AI Tutor
-                  </button>
-                  <button
-                    className="btn btn-outline large"
-                    onClick={() => user ? go("library") : openAuth("login")}
-                  >
-                    <BookOpenIcon aria-hidden="true" className="btn-icon" />
-                    Mở kho học liệu
-                  </button>
-                </div>
-                <div className="hero-badges">
-                  <button type="button" className="hero-badge" onClick={() => go("quiz")}><RectangleStackIcon aria-hidden="true" /> Quiz Card AI</button>
-                  <button type="button" className="hero-badge" onClick={() => go("roadmap")}><SparklesIcon aria-hidden="true" /> Lộ trình cá nhân</button>
-                  <button type="button" className="hero-badge" onClick={() => go("dashboard")}><BoltIcon aria-hidden="true" /> Theo dõi tiến độ</button>
-                </div>
-              </div>
-              <div className="hero-visual">
-                <Logo3D />
-                {user ? <>
-                  <div className="hero-note hero-note--one"><BookOpenIcon aria-hidden="true" /><div><strong>{documents.length} tài liệu</strong><small>Đã lưu</small></div></div>
-                  <div className="hero-note hero-note--two"><SparklesIcon aria-hidden="true" /><div><strong>{progress.length ? `${average}%` : "—"}</strong><small>Tiến độ</small></div></div>
-                  <div className="hero-note hero-note--three">{streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}<div><strong>{streak.current_streak} ngày</strong><small>Streak</small></div></div>
-                </> : <>
-                  <div className="hero-note hero-note--one"><BookOpenIcon aria-hidden="true" /><div><strong>Gọn một nơi</strong><small>Tài liệu & kiến thức</small></div></div>
-                  <div className="hero-note hero-note--two"><SparklesIcon aria-hidden="true" /><div><strong>Rõ từng bước</strong><small>Lộ trình của riêng bạn</small></div></div>
-                  <div className="hero-note hero-note--three">{streak.current_streak > 0 ? <FireIcon aria-hidden="true" /> : <CalendarDaysIcon aria-hidden="true" />}<div><strong>Mỗi ngày một chút</strong><small>Xây thói quen học</small></div></div>
-                </>}
-              </div>
-            </section>
-            <section className="content-section pain-points-section">
-              <span className="eyebrow">❤️ VẤN ĐỀ</span>
-              <h2>Bạn có đang học theo cách này?</h2>
-              <div className="pain-grid">
-                {[
-                  ["📄", "Tài liệu nằm khắp nơi", "Drive, Google, Messenger, đủ nơi không biết bắt đầu từ đâu."],
-                  ["❤️", "Học nhiều nhưng khô nhớ", "Không có phương pháp lặp lại hiệu quả."],
-                  ["💡", "Không biết học gì tiếp theo", "Không có lộ trình rõ ràng."],
-                  ["🔥", "Khó duy trì thói quen", "Học được vài ngày rồi bỏ."],
-                ].map(([icon, title, desc], i) => (
-                  <article className="pain-card" key={i}>
-                    <span className="pain-icon">{icon}</span>
-                    <h3>{title}</h3>
-                    <p>{desc}</p>
-                  </article>
-                ))}
-              </div>
-              <p className="pain-conclusion">
-                <strong>Bạn không thiếu tài liệu.</strong><br/>
-                Bạn đang thiếu một hệ thống học tập phù hợp.
-              </p>
-            </section>
-            {user && <StreakCard
-              user={user}
-              streak={streak}
-              onLogin={() => openAuth("login")}
-            />}
-            <section className="content-section workflow-section" id="studyhub-workflow">
-              <span className="eyebrow">WORKFLOW CÁ NHÂN</span>
-              <h2>StudyHub gom mọi thứ bạn cần<br />vào một nhịp học.</h2>
-              <div className="workflow-grid reveal-stagger">
-                {[
-                  [
-                    "01",
-                    "Lưu học liệu",
-                    "Tải bài giảng & tài liệu lên kho thông minh.",
-                    "library",
-                  ],
-                  [
-                    "02",
-                    "Ôn Quiz Card",
-                    "AI tự tạo thẻ Flashcard ôn tập lặp lại ngắt quãng.",
-                    "quiz",
-                  ],
-                  [
-                    "03",
-                    "Xây lộ trình",
-                    "Phân bổ lịch học cụ thể theo cấu trúc thi.",
-                    "roadmap",
-                  ],
-                  [
-                    "04",
-                    "Theo dõi tiến độ",
-                    "Xem tỉ lệ hoàn thành và giữ vững streak học.",
-                    "dashboard",
-                  ],
-                  [
-                    "05",
-                    "Hỏi Nova AI",
-                    "Giải đáp thắc mắc chuyên sâu tức thì 24/7.",
-                    "tutor",
-                  ],
-                ].map(([num, title, detail, target]) => (
-                  <article className="workflow-card" key={num}>
-                    <span className="step-tag">{num}</span>
-                    <h3>{title}</h3>
-                    <p>{detail}</p>
-                <button className="text-link" onClick={() => go(target)}>
-                      Mở tính năng{" "}
-                      <ArrowRightIcon
-                        aria-hidden="true"
-                        className="link-icon"
-                      />
-                    </button>
-                  </article>
-                ))}
-              </div>
-            </section>
-            <section className="content-section roadmap-sample-section">
-              <span className="eyebrow">■ LỘ TRÌNH HỌC MẪu</span>
-              <h2>Học từng bước, tiến bộ từng tuần.</h2>
-              <p>StudyHub giúp bạn biến một mục tiêu lớn thành những bước học nhỏ và rõ ràng.</p>
-              <div className="roadmap-cards">
-                {[
-                  { week: "TUẦN 1", title: "Làm quen", sub: "Xây nền tảng", items: ["Làm quen với kiến thức cơ bản", "Đọc tài liệu nền tảng", "Hoàn thành 2 bài học", "Ôn 10 Quiz Card"], progress: 80, active: false },
-                  { week: "TUẦN 2", title: "Xây nền", sub: "Nắm kiến thức trọng tâm", items: ["Học kiến thức chính", "Làm bài tập cơ bản", "Hoàn thành 3 bài học", "Ôn 20 Quiz Card"], progress: 60, active: true },
-                  { week: "TUẦN 3", title: "Luyện tập", sub: "Áp dụng kiến thức", items: ["Làm bài tập nâng cao", "Ôn tập bằng Quiz Card", "Hỏi Nova những phần chưa hiểu", "Hoàn thành mini test"], progress: 40, active: false },
-                  { week: "TUẦN 4", title: "Tổng ôn", sub: "Kiểm tra và củng cố", items: ["Ôn toàn bộ kiến thức", "Làm bài kiểm tra", "Xem lại phần còn yếu", "Đánh giá tiến độ"], progress: 20, active: false },
-                ].map((w, i) => (
-                  <article className={`roadmap-week-card${w.active ? ' active' : ''}`} key={i}>
-                    <div className="roadmap-week-header">
-                      <span className="week-dot" />
-                      <span className="week-label">{w.week}</span>
-                      {w.active && <span className="week-badge">ĐANG HỌC</span>}
-                    </div>
-                    <h3>{w.title}</h3>
-                    <p className="week-sub">{w.sub}</p>
-                    <ul>{w.items.map((item, j) => <li key={j}>{item}</li>)}</ul>
-                    <div className="week-progress">
-                      <span>Tiến độ</span>
-                      <strong>{w.progress}%</strong>
-                    </div>
-                    <div className="progress-bar"><span style={{ width: `${w.progress}%` }} /></div>
-                  </article>
-                ))}
-              </div>
-              <div className="roadmap-cta">
-                <p><strong>Bạn không cần tự lên kế hoạch từ đầu.</strong></p>
-                <p>StudyHub giúp chia mục tiêu lớn thành từng bước học rõ ràng.</p>
-                <button className="btn btn-primary" onClick={() => go("roadmap")}>Xem lộ trình của tôi →</button>
-              </div>
-            </section>
-            <section className="content-section streak-habit-section">
-              <span className="eyebrow">■ THÓI QUEN BỀN VỮNG</span>
-              <h2>🔥 Giữ nhịp học mỗi ngày ✨</h2>
-              <p>Sự đều đặn nhỏ bé tích lũy thành thành tựu lớn. Lên kế hoạch, giữ streak để có thói quen học tập bền bỉ và khỏe mạnh.</p>
-              {user ? <StreakCard user={user} streak={streak} onLogin={() => openAuth("login")} /> : <div className="streak-calendar-card">
-                <div className="streak-cal-header">
-                  <span>{user ? new Date().toLocaleDateString('vi-VN', { month: 'long', year: 'numeric', timeZone: VIETNAM_TIME_ZONE }) : 'Một tuần học · Minh họa'}</span>
-                  <span>✔ {user ? `Chuỗi hiện tại: ${streak.current_streak} ngày` : 'Mỗi ngày một bước tiến'}</span>
-                </div>
-                <div className="streak-week">
-                  {["T2", "T3", "T4", "T5", "T6", "T7", "CN"].map((day, i) => (
-                    <div className={`streak-day${i < (user ? streak.current_streak : 5) ? ' done' : ''}${i === new Date().getDay() - 1 ? ' today' : ''}`} key={i}>
-                      <span className="day-label">{day}</span>
-                      <span className="day-num">{12 + i}</span>
-                      {i < (user ? streak.current_streak : 5) && <span className="day-check">✔</span>}
-                      {user && i === new Date().getDay() - 1 && <span className="day-today">Hôm nay</span>}
-                    </div>
-                  ))}
-                </div>
-              </div>}
-            </section>
-            {!user && <LandingExtras plans={PLANS} onStart={() => openAuth("register")} onExplore={go} />}
-          </>
-        )}
+        <Suspense fallback={loadingPage}>
+        {view === "home" && (isAuthenticated
+          ? <MemberHome user={user} documentCount={documents.length} average={average} streak={streak} go={go} openAuth={openAuth} randomQuote={randomQuote} notify={notify} />
+          : <GuestHome go={go} openAuth={openAuth} randomQuote={randomQuote} notify={notify} plans={PLANS} />)}
         {view === "library" && (
           <section className="library-page" aria-labelledby="library-title">
             <header className="library-hero reveal">
@@ -1520,19 +1341,9 @@ export default function App() {
               </div>
               <button
                 className="btn btn-primary hero-upload"
-                onClick={() => {
-                  if (requireLogin()) return;
-                  setUploadPhase("idle");
-                  setUploadError("");
-                  setUploadFile(null);
-                  setUploadFileName("");
-                  setUploadTitle("");
-                  uploadTitleEdited.current = false; uploadDescriptionEdited.current = false;
-                  setUploadSuggestionNote(''); setSuggestedUploadTitle(''); setUploadSuggestionBusy(false);
-                  setUploadDescription("");
-                  setUploadSubject("");
-                  setModal("upload");
-                }}
+                disabled={Boolean(user) && !permissions.canUpload}
+                title={user && !permissions.canUpload ? 'Nâng cấp để sử dụng' : undefined}
+                onClick={() => openUpload()}
               >
                 <CloudArrowUpIcon aria-hidden="true" />
                 Upload tài liệu mới
@@ -1655,7 +1466,7 @@ export default function App() {
           </section>
         )}
         {view === "quiz" && (
-          <QuizCardPage key={userKey || 'guest'} user={user} decks={quizDecks} decksLoading={decksLoading}
+          <QuizCardPage key={userKey || 'guest'} user={user} subscription={subscription} decks={quizDecks} decksLoading={decksLoading}
             onDeckSaved={(saved) => setQuizDecks((current) => current.some((item) => item.id === saved.id) ? current.map((item) => item.id === saved.id ? saved : item) : [...current,saved])}
             onDeleteDeck={removeFlashcardDeck} onStudy={setActiveStudyDeck}
             onEdit={(deck) => {setEditingDeck(deck);setModal('quiz-create');}}
@@ -1664,11 +1475,14 @@ export default function App() {
         )}
         {view === "roadmap" && (
           <LearningRoadmapPage
+            subscription={subscription}
             key={String(user?.id || user?.email || "guest")}
             documents={documents}
+            subjects={subjects}
             progress={progress}
             onOpenDocument={openDocumentPreview}
             onTakeQuiz={(document) => { setSelectedDocument(document); go("quiz"); }}
+            onAskNova={(document) => { setSelectedDocument(document); go("tutor"); }}
             user={user}
             streak={streak}
             studyTime={studyTime}
@@ -1677,16 +1491,21 @@ export default function App() {
         {view === "dashboard" && (
           <ProgressDashboard
             user={user}
-            analytics={progressAnalytics}
             progress={progress}
-            studyTime={studyTime}
-            streak={streak}
-            quizDecks={quizDecks}
+            subscription={subscription}
+            onUpgrade={() => go("pricing")}
             onLogin={() => openAuth("login")}
           />
         )}
         {view === "tutor" && (
-          <AITutorPage selectedDocument={selectedDocument} user={user} onDocumentsChanged={loadDocumentsAndProgress} onDocumentDeleted={(documentId) => setSelectedDocument((current) => String(current?.id) === String(documentId) ? null : current)} />
+          <AITutorPage
+            selectedDocument={selectedDocument}
+            user={user}
+            subscription={subscription}
+            onUpgrade={() => go("pricing")}
+            onDocumentsChanged={loadDocumentsAndProgress}
+            onDocumentDeleted={(documentId) => setSelectedDocument((current) => String(current?.id) === String(documentId) ? null : current)}
+          />
         )}
         {view === "pricing" && (
           <section className="pricing-page">
@@ -1699,50 +1518,77 @@ export default function App() {
                 </p>
               </div>
             </div>
-            <div className="price-grid reveal-stagger">
-              {Object.entries(PLANS).map(([id, plan]) => (
-                <article
-                  className={`price-card pricing-card-${id} ${id === "plus" ? "featured" : ""} ${subscription.plan === id ? "active" : ""}`}
-                  key={id}
-                >
-                  {id === "plus" && <span className="pricing-ribbon">Khuyến dùng cho sinh viên</span>}
-                  <div className="price-card-topline">
-                    <span className="plan-badge">{plan.badge}</span>
-                    {subscription.plan === id && <span className="current-plan"><CheckIcon aria-hidden="true" /> Gói hiện tại</span>}
-                  </div>
-                  <h3>{plan.name}</h3>
-                  <div className="price-line">
-                    {plan.price}
-                    <span>{id === "free" ? "" : " / tháng"}</span>
-                  </div>
-                  <strong className="plan-usage">{plan.subtitle}</strong>
-                  <hr />
-                  <h4>Quyền lợi chính</h4>
-                  <ul>
-                    {plan.items.map((item) => (
-                      <li key={item}><CheckIcon aria-hidden="true" />{item}</li>
-                    ))}
-                    {plan.excluded.length > 0 && <li className="excluded-divider">Chưa có trong gói này</li>}
-                    {plan.excluded.map((item) => (
-                      <li className="is-excluded" key={item}><XMarkIcon aria-hidden="true" />{item}</li>
-                    ))}
-                  </ul>
-                  <button
-                    className={`btn full ${subscription.plan === id ? "btn-ghost" : id === "free" ? "btn-outline" : "btn-primary"}`}
-                    disabled={subscription.plan === id}
-                    onClick={() => requestPlan(id)}
+            <div className="price-grid">
+              {Object.entries(PLANS).map(([id, plan]) => {
+                const isCurrent = subscription.plan === id;
+                return (
+                  <article
+                    className={`price-card pricing-card-${id} ${id === "plus" ? "featured" : ""} ${isCurrent ? "active" : ""}`}
+                    key={id}
                   >
-                    {id !== "free" && <BoltIcon aria-hidden="true" className="btn-icon" />}
-                    {subscription.plan === id
-                      ? "Gói hiện tại"
-                      : id === "free"
-                        ? "Chuyển về Gói Khởi Động"
-                        : id === "plus"
-                          ? "Nâng cấp Gói 199đ"
-                          : "Nâng cấp Gói 299đ"}
-                  </button>
-                </article>
-              ))}
+                    {plan.ribbon && (
+                      <div className="pricing-ribbon-badge">{plan.ribbon}</div>
+                    )}
+                    <div className="price-card-topline">
+                      {!plan.ribbon && <span className="plan-badge">{plan.badge}</span>}
+                      {isCurrent && (
+                        <span className="current-plan-indicator">
+                          <CheckIcon aria-hidden="true" /> Gói hiện tại
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="price-card-title">{plan.name}</h3>
+                    <div className="price-line">
+                      <span className="price-amount">{plan.price}</span>
+                      {plan.pricePeriod && (
+                        <span className="price-period">{plan.pricePeriod}</span>
+                      )}
+                    </div>
+                    <p className="plan-usage">{plan.subtitle}</p>
+                    <hr className="price-card-divider" />
+                    <h4 className="price-card-section-title">Quyền lợi chính</h4>
+                    <ul className="price-features-list">
+                      {plan.items.map((item) => (
+                        <li key={item}>
+                          <CheckIcon aria-hidden="true" className="feature-check-icon" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+
+                    {plan.hasLimits && plan.excluded?.length > 0 && (
+                      <>
+                        <div className="price-limits-divider">
+                          <span>{plan.limitsTitle || "GIỚI HẠN"}</span>
+                        </div>
+                        <ul className="price-limits-list">
+                          {plan.excluded.map((item) => (
+                            <li key={item}>
+                              <XMarkIcon aria-hidden="true" className="limit-cross-icon" />
+                              <span>{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+
+                    <div className="price-card-action">
+                      <button
+                        className={`btn full ${isCurrent ? "btn-current-plan" : "btn-plan-select"}`}
+                        disabled={isCurrent}
+                        onClick={() => requestPlan(id)}
+                      >
+                        {!isCurrent && <BoltIcon aria-hidden="true" className="btn-icon" />}
+                        {isCurrent
+                          ? "Gói hiện tại"
+                          : id === "free"
+                            ? "Chuyển về Gói Khởi Động"
+                            : `Chọn ${plan.name}`}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
             {user && (
               <section className="subscription-panel">
@@ -1769,9 +1615,10 @@ export default function App() {
             )}
           </section>
         )}
+        </Suspense>
       </main>
       {view === "home" && <FocusSpaceLogo onOpen={() => go("focusSpace")} />}
-      <BeeChatWidget visible={view === "home"} key={String(user?.id || user?.email || "guest")} user={user} onNavigate={go} />
+      <BeeChatWidget visible={view === "home" || view === "roadmap"} variant={view === "roadmap" ? "roadmap" : "default"} key={String(user?.id || user?.email || "guest")} user={user} subscription={subscription} onNavigate={go} />
       {modal === "document-preview" && documentPreview && (
         <Modal
           title={documentPreview.document.title || "Nội dung tài liệu"}
@@ -1818,7 +1665,7 @@ export default function App() {
       )}
       {modal === "upload" && (
         <Modal
-          title="Tải lên Tài liệu Mới"
+          title="Thêm tài liệu vào Kho học liệu"
           subtitle="Thêm tài liệu học tập của bạn để bắt đầu ôn luyện và tạo bộ đề tự động."
           icon={<CloudArrowUpIcon />}
           onClose={() => setModal(null)}
@@ -1869,7 +1716,7 @@ export default function App() {
                 <strong>ENTER THE KNOWLEDGE VAULT</strong>
                 <p>{uploadFileName || "Kéo và thả tài liệu vào đây"}</p>
                 <button type="button" className="btn btn-outline" onClick={() => uploadInput.current?.click()}>Chọn tài liệu</button>
-                <small>PDF · DOCX · PPTX · TXT · MD · tối đa 10MB</small>
+                <small>PDF · DOC · DOCX · MD · TXT · PPTX · tối đa 10MB</small>
                 <input
                   ref={uploadInput}
                   id="upload-file"
@@ -1917,7 +1764,7 @@ export default function App() {
               >
                 Hủy bỏ
               </button>
-              <button className="btn btn-primary" disabled={uploadSuggestionBusy || ["validating", "uploading", "processing"].includes(uploadPhase)}>Tải lên & Xử lý</button>
+              <button className="btn btn-primary" title={!permissions.canUpload || permissions.storage_used_bytes + (uploadFile?.size || 0) > permissions.storage_bytes ? 'Nâng cấp để sử dụng' : undefined} disabled={!permissions.canUpload || permissions.storage_used_bytes + (uploadFile?.size || 0) > permissions.storage_bytes || uploadSuggestionBusy || ["validating", "uploading", "processing"].includes(uploadPhase)}>Tải lên & Xử lý</button>
             </footer>
           </form>
         </Modal>
@@ -1962,7 +1809,7 @@ export default function App() {
       )}
       {modal === "quiz-create" && (
         <Modal title={editingDeck ? "Chỉnh sửa bộ thẻ" : "Tạo bộ thẻ ghi nhớ mới"} onClose={() => { setModal(null); setEditingDeck(null); }}>
-          <FlashcardDeckForm key={editingDeck?.id || "new"} userKey={userKey} initialDeck={editingDeck} onCreate={submitQuizDeck} onCancel={() => { setModal(null); setEditingDeck(null); }} />
+          <Suspense fallback={loadingPage}><FlashcardDeckForm key={editingDeck?.id || "new"} userKey={userKey} canGenerate={permissions.advancedQuiz} initialDeck={editingDeck} onCreate={submitQuizDeck} onCancel={() => { setModal(null); setEditingDeck(null); }} /></Suspense>
         </Modal>
       )}
       {modal === "plan" && (
@@ -1983,7 +1830,7 @@ export default function App() {
       )}
       {modal === "payment" && pendingPlan && (
         <Modal title="Thanh toán gói học" subtitle="Thanh toán QR hiện đại · trạng thái xác nhận an toàn" onClose={() => setModal(null)}>
-          <PaymentCheckout planId={pendingPlan} plan={PLANS[pendingPlan]} qrImage="/payment/momo-vietqr.jpg" onClose={() => setModal(null)} />
+          <Suspense fallback={loadingPage}><PaymentCheckout planId={pendingPlan} plan={PLANS[pendingPlan]} qrImage="/payment/momo-vietqr.jpg" onClose={() => setModal(null)} /></Suspense>
         </Modal>
       )}
       {modal === "account" && (
@@ -2007,46 +1854,36 @@ export default function App() {
       <footer className="site-footer">
         <div className="footer-inner">
           <div className="footer-brand">
-            <button className="brand-wrap" onClick={() => go("home")}>
+            <button className="footer-brand-wrap" onClick={() => go("home")}>
               <span className="brand-mark"><AcademicCapIcon aria-hidden="true" /></span>
               <span className="brand-text">Study<span>Hub</span></span>
             </button>
-            <p>Nền tảng học tập thông minh đồng hành cùng sinh viên Việt Nam chinh phục mọi kỳ thi đại học.</p>
+            <p>{FOOTER_COPY.description}</p>
           </div>
           <div className="footer-col">
-            <h4>HỌC LIỆU</h4>
-            <ul>
-              <li><button onClick={() => go("library")}>Đề thi thử</button></li>
-              <li><button onClick={() => go("library")}>Bài tập lớn</button></li>
-              <li><button onClick={() => go("quiz")}>Quiz card</button></li>
-              <li><button onClick={() => go("library")}>Bài giảng tóm tắt</button></li>
-            </ul>
+            <h4>{FOOTER_COPY.headings[0]}</h4>
+            <ul>{FOOTER_COPY.materials.map(([target, label]) => <li key={label}><button onClick={() => go(target)}>{label}</button></li>)}</ul>
           </div>
           <div className="footer-col">
-            <h4>TÍNH NĂNG</h4>
-            <ul>
-              <li><button onClick={() => go("tutor")}>AI Tutor</button></li>
-              <li><button onClick={() => go("roadmap")}>Nhóm học tập</button></li>
-              <li><button onClick={() => go("quiz")}>Flashcard</button></li>
-              <li><button onClick={() => go("dashboard")}>Bảng xếp hạng</button></li>
-            </ul>
+            <h4>{FOOTER_COPY.headings[1]}</h4>
+            <ul>{FOOTER_COPY.features.map(([target, label]) => <li key={label}><button onClick={() => go(target)}>{label}</button></li>)}</ul>
           </div>
           <div className="footer-col">
-            <h4>LIÊN HỆ</h4>
-            <p>Email: support@studyhub.vn</p>
-            <p>Hotline: 1900 1234</p>
+            <h4>{FOOTER_COPY.headings[2]}</h4>
+            <p>{FOOTER_COPY.email}</p>
+            <p>{FOOTER_COPY.hotline}</p>
           </div>
         </div>
         <div className="footer-bottom">
-          <span>© 2026 StudyHub. Tất cả bản quyền được bảo lưu.</span>
+          <span>{FOOTER_COPY.copyright}</span>
           <div>
-            <button>Điều khoản dịch vụ</button>
-            <button>Chính sách bảo mật</button>
+            <button>{FOOTER_COPY.terms}</button>
+            <button>{FOOTER_COPY.privacy}</button>
           </div>
         </div>
       </footer>
       {toast && <div className="toast">{toast}</div>}
-      {activeStudyDeck && <StudyDeckSession key={activeStudyDeck.id} deck={activeStudyDeck} onUpdateDeck={updateStudyDeck} onClose={() => setActiveStudyDeck(null)} />}
+      {activeStudyDeck && <Suspense fallback={loadingPage}><StudyDeckSession key={activeStudyDeck.id} deck={activeStudyDeck} onUpdateDeck={updateStudyDeck} onClose={() => setActiveStudyDeck(null)} /></Suspense>}
     </div>
     </>
   );

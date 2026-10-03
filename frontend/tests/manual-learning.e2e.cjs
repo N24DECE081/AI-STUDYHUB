@@ -26,7 +26,7 @@ for (const kind of ['flashcard','quiz']) test(`manual ${kind}: author, retain dr
   await dialog.getByRole('button',{name:flash?'+ Thêm thẻ':'+ Thêm câu hỏi',exact:true}).click();
   await expect(save).toBeDisabled();
   await dialog.getByRole('button',{name:flash?'Xóa thẻ 2':'Xóa câu 2',exact:true}).click();
-  await dialog.getByRole('button',{name:'Tự động',exact:true}).click();
+  await expect(dialog.getByRole('button',{name:'Tự động',exact:true})).toBeDisabled(); // Free accounts keep manual authoring, not paid AI generation.
   await dialog.getByRole('button',{name:'Thủ công',exact:true}).click();
   await expect(dialog.getByLabel(flash?'Tên bộ Flashcard':'Tên bài trắc nghiệm',{exact:true})).toHaveValue('Bộ tự tạo QA');
   await expect(save).toBeEnabled();

@@ -280,6 +280,54 @@
   filter: drop-shadow(0 4px 9px #426b4c40);
 }
 
+.bee-chat-widget--roadmap .bee-chat-launcher {
+  width: 156px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 12px 7px 8px;
+  border: 1px solid var(--bee-line);
+  border-radius: 8px;
+  background: var(--bee-paper);
+  color: var(--bee-ink);
+  box-shadow: var(--shadow-card);
+  animation: none;
+  font-family: inherit;
+}
+
+.bee-chat-launcher-icon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--bee-mint);
+  color: var(--mint-ink);
+}
+
+.bee-chat-launcher-icon svg { width: 18px; height: 18px; }
+.bee-chat-launcher-copy { display: grid; gap: 3px; text-align: left; white-space: nowrap; }
+.bee-chat-launcher-copy strong { font-size: 12px; line-height: 1.3; }
+.bee-chat-launcher-copy small { font-size: 10px; line-height: 1.3; color: var(--bee-muted); }
+
+/* Keep Nova beside content on wide screens, in its own row on smaller screens. */
+@media (max-width: 1648px) {
+  .bee-chat-widget.bee-chat-widget--roadmap {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    width: fit-content;
+    margin: 0 24px 24px auto;
+  }
+  .bee-chat-widget--roadmap .bee-chat-panel {
+    position: fixed;
+    right: 12px;
+    bottom: 84px;
+  }
+}
+
 @keyframes bee-chat-float { 0%,100% { translate: 0 0; } 50% { translate: 0 -5px; } }
 @keyframes bee-chat-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes bee-chat-dots { 0% { opacity: .2; } 50% { opacity: 1; } 100% { opacity: .2; } }

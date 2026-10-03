@@ -1174,27 +1174,24 @@ class LocalEngine:
         topics = payload.get('topics') or []
         if not isinstance(topics, list) or not topics:
             topics = [f'Kiến thức nền về {subject}', f'Thực hành {subject}', f'Ứng dụng {subject}']
-        lessons_per_module = {'slow': 2, 'steady': 3, 'fast': 4}.get(pace, 3)
-        minutes_per_lesson = max(20, study_time // (lessons_per_module * 2))
+        module_topics = topics[:5]
+        minutes_per_lesson = max(20, study_time // len(module_topics))
         modules = []
-        for module_index, topic in enumerate(topics[:5], start=1):
-            lessons = []
-            for lesson_index in range(1, lessons_per_module + 1):
-                lessons.append({
-                    'key': f'm{module_index}-l{lesson_index}',
-                    'title': f'{topic} — phần {lesson_index}',
-                    'objectives': [
-                        f'Hiểu khái niệm chính của {topic}',
-                        f'Áp dụng {topic} vào bài tập nhỏ',
-                    ],
-                    'examples': [f'Ví dụ minh hoạ cho {topic} (phần {lesson_index})'],
-                    'estimated_minutes': minutes_per_lesson,
-                })
+        for module_index, topic in enumerate(module_topics, start=1):
             modules.append({
                 'key': f'm{module_index}',
                 'title': f'Chặng {module_index}: {topic}',
                 'difficulty': level if module_index == 1 else ('intermediate' if module_index < 4 else target),
-                'lessons': lessons,
+                'lessons': [{
+                    'key': f'm{module_index}-l1',
+                    'title': str(topic),
+                    'objectives': [
+                        f'Hiểu khái niệm chính của {topic}',
+                        f'Áp dụng {topic} vào bài tập nhỏ',
+                    ],
+                    'examples': [f'Ví dụ minh hoạ cho {topic}'],
+                    'estimated_minutes': minutes_per_lesson,
+                }],
                 'quiz': {'question_count': 3, 'max_score': 10},
                 'assessment': {'type': 'short_answer', 'max_score': 10},
             })
@@ -1512,8 +1509,11 @@ class ProviderEngine:
                         '"lessons": [{"key": "m1-l1", "title": str, "objectives": [str], "examples": [str], '
                         '"estimated_minutes": int}], "quiz": {"question_count": int, "max_score": 10}, '
                         '"assessment": {"type": "short_answer", "max_score": 10}}]}\n'
-                        'Mỗi module PHẢI có 2-4 lesson là object có "title"; không được để lessons rỗng '
-                        'và không được trả lesson dạng chuỗi.'),
+                        'Gom các ý liên quan thành chương chính. Mỗi module có 1-3 lesson là object có "title" '
+                        'với mục tiêu và nội dung khác nhau; không được để lessons rỗng hoặc trả lesson dạng chuỗi. '
+                        'Mỗi chủ đề mặc định là một bài; chỉ tách khi có nội dung học thực sự khác biệt. '
+                        'Không nhân bản cùng chủ đề thành phần 1, 2, 3 với mục tiêu lặp lại. '
+                        'Nhịp học chỉ điều chỉnh thời lượng, không làm tăng số bài trùng nội dung.'),
             'quiz': ('Tạo quiz trắc nghiệm bám sát tài liệu. Chỉ trả về JSON, không thêm chữ nào ngoài JSON. '
                      'Cấu trúc bắt buộc: {"questions": [{"question": str, "options": [str, str, str, str], '
                      '"answer_index": int (0..3, vị trí đáp án đúng), "max_score": int}], "topic": str}. '

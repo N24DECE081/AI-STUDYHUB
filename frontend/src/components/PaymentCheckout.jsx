@@ -22,7 +22,7 @@ export default function PaymentCheckout({ planId, plan, qrImage, onClose }) {
         <button type="button" className={method === "bank" ? "active" : ""} onClick={() => setMethod("bank")}>Chuyển khoản</button>
       </div>
       {method === "qr" ? <div className="payment-qr-panel">
-        <img src={qrImage} alt="Mã QR thanh toán MoMo VietQR" />
+        <img src={qrImage} alt="Mã QR thanh toán MoMo VietQR" loading="eager" decoding="async" />
         <div><strong>Quét bằng ứng dụng ngân hàng hoặc MoMo</strong><span>Số tiền gói: {amount.toLocaleString("vi-VN")}đ</span><span>Nội dung: {reference}</span></div>
         <p><b>Lưu ý:</b> QR được cung cấp đang chứa số tiền 24.500đ, chưa trùng giá gói. Chỉ dùng để kiểm thử giao diện; cần QR động đúng số tiền trước khi thu tiền thật.</p>
       </div> : <div className="payment-bank-panel"><span>Người nhận</span><strong>PHAN NGUYEN TIEN VY</strong><span>Số tài khoản</span><strong>•••••••775</strong><span>Số tiền</span><strong>{amount.toLocaleString("vi-VN")}đ</strong><span>Nội dung chuyển khoản</span><strong>{reference}</strong><p>Cần cấu hình đầy đủ ngân hàng và số tài khoản trước khi triển khai thật.</p></div>}

@@ -2,6 +2,7 @@
 import json
 import os
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -74,6 +75,10 @@ class AITutorJourneyTests(unittest.TestCase):
             raise RuntimeError('server did not start: ' + out)
         try:
             cls.cookie = cls.register()
+            # This suite exercises paid journey/AI routes; free limits have a separate suite.
+            with sqlite3.connect(Path(cls.tmp.name) / 'ai_tutor.db') as conn:
+                conn.execute("INSERT INTO subscriptions(user_id,plan_id,status) SELECT u.id,p.id,'active' FROM users u,plans p WHERE u.full_name='AI Tutor Tester' AND p.name='Premium'")
+            conn.close()
             cls.subject_id = cls.ensure_test_subject()
             cls.upload_owned_document(cls.subject_id)
         except Exception:

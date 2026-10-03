@@ -33,7 +33,7 @@ const MARKDOWN_COMPONENTS = {
 // Nova tự chọn cách trả lời; nhãn này cho người học biết nó đã hiểu câu hỏi theo hướng nào.
 const MODE_LABELS = { explain: 'Giải thích', solve: 'Giải bài', hint: 'Gợi ý', guided: 'Từng bước', review: 'Nhận xét', summarize: 'Tóm tắt', generate_quiz: 'Quiz' };
 
-export default function AITutorMessage({ message, onRetry }) {
+export default function AITutorMessage({ message, onRetry, retryDisabled }) {
   const copy = async () => {
     try { await navigator.clipboard.writeText(message.content); } catch { /* Clipboard can be unavailable on non-secure origins. */ }
   };
@@ -41,9 +41,9 @@ export default function AITutorMessage({ message, onRetry }) {
   return <article className={`tutor-message ${message.role}`}>
     <div className="tutor-message-label">{message.role === 'user' ? 'Bạn' : 'Nova'}{modeLabel ? <span className="tutor-route">{modeLabel}</span> : null}</div>
     <div className="tutor-message-content">
-      {message.error ? <><p className="tutor-error">{message.error}</p><button className="tutor-link" onClick={onRetry}>Thử lại</button></> : <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={MARKDOWN_COMPONENTS}>{message.content}</ReactMarkdown>}
+      {message.error ? <><p className="tutor-error">{message.error}</p><button className="tutor-link" disabled={retryDisabled} title={retryDisabled ? 'Nâng cấp để sử dụng' : undefined} onClick={onRetry}>Thử lại</button></> : <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={MARKDOWN_COMPONENTS}>{message.content}</ReactMarkdown>}
     </div>
-    {message.quiz ? <AITutorQuiz quiz={message.quiz} /> : null}
+    {message.quiz ? <AITutorQuiz quiz={message.quiz} messageId={message.message_id || message.id} /> : null}
     {message.role === 'assistant' && !message.error && <button className="tutor-copy" title="Sao chép câu trả lời" onClick={copy}>Sao chép</button>}
   </article>;
 }

@@ -34,8 +34,8 @@ class WebsiteQuestionsTest(unittest.TestCase):
     def test_free_plan_limits_are_answered(self):
         result = self.ask('Gói miễn phí 0đ có gì?')
         self.assertTrue(result['in_scope'])
-        self.assertIn('5 tài liệu', result['answer'])
-        self.assertIn('10 câu/ngày', result['answer'])
+        self.assertIn('10 tài liệu', result['answer'])
+        self.assertIn('5 lượt mỗi ngày', result['answer'])
 
     def test_nova_tutor_question_is_answered(self):
         result = self.ask('Nova AI Tutor làm được gì?')

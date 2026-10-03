@@ -106,6 +106,11 @@ class QuizHTTPTests(unittest.TestCase):
         try:
             with patch.dict('os.environ',{'STUDYHUB_AI_PROVIDER':'custom','STUDYHUB_AI_BASE_URL':f'http://127.0.0.1:{cls.provider.server_port}/v1','STUDYHUB_AI_MODEL':'fixture','STUDYHUB_AI_TASK_MODEL':'fixture'}):
                 ServerIntegrationTest.setUpClass.__func__(cls)
+            # Generated Quiz tests need the existing paid-plan permission.
+            import sqlite3
+            from pathlib import Path
+            with sqlite3.connect(Path(cls.tmp.name) / 'integration.db') as conn:
+                conn.execute("INSERT INTO subscriptions(user_id,plan_id,status) SELECT u.id,p.id,'active' FROM users u CROSS JOIN plans p WHERE p.name='Standard' AND u.email IN ('student@studyhub.local','teacher@studyhub.local')")
         except Exception:
             cls.provider.shutdown();cls.provider.server_close();raise
 

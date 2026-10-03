@@ -1,5 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
-import { ArrowRightIcon, BookOpenIcon, CheckIcon, ClockIcon, SparklesIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  Clock3,
+  FileText,
+  LockKeyhole,
+  Plus,
+  Search,
+  Sparkles,
+  Upload,
+  X,
+  ChevronDown,
+  ShieldCheck,
+} from "lucide-react";
 import {
   generateTutorRoadmap,
   getDocumentContent,
@@ -8,22 +25,53 @@ import {
   submitTutorExercise,
 } from "../api";
 import "./learning-roadmap.css";
+import RoadmapLogo from "./RoadmapLogo";
+import { CurrentRoadmapCard, RoadmapBanner } from "./RoadmapOverview";
+import { planPermissions } from '../utils/planPermissions';
 
-const FIELDS = [
-  { name: "Software Engineering", goal: "Backend Developer", icon: "⌘" },
-  { name: "Web Development", goal: "Full-stack Developer", icon: "⌁" },
-  { name: "AI / Machine Learning", goal: "Machine Learning Engineer", icon: "✳" },
-  { name: "Cyber Security", goal: "Security Analyst", icon: "⛨" },
-  { name: "Data Science", goal: "Data Scientist", icon: "▥" },
-  { name: "Database", goal: "Database Engineer", icon: "▤" },
-  { name: "Computer Networks", goal: "Network Engineer", icon: "⌘" },
-  { name: "Mobile Development", goal: "Mobile Developer", icon: "▯" },
+const GOALS = [
+  "Nắm kiến thức cơ bản",
+  "Chuẩn bị cho kỳ thi",
+  "Làm bài tập",
+  "Làm project",
+  "Học để đi làm",
 ];
-const LEVELS = [["beginner", "Mới bắt đầu"], ["intermediate", "Đã có nền tảng"], ["advanced", "Nâng cao"]];
-const FILTERS = [["all", "Tất cả"], ["in-progress", "Đang học"], ["completed", "Hoàn thành"], ["recent", "Mới thêm"]];
+
+const STAGES = [
+  "Đang đọc tài liệu",
+  "Phân tích nội dung",
+  "Xác định các chủ đề quan trọng",
+  "Sắp xếp thứ tự học",
+  "Phân bổ thời gian",
+];
+
+const formatHours = (value) => Number(value.toFixed(1)).toLocaleString("vi-VN");
 const clamp = (value) => Math.min(100, Math.max(0, Number(value) || 0));
-const levelLabel = (value) => LEVELS.find(([id]) => id === value)?.[1] || value || "Chưa xác định";
-const masteryLabel = (value) => value >= 95 ? "Mastered" : value >= 80 ? "Proficient" : value >= 60 ? "Familiar" : value >= 40 ? "Learning" : "Not started";
+const subjectKey = (item) => String(item.subject_id ?? item.subject_code ?? item.subject_name ?? "ungrouped");
+const fileType = (document) =>
+  String(document.file_type || document.original_filename?.split(".").pop() || "FILE")
+    .replace(/^\./, "")
+    .toUpperCase();
+const documentName = (document) => String(document?.title || document?.original_filename || "")
+  .replace(/\.[^./\\]+$/, "")
+  .trim();
+
+const readSaved = (key) => {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+};
+
+const saveLocal = (key, value) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* ignore localStorage exceptions */
+  }
+};
 
 const sourceHeading = (line) => {
   const text = line.trim();
@@ -43,196 +91,576 @@ const extractSourceSections = (content, document) => {
   const headings = [];
   lines.forEach((line, index) => {
     const title = sourceHeading(line);
-    if (title && !headings.some((item) => item.title.toLocaleLowerCase("vi") === title.toLocaleLowerCase("vi"))) headings.push({ title, line: index });
+    if (title && !headings.some((item) => item.title.toLocaleLowerCase("vi") === title.toLocaleLowerCase("vi"))) {
+      headings.push({ title, line: index });
+    }
   });
   if (!headings.length) {
     const excerpt = lines.map((line) => line.trim()).find(Boolean) || "";
-    return excerpt ? [{ id: String(document.id) + "-source", title: document.title, excerpt: excerpt.slice(0, 700), sourceOnly: true }] : [];
+    return excerpt
+      ? [{ id: String(document.id) + "-source", title: document.title, excerpt: excerpt.slice(0, 700), sourceOnly: true }]
+      : [];
   }
   return headings.slice(0, 32).map((heading, index) => {
     const end = headings[index + 1]?.line ?? lines.length;
-    const excerpt = lines.slice(heading.line + 1, end).map((line) => line.trim()).filter(Boolean).join(" ");
-    return { id: String(document.id) + "-" + index, title: heading.title, excerpt: excerpt.slice(0, 700), sourceLine: heading.line + 1 };
+    const excerpt = lines
+      .slice(heading.line + 1, end)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join(" ");
+    return {
+      id: String(document.id) + "-" + index,
+      title: heading.title,
+      excerpt: excerpt.slice(0, 700),
+      sourceLine: heading.line + 1,
+    };
   });
 };
 
-const readProgress = (key) => {
-  try { return JSON.parse(localStorage.getItem(key) || "{}"); } catch { return {}; }
-};
+function ProgressBar({ value, label, showPercent = false }) {
+  const rounded = Math.round(clamp(value));
+  return (
+    <div className="lr-progress-wrap">
+      <div
+        className="lr-progress-bar"
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={rounded}
+      >
+        <div className="lr-progress-fill" style={{ width: `${rounded}%` }} />
+      </div>
+      {showPercent && <span className="lr-progress-percent">{rounded}%</span>}
+    </div>
+  );
+}
+
+function SourceRoadmap({ document, userScope, onBack, onOpenDocument, onTakeQuiz }) {
+  const storageKey = "studyhub-source-roadmap:" + userScope;
+  const [content, setContent] = useState("");
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
+  const [selected, setSelected] = useState(0);
+  const [done, setDone] = useState(() => readSaved(storageKey));
+
+  useEffect(() => {
+    let active = true;
+    getDocumentContent(document.id)
+      .then((data) => {
+        if (active) setContent(data.content || "");
+      })
+      .catch((failure) => {
+        if (active) setError(failure.message);
+      })
+      .finally(() => {
+        if (active) setBusy(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [document.id, retry]);
+
+  const sections = useMemo(() => extractSourceSections(content, document), [content, document]);
+  const keyFor = (section) => document.id + ":" + section.id;
+  const current = sections[selected];
+  const completion = sections.length
+    ? (sections.filter((section) => done[keyFor(section)]).length / sections.length) * 100
+    : 0;
+
+  const toggleDone = () => {
+    if (!current) return;
+    const next = { ...done, [keyFor(current)]: !done[keyFor(current)] };
+    setDone(next);
+    saveLocal(storageKey, next);
+  };
+
+  return (
+    <div className="lr-source-roadmap">
+      <button className="lr-back-link" onClick={onBack}>
+        <ArrowLeft size={16} /> Quay lại lộ trình
+      </button>
+      <header className="lr-view-header">
+        <div>
+          <span className="lr-eyebrow">TÀI LIỆU HỌC TẬP</span>
+          <h1 className="lr-page-title">{document.title}</h1>
+          <p className="lr-page-desc">{document.subject_name}</p>
+        </div>
+        {onOpenDocument && (
+          <button className="lr-btn lr-btn-secondary" onClick={() => onOpenDocument(document)}>
+            <BookOpen size={16} /> Mở tài liệu
+          </button>
+        )}
+      </header>
+      {busy ? (
+        <div className="lr-loading-inline" role="status">
+          <BookOpen size={18} aria-hidden="true" /> Đang đọc tài liệu...
+        </div>
+      ) : error ? (
+        <div className="lr-error-banner" role="alert">
+          {error}
+          <button
+            className="lr-btn lr-btn-secondary"
+            onClick={() => {
+              setBusy(true);
+              setError("");
+              setRetry((v) => v + 1);
+            }}
+          >
+            Thử lại
+          </button>
+        </div>
+      ) : !sections.length ? (
+        <div className="lr-empty-card">
+          <BookOpen size={36} />
+          <h2>Tài liệu chưa có nội dung văn bản</h2>
+          <p>Mở tài liệu gốc để tiếp tục học.</p>
+        </div>
+      ) : (
+        <>
+          <div className="lr-progress-header">
+            <strong>Tiến độ học tập</strong>
+            <span>{Math.round(completion)}%</span>
+          </div>
+          <ProgressBar value={completion} label="Tiến độ tài liệu" />
+          <div className="lr-study-layout">
+            <div className="lr-module-lessons lr-lesson-list">
+              {sections.map((section, index) => (
+                <button
+                  className={"lr-lesson-btn" + (selected === index ? " is-selected" : "")}
+                  key={section.id}
+                  aria-pressed={selected === index}
+                  onClick={() => setSelected(index)}
+                >
+                  <span className={"lr-lesson-status-badge" + (done[keyFor(section)] ? " is-done" : "")}>
+                    {done[keyFor(section)] ? <Check size={14} /> : index + 1}
+                  </span>
+                  <span className="lr-lesson-btn-text"><strong>{section.title}</strong></span>
+                  <ArrowRight size={15} className="lr-caret" aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+            <aside className="lr-detail-inner-card">
+              <span className="lr-eyebrow">NỘI DUNG TÀI LIỆU</span>
+              <h2 className="lr-lesson-detail-title">{current?.title}</h2>
+              <p className="lr-source-excerpt">
+                {current?.excerpt || "Mở tài liệu gốc để xem nội dung đầy đủ."}
+              </p>
+              <div className="lr-exercise-btn-row lr-source-actions">
+                <button
+                  className="lr-btn lr-btn-primary"
+                  disabled={selected > 0 && !done[keyFor(sections[selected - 1])]}
+                  onClick={toggleDone}
+                >
+                  <Check size={16} />
+                  {done[keyFor(current)] ? "Đánh dấu chưa hoàn thành" : "Hoàn tất chủ đề"}
+                </button>
+                {onTakeQuiz && (
+                  <button className="lr-btn lr-btn-secondary" onClick={() => onTakeQuiz(document)}>
+                    Tạo Quiz từ tài liệu <ArrowRight size={16} />
+                  </button>
+                )}
+              </div>
+            </aside>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function LearningRoadmapPage({
-  documents = [], progress = [], onOpenDocument, onTakeQuiz,
-  user, streak = {}, studyTime = {},
+  documents = [],
+  subjects = [],
+  onOpenDocument,
+  onTakeQuiz,
+  onUpload,
+  onAskNova,
+  user,
+  subscription,
+  streak = {},
 }) {
+  const permissions = planPermissions(subscription);
+  const roadmapLock = { disabled: !permissions.personalizedRoadmap, title: !permissions.personalizedRoadmap ? 'Nâng cấp để sử dụng' : undefined };
+  const uploadLock = { disabled: !permissions.canUpload, title: !permissions.canUpload ? 'Nâng cấp để sử dụng' : undefined };
   const userScope = String(user?.id || user?.email || "guest");
-  const [mode, setMode] = useState("documents");
-  const [filter, setFilter] = useState("all");
+  const storageKey = "studyhub-roadmap-plan:" + userScope;
+
+  const [currentStep, setCurrentStep] = useState("overview"); // overview | step1_select_docs | step2_set_goals | step3_loading | roadmap_view
+  const [selectedSubject, setSelectedSubject] = useState("");
+  const [selectedDocIds, setSelectedDocIds] = useState([]);
+  const [selectedGoals, setSelectedGoals] = useState([GOALS[0], GOALS[3]]);
+  const [weeks, setWeeks] = useState("8");
+  const [dailyHours, setDailyHours] = useState("2");
+  const [daysPerWeek, setDaysPerWeek] = useState("5");
   const [search, setSearch] = useState("");
-  const [selectedDocumentId, setSelectedDocumentId] = useState(null);
-  const [sourceContent, setSourceContent] = useState("");
-  const [sourceBusy, setSourceBusy] = useState(false);
-  const [sourceError, setSourceError] = useState("");
-  const [selectedSourceIndex, setSelectedSourceIndex] = useState(0);
-  const [sourceDone, setSourceDone] = useState(() => readProgress("studyhub-source-roadmap:" + userScope));
-  const [field, setField] = useState(FIELDS[0].name);
-  const [goal, setGoal] = useState(FIELDS[0].goal);
-  const [currentLevel, setCurrentLevel] = useState("beginner");
-  const [targetLevel, setTargetLevel] = useState("advanced");
-  const [weeklyHours, setWeeklyHours] = useState("8");
-  const [careerRoadmap, setCareerRoadmap] = useState(null);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+
+  const [roadmap, setRoadmap] = useState(() => readSaved(storageKey).demoRoadmap || null);
+  const [plan, setPlan] = useState(() => readSaved(storageKey));
   const [submissions, setSubmissions] = useState([]);
-  const [roadmapLoaded, setRoadmapLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [sourceDocument, setSourceDocument] = useState(null);
   const [selectedLessonId, setSelectedLessonId] = useState(null);
   const [activeExerciseId, setActiveExerciseId] = useState(null);
   const [answer, setAnswer] = useState("");
   const [grade, setGrade] = useState(null);
+  const [demoMode, setDemoMode] = useState(true);
+  const [uploadedDocument, setUploadedDocument] = useState(null);
 
-  const sourceStorageKey = "studyhub-source-roadmap:" + userScope;
-  const careerIsLoaded = roadmapLoaded || userScope === "guest";
-  const progressByDocument = useMemo(() => new Map(progress.map((item) => [String(item.documentId), Number(item.percent || 0)])), [progress]);
-  const selectedDocument = documents.find((document) => String(document.id) === String(selectedDocumentId));
-  const sourceSections = useMemo(
-    () => selectedDocument ? extractSourceSections(sourceContent, selectedDocument) : [],
-    [sourceContent, selectedDocument],
-  );
-  const selectedSource = sourceSections[selectedSourceIndex] || null;
-  const selectedSourceKey = selectedSource ? String(selectedDocumentId) + ":" + selectedSource.id : "";
-  const completedSourceCount = sourceSections.filter((section) => sourceDone[String(selectedDocumentId) + ":" + section.id]).length;
-  const sourceCompletion = sourceSections.length ? Math.round(completedSourceCount * 100 / sourceSections.length) : 0;
+  const requestVersion = useRef(0);
+  const finishTimer = useRef(null);
 
-  const filteredDocuments = useMemo(() => {
-    let items = documents.filter((document) => {
-      const query = search.trim().toLocaleLowerCase("vi");
-      const matchesSearch = !query || (String(document.title || "") + " " + String(document.subject_name || "") + " " + String(document.original_filename || "")).toLocaleLowerCase("vi").includes(query);
-      const percent = progressByDocument.get(String(document.id)) || 0;
-      const matchesFilter = filter === "all" || filter === "recent"
-        || (filter === "completed" && percent >= 100)
-        || (filter === "in-progress" && percent > 0 && percent < 100);
-      return matchesSearch && matchesFilter;
+  // Group and extract subjects from list or docs
+  const subjectOptions = useMemo(() => {
+    const map = new Map();
+    subjects.forEach((subj) => {
+      map.set(String(subj.id), {
+        key: String(subj.id),
+        name: subj.name,
+        code: subj.code,
+      });
     });
-    if (filter === "recent") items = [...items].sort((a, b) => String(b.uploaded_at || b.created_at || "").localeCompare(String(a.uploaded_at || a.created_at || "")));
-    return items;
-  }, [documents, filter, progressByDocument, search]);
+    documents.forEach((doc) => {
+      const key = subjectKey(doc);
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          name: doc.subject_name || doc.subject_code || "Lập trình C++",
+          code: doc.subject_code,
+        });
+      }
+    });
+    if (!map.size) {
+      map.set("cpp", { key: "cpp", name: "Lập trình C++", code: "CPP" });
+    }
+    return [...map.values()];
+  }, [subjects, documents]);
 
-  const lessonRows = useMemo(() => (careerRoadmap?.modules || []).flatMap((module) => (module.lessons || []).map((lesson) => ({
-    module,
-    lesson,
-    exercises: (careerRoadmap.exercises || []).filter((exercise) => String(exercise.lesson_key) === String(lesson.key)),
-  }))), [careerRoadmap]);
+  // Compute active subject without calling setState synchronously inside an effect
+  const activeSubjectKey = selectedSubject || subjectOptions[0]?.key || "";
+  const subject = subjectOptions.find((item) => item.key === activeSubjectKey) || subjectOptions[0];
+
+  const subjectDocuments = useMemo(() => {
+    const docs = documents.filter((doc) => subjectKey(doc) === activeSubjectKey);
+    return docs;
+  }, [documents, activeSubjectKey]);
+
+  const selectedDocuments = useMemo(() => {
+    return subjectDocuments.filter((doc) => selectedDocIds.includes(String(doc.id)));
+  }, [subjectDocuments, selectedDocIds]);
+
+  const visibleDocuments = useMemo(() => {
+    const q = search.trim().toLocaleLowerCase("vi");
+    return subjectDocuments.filter((doc) => {
+      const combined = `${doc.title || ""} ${doc.original_filename || ""}`.toLocaleLowerCase("vi");
+      return !q || combined.includes(q);
+    });
+  }, [subjectDocuments, search]);
+
+  // Time calculations
+  const totalHours = useMemo(() => {
+    const w = Number(weeks) || 0;
+    const h = Number(dailyHours) || 0;
+    const d = Number(daysPerWeek) || 0;
+    return w * h * d;
+  }, [weeks, dailyHours, daysPerWeek]);
+
+  const validTime =
+    Number(weeks) >= 1 &&
+    Number(weeks) <= 104 && Number.isInteger(Number(weeks)) &&
+    Number(dailyHours) >= 0.5 &&
+    Number(dailyHours) <= 12 &&
+    Number(daysPerWeek) >= 1 &&
+    Number(daysPerWeek) <= 7 && Number.isInteger(Number(daysPerWeek));
+
+  // Loading stages mapping from progress 0% - 100%
+  const currentLoadingStage = useMemo(() => {
+    if (loadingProgress < 20) return 0;
+    if (loadingProgress < 45) return 1;
+    if (loadingProgress < 70) return 2;
+    if (loadingProgress < 90) return 3;
+    return 4;
+  }, [loadingProgress]);
+
+  const lessonRows = useMemo(
+    () =>
+      (roadmap?.modules || []).flatMap((module) =>
+        (module.lessons || []).map((lesson) => ({
+          module,
+          lesson: { ...lesson, source: lesson.source || plan.lessonSources?.[lesson.key] },
+          exercises: (roadmap.exercises || []).filter(
+            (exercise) => String(exercise.lesson_key) === String(lesson.key)
+          ),
+        }))
+      ),
+    [roadmap, plan.lessonSources]
+  );
+
   const exerciseGrades = useMemo(() => {
-    const ids = new Set((careerRoadmap?.exercises || []).map((exercise) => String(exercise.id)));
+    const ids = new Set((roadmap?.exercises || []).map((exercise) => String(exercise.id)));
     const best = new Map();
     submissions.forEach((item) => {
       const id = String(item.exercise_id);
-      if (!ids.has(id)) return;
-      const previous = best.get(id);
-      if (!previous || clamp(item.percentage) > previous.percentage) {
-        best.set(id, { percentage: clamp(item.percentage), score: Number(item.score || 0) });
+      if (ids.has(id)) {
+        best.set(id, Math.max(best.get(id) || 0, clamp(item.percentage)));
       }
     });
     return best;
-  }, [careerRoadmap, submissions]);
+  }, [roadmap, submissions]);
+
   const lessonMastery = (row) => {
-    const scores = row.exercises.map((exercise) => exerciseGrades.get(String(exercise.id))?.percentage).filter((value) => value !== undefined);
-    return scores.length ? Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length) : 0;
-  };
-  const careerMastery = lessonRows.length ? Math.round(lessonRows.reduce((sum, row) => sum + lessonMastery(row), 0) / lessonRows.length) : 0;
-  const selectedLessonRow = lessonRows.find((row) => row.lesson.key === selectedLessonId) || lessonRows[0] || null;
-  const selectedLessonIndex = selectedLessonRow ? lessonRows.findIndex((row) => row.lesson.key === selectedLessonRow.lesson.key) : -1;
-  const isLessonLocked = selectedLessonIndex > 0 && lessonRows.slice(0, selectedLessonIndex).some((row) => lessonMastery(row) < 60);
-  const selectedExercises = selectedLessonRow?.exercises || [];
-  const activeExercise = selectedExercises.find((exercise) => String(exercise.id) === String(activeExerciseId)) || null;
-  const gradedCount = exerciseGrades.size;
-  const xp = Math.round([...exerciseGrades.values()].reduce((sum, result) => sum + result.score, 0));
-  const playerLevel = Math.floor(xp / 250) + 1;
-  const masteryBadge = [...exerciseGrades.values()].some((result) => result.percentage >= 95);
-  const studyMinutes = Math.floor(Number(studyTime.total_seconds || 0) / 60);
-  const selectedPrevious = selectedLessonIndex > 0 ? lessonRows[selectedLessonIndex - 1] : null;
-  const practiceExercise = selectedExercises.find((item) => item.exercise_type !== "multiple_choice") || selectedExercises[0];
-  const quizExercise = selectedExercises.find((item) => item.exercise_type === "multiple_choice") || selectedExercises[0];
-
-  useEffect(() => {
-    if (mode !== "career" || roadmapLoaded || userScope === "guest") return undefined;
-    let active = true;
-    Promise.allSettled([getTutorRoadmap(), getTutorSubmissions()]).then(([pathResult, submissionsResult]) => {
-      if (!active) return;
-      if (pathResult.status === "fulfilled" && pathResult.value?.roadmap_id) {
-        const data = pathResult.value;
-        setCareerRoadmap(data);
-        setField(FIELDS.find((item) => item.name === data.subject)?.name || data.subject || FIELDS[0].name);
-        setGoal(data.goal || FIELDS[0].goal);
-        setCurrentLevel(data.current_level || "beginner");
-        setTargetLevel(data.target_level || "advanced");
-        setWeeklyHours(String(Math.max(2, Math.min(40, Math.round(Number(data.study_time || 480) / 60)))));
-        setSelectedLessonId(data.modules?.[0]?.lessons?.[0]?.key || null);
-      }
-      if (submissionsResult.status === "fulfilled") setSubmissions(submissionsResult.value?.items || []);
-      if (pathResult.status === "rejected") setError(pathResult.reason?.message || "Không tải được lộ trình đã lưu.");
-      setRoadmapLoaded(true);
-    });
-    return () => { active = false; };
-  }, [mode, roadmapLoaded, userScope]);
-
-  const openSourceRoadmap = async (document) => {
-    setSelectedDocumentId(document.id);
-    setSelectedSourceIndex(0);
-    setSourceContent("");
-    setSourceError("");
-    setSourceBusy(true);
-    try {
-      const result = await getDocumentContent(document.id);
-      setSourceContent(result.content || "");
-    } catch (requestError) {
-      setSourceError(requestError.message || "Không thể đọc nội dung tài liệu.");
-    } finally {
-      setSourceBusy(false);
+    if (String(plan.roadmapId) === String(roadmap?.roadmap_id)) {
+      if (plan.done?.[row.lesson.key]) return 100;
+      if (plan.quizGrades?.[row.lesson.key] !== undefined) return clamp(plan.quizGrades[row.lesson.key]);
     }
+    const scores = row.exercises
+      .map((exercise) => exerciseGrades.get(String(exercise.id)))
+      .filter((val) => val !== undefined);
+    return scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : 0;
   };
 
-  const completeSourceNode = () => {
-    if (!selectedSource || !selectedSourceKey) return;
-    const next = { ...sourceDone, [selectedSourceKey]: !sourceDone[selectedSourceKey] };
-    setSourceDone(next);
-    try { localStorage.setItem(sourceStorageKey, JSON.stringify(next)); } catch { /* giữ state trong phiên hiện tại */ }
+  const locked = (index) => !permissions.personalizedRoadmap || lessonRows.slice(0, index).some((row) => lessonMastery(row) < 60);
+  const completed = lessonRows.filter((row) => lessonMastery(row) >= 60).length;
+
+  const currentPlan = roadmap && String(plan.roadmapId) === String(roadmap.roadmap_id) ? plan : null;
+  const roadmapHours = roadmap ? currentPlan?.totalHours || 80 : 0;
+  const totalWeight = lessonRows.reduce((sum, row) => sum + (Number(row.lesson.estimated_minutes) || 1), 0);
+  const topicHours = (row) => roadmapHours * (Number(row.lesson.estimated_minutes) || 1) / (totalWeight || 1);
+  const completedHours = Math.round(lessonRows.reduce((sum, row) => sum + topicHours(row) * (lessonMastery(row) >= 60 ? 1 : lessonMastery(row) / 100), 0) * 10) / 10;
+  const overallProgress = roadmap ? Math.round(completedHours / roadmapHours * 100) : 0;
+  const remainingHours = Math.max(0, roadmapHours - completedHours);
+
+  const roadmapDocuments = currentPlan
+    ? documents.filter((document) => (currentPlan.documentIds || []).includes(String(document.id)))
+    : selectedDocuments.length
+    ? selectedDocuments
+    : documents.slice(0, 4);
+  const primaryDocument = roadmapDocuments[0];
+  const roadmapTitle = currentPlan?.title || documentName(primaryDocument) || roadmap?.subject || subject?.name || "Lộ trình học";
+  const roadmapDescription = roadmap?.summary || roadmap?.goal || "";
+
+  const selectedLesson =
+    lessonRows.find((row) => row.lesson.key === selectedLessonId) || lessonRows[0];
+  const selectedLessonIndex = selectedLesson ? lessonRows.indexOf(selectedLesson) : -1;
+  const activeExercise = selectedLesson?.exercises.find(
+    (exercise) => String(exercise.id) === String(activeExerciseId)
+  );
+  const nextLesson = lessonRows.find((row) => lessonMastery(row) < 60) || lessonRows[0];
+
+  // Fetch saved roadmap & submissions
+  useEffect(() => {
+    let active = true;
+    Promise.allSettled([getTutorRoadmap(), getTutorSubmissions()]).then(([pathResult, subResult]) => {
+      if (!active) return;
+      if (!readSaved(storageKey).demoRoadmap && pathResult.status === "fulfilled" && pathResult.value?.roadmap_id) {
+        setRoadmap(pathResult.value);
+      }
+      if (subResult.status === "fulfilled") {
+        setSubmissions(subResult.value?.items || []);
+      }
+      setLoaded(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [loadAttempt, storageKey]);
+
+  useEffect(() => () => {
+    requestVersion.current += 1;
+    window.clearTimeout(finishTimer.current);
+  }, []);
+
+  // Smooth loading progression from 0% towards 95%
+  useEffect(() => {
+    if (currentStep !== "step3_loading") return undefined;
+    const interval = window.setInterval(() => {
+      setLoadingProgress((prev) => {
+        if (prev >= 95) return prev;
+        const step = demoMode ? 4 : Math.max(0.5, (95 - prev) * 0.08);
+        return Math.min(95, prev + step);
+      });
+    }, 120);
+    return () => window.clearInterval(interval);
+  }, [currentStep, demoMode]);
+
+  const beginWizard = () => {
+    if (!permissions.personalizedRoadmap) return;
+    const initialSubject = subjectOptions[0]?.key || "";
+    setSelectedSubject(initialSubject);
+    setSelectedDocIds([]);
+    setUploadedDocument(null);
+    setError("");
+    setSearch("");
+    setSourceDocument(null);
+    setCurrentStep("step1_select_docs");
   };
 
-  const generateCareerRoadmap = async (event) => {
-    event.preventDefault();
-    const hours = Math.max(2, Math.min(40, Number(weeklyHours) || 0));
-    if (!goal.trim()) {
-      setError("Hãy nhập mục tiêu nghề nghiệp trước khi tạo lộ trình.");
+  const openLesson = (row) => {
+    if (!permissions.personalizedRoadmap) return;
+    setSelectedLessonId(row?.lesson.key || null);
+    setActiveExerciseId(null);
+    setGrade(null);
+    setError("");
+    setCurrentStep("roadmap_view");
+  };
+
+  const updatePlan = (patch) => {
+    const next = { ...plan, ...patch };
+    setPlan(next);
+    saveLocal(storageKey, next);
+  };
+
+  const markComplete = () => {
+    if (!selectedLesson || locked(selectedLessonIndex)) return;
+    const following = lessonRows[selectedLessonIndex + 1];
+    updatePlan({
+      done: { ...plan.done, [selectedLesson.lesson.key]: true },
+      started: { ...plan.started, ...(following ? { [following.lesson.key]: true } : {}) },
+    });
+  };
+
+  const handleGoalToggle = (goal) => {
+    setSelectedGoals((prev) =>
+      prev.includes(goal) ? prev.filter((item) => item !== goal) : [...prev, goal]
+    );
+  };
+
+  const handleDocumentToggle = (docId) => {
+    const idStr = String(docId);
+    setSelectedDocIds((prev) =>
+      prev.includes(idStr) ? prev.filter((id) => id !== idStr) : [...prev, idStr]
+    );
+  };
+
+  // Generate roadmap with Nova AI loading from 0% to 100%
+  const generateRoadmap = async (event) => {
+    if (event) event.preventDefault();
+    if (!permissions.personalizedRoadmap) return;
+    if (busy) return;
+    if (!selectedDocuments.length) {
+      setError("Vui lòng chọn ít nhất 1 tài liệu để tạo lộ trình.");
       return;
     }
+    if (!selectedGoals.length) {
+      setError("Vui lòng chọn ít nhất 1 mục tiêu học tập.");
+      return;
+    }
+    if (!validTime) {
+      setError("Thời gian học không hợp lệ. Vui lòng kiểm tra lại.");
+      return;
+    }
+
+    const version = ++requestVersion.current;
     setBusy("generate");
     setError("");
-    setGrade(null);
+    setLoadingProgress(0);
+    setCurrentStep("step3_loading");
+    window.scrollTo({ top: 0, behavior: "instant" });
+
+    const effectiveDocs = [...selectedDocuments].sort((a, b) => Number(a.id) - Number(b.id));
+    const hours = Number(dailyHours) * Number(daysPerWeek);
+
     try {
-      const previousIds = new Set((careerRoadmap?.exercises || []).map((exercise) => String(exercise.id)));
-      const relevant = submissions.filter((item) => previousIds.has(String(item.exercise_id)) && careerRoadmap?.subject === field);
-      const strengths = [...new Set(relevant.filter((item) => Number(item.percentage) >= 80).map((item) => item.topic).filter(Boolean))].slice(0, 5);
-      const weaknesses = [...new Set(relevant.filter((item) => Number(item.percentage) < 60).map((item) => item.topic).filter(Boolean))].slice(0, 5);
-      const data = await generateTutorRoadmap({
-        subject: field,
-        goal: goal.trim(),
-        current_level: currentLevel,
-        target_level: targetLevel,
+      // 1. Read document sections
+      const sources = await Promise.all(
+        effectiveDocs.map(async (doc) => {
+          try {
+            const res = await getDocumentContent(doc.id);
+            const sections = extractSourceSections(res.content, doc);
+            return sections.map((section) => ({ ...section, documentId: String(doc.id), documentTitle: doc.title }));
+          } catch {
+            return [{ title: doc.title, documentId: String(doc.id), documentTitle: doc.title, excerpt: "Mở tài liệu gốc để xem nội dung đầy đủ." }];
+          }
+        })
+      );
+
+      if (version !== requestVersion.current) return;
+
+      const previousIds = new Set((roadmap?.exercises || []).map((ex) => String(ex.id)));
+      const relevant = submissions.filter(
+        (item) => previousIds.has(String(item.exercise_id)) && roadmap?.subject === (subject?.name || "Lập trình C++")
+      );
+
+      // Call backend API
+      let data = demoMode ? null : await generateTutorRoadmap({
+        subject: subject?.name || "Lập trình C++",
+        goal: selectedGoals.join("; "),
+        current_level: "beginner",
+        target_level: permissions.advancedRoadmap ? 'advanced' : 'intermediate',
         pace: hours <= 4 ? "slow" : hours <= 8 ? "steady" : "fast",
         study_time: hours * 60,
-        strengths,
-        weaknesses,
-        topics: [],
+        strengths: [...new Set(relevant.filter((i) => Number(i.percentage) >= 80).map((i) => i.topic).filter(Boolean))].slice(0, 5),
+        weaknesses: [...new Set(relevant.filter((i) => Number(i.percentage) < 60).map((i) => i.topic).filter(Boolean))].slice(0, 5),
+        topics: [...new Set(sources.flat().map((section) => section.title))],
       });
-      setCareerRoadmap(data);
-      setSelectedLessonId(data.modules?.[0]?.lessons?.[0]?.key || null);
+
+      if (version !== requestVersion.current) return;
+
+      // ponytail: demo uses document headings, connect Nova for semantic topic extraction.
+      const sourceSections = sources.flat();
+      if (demoMode) {
+        if (!sourceSections.length) throw new Error("Tài liệu chưa có nội dung. Hãy chọn tài liệu khác.");
+        await new Promise((resolve) => { finishTimer.current = window.setTimeout(resolve, 3200); });
+        if (version !== requestVersion.current) return;
+        data = {
+          roadmap_id: "demo-" + Date.now(), demo: true,
+          subject: subject?.name, goal: selectedGoals.join(" · "),
+          summary: "Học từng chủ đề, thực hành và kết nối kiến thức từ tài liệu của bạn.",
+          modules: [{ key: "documents", title: "Lộ trình từ tài liệu", lessons: sourceSections.map((section, index) => ({
+            key: "topic-" + index, title: section.title, estimated_minutes: 60,
+            objectives: ["Hiểu và trình bày lại kiến thức về " + section.title, "Vận dụng nội dung tài liệu vào một bài tập hoặc ví dụ."],
+            source: section,
+          })) }],
+          exercises: sourceSections.map((section, index) => ({
+            id: "demo-quiz-" + index, lesson_key: "topic-" + index, exercise_type: "multiple_choice",
+            prompt: "Nội dung nào được đề cập trong chủ đề “" + section.title + "”?",
+            options: [section.excerpt?.slice(0, 180) || section.title, "Một chủ đề khác ngoài tài liệu đã chọn", "Tài liệu không đề cập đến chủ đề này"],
+          })),
+        };
+      }
+      if (!data?.roadmap_id || !data.modules?.some((module) => module.lessons?.length)) {
+        throw new Error("Nova chưa trả về chủ đề học. Vui lòng thử lại hoặc bật chế độ demo.");
+      }
+      data.modules.forEach((module) => module.lessons?.forEach((lesson) => {
+        lesson.source = lesson.source || sourceSections.find((section) => section.title.toLocaleLowerCase("vi") === lesson.title.toLocaleLowerCase("vi"));
+      }));
+
+      const nextPlan = {
+        roadmapId: data.roadmap_id,
+        documentIds: effectiveDocs.map((doc) => String(doc.id)),
+        weeks: Number(weeks),
+        dailyHours: Number(dailyHours),
+        daysPerWeek: Number(daysPerWeek),
+        totalHours,
+        demoRoadmap: data.demo ? data : null,
+        done: {}, started: {}, quizGrades: {},
+        lessonSources: Object.fromEntries(data.modules.flatMap((module) => module.lessons.map((lesson) => [lesson.key, lesson.source]))),
+      };
+
+      setRoadmap(data);
+      setPlan(nextPlan);
+      saveLocal(storageKey, nextPlan);
+      setLoaded(true);
+      setSelectedLessonId(data.modules[0]?.lessons?.[0]?.key || null);
       setActiveExerciseId(null);
-      setRoadmapLoaded(true);
-      const latest = await getTutorSubmissions().catch(() => null);
-      if (latest) setSubmissions(latest.items || []);
-    } catch (requestError) {
-      setError(requestError.message || "Không thể tạo lộ trình AI lúc này.");
-    } finally {
+      setGrade(null);
+
+      // Finish at 100% smoothly
+      setLoadingProgress(100);
+      finishTimer.current = window.setTimeout(() => {
+        setCurrentStep("roadmap_view");
+        setBusy("");
+      }, 700);
+    } catch (failure) {
+      if (version !== requestVersion.current) return;
+      setError(failure.message || "Không thể tạo lộ trình lúc này. Vui lòng thử lại.");
+      setCurrentStep("step2_set_goals");
       setBusy("");
     }
   };
@@ -246,161 +674,911 @@ export default function LearningRoadmapPage({
 
   const sendExercise = async (event) => {
     event.preventDefault();
-    if (!activeExercise || !answer.trim() || busy) return;
+    if (!activeExercise || !answer.trim() || busy || locked(selectedLessonIndex)) return;
+    const version = ++requestVersion.current;
     setBusy("grade");
     setError("");
     try {
-      const answerType = activeExercise.exercise_type === "multiple_choice" ? "choice" : activeExercise.exercise_type;
-      const result = await submitTutorExercise(activeExercise.id, { answer: answer.trim(), answerType });
+      if (roadmap.demo) {
+        const percentage = answer === activeExercise.options[0] ? 100 : 0;
+        setGrade({ percentage, grade: percentage ? "Hoàn thành" : "Cần ôn lại", feedback: percentage ? "Bạn đã nhận diện đúng nội dung tài liệu." : "Hãy đọc lại nội dung tài liệu rồi thử một lần nữa." });
+        const following = lessonRows[selectedLessonIndex + 1];
+        updatePlan({
+          quizGrades: { ...plan.quizGrades, [selectedLesson.lesson.key]: Math.max(plan.quizGrades?.[selectedLesson.lesson.key] || 0, percentage) },
+          started: { ...plan.started, ...(percentage >= 60 && following ? { [following.lesson.key]: true } : {}) },
+        });
+        return;
+      }
+      const result = await submitTutorExercise(activeExercise.id, {
+        answer: answer.trim(),
+        answerType: activeExercise.exercise_type === "multiple_choice" ? "choice" : activeExercise.exercise_type,
+      });
+      if (version !== requestVersion.current) return;
       setGrade(result);
       const [pathData, submissionData] = await Promise.all([getTutorRoadmap(), getTutorSubmissions()]);
-      if (pathData?.roadmap_id) setCareerRoadmap(pathData);
+      if (version !== requestVersion.current) return;
+      if (pathData?.roadmap_id) setRoadmap(pathData);
       setSubmissions(submissionData?.items || []);
-    } catch (requestError) {
-      setError(requestError.message || "Không chấm được bài làm.");
+    } catch (failure) {
+      if (version === requestVersion.current) {
+        setError(failure.message || "Không chấm được bài làm.");
+      }
     } finally {
-      setBusy("");
+      if (version === requestVersion.current) setBusy("");
     }
   };
 
-  const badges = [
-    { icon: "⚡", title: "Bước đầu", earned: gradedCount > 0 },
-    { icon: "🧠", title: "Quiz Master", earned: masteryBadge },
-    { icon: "🔥", title: "7 ngày streak", earned: Number(streak.current_streak || 0) >= 7 },
-    { icon: "🏆", title: "Hoàn tất hành trình", earned: Boolean(careerRoadmap?.progress?.completed) },
-  ];
+  if (sourceDocument) {
+    return (
+      <div className="learning-roadmap-page">
+        <SourceRoadmap
+          key={sourceDocument.id}
+          document={sourceDocument}
+          userScope={userScope}
+          onBack={() => setSourceDocument(null)}
+          onOpenDocument={onOpenDocument}
+          onTakeQuiz={onTakeQuiz}
+        />
+      </div>
+    );
+  }
 
   return (
-    <section className="learning-roadmap-page" aria-labelledby="learning-roadmap-title">
-      <header className="lr-header">
-        <div><span className="lr-kicker"><SparklesIcon aria-hidden="true" /> STUDYHUB · LEARNING ROADMAP</span><h1 id="learning-roadmap-title">Your journey to mastery</h1><p>Chọn hành trình của bạn, đi từng mốc và theo dõi mastery qua bài luyện thực tế.</p></div>
-        <div className="lr-stats" aria-label="Thành tích học tập">
-          <span><b>🔥 {streak.current_streak || 0}</b><small>ngày streak</small></span>
-          <span><b>LV {String(playerLevel).padStart(2, "0")}</b><small>{xp.toLocaleString("vi-VN")} XP</small></span>
-          <span><b>{studyMinutes >= 60 ? (studyMinutes / 60).toFixed(1) + "h" : studyMinutes + "m"}</b><small>thời gian học</small></span>
-        </div>
-      </header>
+    <div className="learning-roadmap-page" aria-busy={currentStep === "step3_loading"}>
+      {/* ==================== STEP 3: NOVA AI LOADING (0% -> 100%) ==================== */}
+      {currentStep === "step3_loading" ? (
+        <div className="lr-nova-loading-view" role="status">
+          <RoadmapLogo size="lg" interactive className="lr-loading-logo" />
 
-      <nav className="lr-modes" aria-label="Chọn loại lộ trình">
-        <button type="button" className={mode === "documents" ? "is-active" : ""} aria-pressed={mode === "documents"} onClick={() => { setMode("documents"); setError(""); }}><BookOpenIcon aria-hidden="true" /><span><strong>Theo tài liệu</strong><small>Học từ nguồn của bạn</small></span></button>
-        <button type="button" className={mode === "career" ? "is-active" : ""} aria-pressed={mode === "career"} onClick={() => { setMode("career"); setError(""); }}><span className="lr-mode-icon" aria-hidden="true">✳</span><span><strong>Theo chuyên ngành</strong><small>Từ nền tảng đến mục tiêu nghề nghiệp</small></span></button>
-      </nav>
-      {error && <p className="lr-error" role="alert">{error}</p>}
+          <span className="lr-loading-badge">NOVA ĐANG LÀM VIỆC</span>
+          <h1 className="lr-loading-title" id="learning-roadmap-title">
+            Nova đang xây dựng lộ trình cho bạn...
+          </h1>
+          <p className="lr-loading-desc">
+            Chỉ mất một chút thời gian. Nova đang đọc và kết nối kiến thức từ{" "}
+            {selectedDocuments.length} tài liệu của bạn.
+          </p>
 
-      {mode === "documents" ? (
-        <div className="lr-document-mode">
-          <aside className="lr-library">
-            <div className="lr-library-head"><div><span className="lr-eyebrow">SOURCE LIBRARY</span><h2>Tài liệu của bạn</h2></div><span className="lr-count">{documents.length}</span></div>
-            <label className="lr-search"><span aria-hidden="true">⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Tìm tài liệu..." aria-label="Tìm tài liệu" /></label>
-            <div className="lr-filters" role="group" aria-label="Lọc tài liệu">{FILTERS.map(([id, label]) => <button type="button" key={id} className={filter === id ? "is-active" : ""} aria-pressed={filter === id} onClick={() => setFilter(id)}>{label}</button>)}</div>
-            <div className="lr-document-list">
-              {filteredDocuments.map((document) => {
-                const percent = clamp(progressByDocument.get(String(document.id)) || 0);
-                const active = String(document.id) === String(selectedDocumentId);
-                return <article className={"lr-document-row" + (active ? " is-selected" : "")} key={document.id}><button type="button" onClick={() => openSourceRoadmap(document)} aria-pressed={active}><span className="lr-document-icon">▤</span><span className="lr-document-copy"><strong>{document.title}</strong><small>{document.subject_code || document.subject_name || "Tài liệu"} · {(document.file_type || "FILE").toString().replace(/^\./, "").toUpperCase()}</small><span className="lr-mini-progress"><i style={{ width: percent + "%" }} /></span><small>{percent}% đã đọc</small></span><ArrowRightIcon aria-hidden="true" /></button></article>;
-              })}
-              {!filteredDocuments.length && <p className="lr-empty">{documents.length ? "Không tìm thấy tài liệu phù hợp." : "Kho tài liệu đang trống."}</p>}
-            </div>
-            <div className="lr-source-note"><span>📄</span><p>Chủ đề hiển thị được trích từ heading và nội dung thật của tài liệu.</p></div>
-          </aside>
-
-          <section className="lr-source-workspace" aria-label="Lộ trình theo tài liệu">
-            {!selectedDocument ? <div className="lr-workspace-empty"><span>◈</span><h2>Chọn tài liệu để mở hành trình</h2><p>Node học bám theo tiêu đề và đoạn văn có trong nguồn đã chọn.</p></div>
-              : sourceBusy ? <div className="lr-workspace-empty" role="status"><span className="lr-spinner" /><h2>Đang đọc tài liệu</h2><p>Đang lấy văn bản gốc để dựng các mốc học.</p></div>
-                : sourceError ? <div className="lr-workspace-empty"><span>!</span><h2>Không đọc được tài liệu</h2><p>{sourceError}</p><button type="button" className="lr-button" onClick={() => openSourceRoadmap(selectedDocument)}>Thử lại</button></div>
-                  : sourceSections.length ? <>
-                    <div className="lr-source-heading"><div><span className="lr-eyebrow">📄 SOURCE CONTENT · {selectedDocument.file_name || selectedDocument.original_filename || "TÀI LIỆU"}</span><h2>{selectedDocument.title}</h2><p>{sourceSections.length} mốc từ văn bản trích xuất · Chỉ nội dung có trong nguồn</p></div><div className="lr-overall"><strong>{sourceCompletion}%</strong><span>đã hoàn thành</span><i><b style={{ width: sourceCompletion + "%" }} /></i></div></div>
-                    <div className="lr-source-layout">
-                      <div className="lr-source-path" aria-label="Các mốc từ tài liệu"><div className="lr-path-line" />
-                        {sourceSections.map((section, index) => {
-                          const done = Boolean(sourceDone[String(selectedDocumentId) + ":" + section.id]);
-                          const locked = index > 0 && !sourceDone[String(selectedDocumentId) + ":" + sourceSections[index - 1].id];
-                          const selected = selectedSourceIndex === index;
-                          return <button type="button" className={"lr-source-node" + (done ? " is-done" : "") + (locked ? " is-locked" : "") + (selected ? " is-current" : "")} key={section.id} onClick={() => setSelectedSourceIndex(index)} aria-pressed={selected}><span className="lr-node-orb">{done ? <CheckIcon aria-hidden="true" /> : String(index + 1).padStart(2, "0")}</span><span className="lr-source-node-copy"><small>{section.sourceOnly ? "DOCUMENT SOURCE" : "SOURCE · " + String(index + 1).padStart(2, "0")}</small><strong>{section.title}</strong><em>{done ? "Hoàn thành" : locked ? "Đang khóa" : selected ? "Đang học" : "Sẵn sàng"}</em></span></button>;
-                        })}
-                        <div className="lr-path-end">END OF SOURCE</div>
-                      </div>
-                      <aside className="lr-detail-panel" aria-live="polite">
-                        {selectedSource ? <>
-                          <div className="lr-detail-top"><span>DOCUMENT NODE</span><button type="button" onClick={() => setSelectedSourceIndex(-1)} aria-label="Đóng chi tiết"><XMarkIcon aria-hidden="true" /></button></div>
-                          <span className="lr-detail-index">{String(selectedSourceIndex + 1).padStart(2, "0")} / {String(sourceSections.length).padStart(2, "0")}</span><h3>{selectedSource.title}</h3>
-                          <span className="lr-source-pill">📄 From your document</span><h4>Nội dung trích từ nguồn</h4><p className="lr-source-excerpt">{selectedSource.excerpt || "Tiêu đề được trích trực tiếp từ tài liệu. Mở bản gốc để xem nội dung."}</p>
-                          {selectedSource.sourceLine && <small className="lr-source-line">Dòng nguồn {selectedSource.sourceLine}</small>}
-                          <div className="lr-detail-meta"><span><ClockIcon aria-hidden="true" /> Theo nhịp học của bạn</span><span>Tiên quyết: {selectedSourceIndex ? sourceSections[selectedSourceIndex - 1]?.title : "Không có"}</span></div>
-                          <div className="lr-detail-actions"><button type="button" className="lr-button lr-button-primary" disabled={selectedSourceIndex > 0 && !sourceDone[String(selectedDocumentId) + ":" + sourceSections[selectedSourceIndex - 1]?.id]} onClick={completeSourceNode}>{sourceDone[selectedSourceKey] ? "Đánh dấu chưa hoàn thành" : "Hoàn tất mốc"}<CheckIcon aria-hidden="true" /></button>{onOpenDocument && <button type="button" className="lr-button" onClick={() => onOpenDocument(selectedDocument)}>Mở tài liệu</button>}{onTakeQuiz && <button type="button" className="lr-button lr-button-quiet" onClick={() => onTakeQuiz(selectedDocument)}>Tạo Quiz từ tài liệu</button>}</div>
-                        </> : <div className="lr-detail-blank"><span>◉</span><p>Chọn một node để xem nội dung nguồn và các thao tác học.</p></div>}
-                      </aside>
+          {/* Checklist Card */}
+          <div className="lr-loading-card">
+            <ul className="lr-checklist">
+              {STAGES.map((stageName, index) => {
+                const isDone = loadingProgress >= 100 || index < currentLoadingStage;
+                const isActive = !isDone && index === currentLoadingStage;
+                return (
+                  <li
+                    key={stageName}
+                    className={`lr-check-item ${isDone ? "is-done" : isActive ? "is-active" : "is-pending"}`}
+                  >
+                    <div className="lr-check-left">
+                      <span className="lr-check-circle">
+                        {isDone ? (
+                          <Check size={14} strokeWidth={3} />
+                        ) : isActive ? (
+                          <span className="lr-pulse-dot" />
+                        ) : null}
+                      </span>
+                      <span className="lr-check-label">{stageName}</span>
                     </div>
-                  </> : <div className="lr-workspace-empty"><span>⌁</span><h2>Văn bản chưa có heading nhận diện được</h2><p>Không tự suy diễn chủ đề. Bạn vẫn có thể mở tài liệu gốc hoặc tạo Quiz từ nội dung đã tải lên.</p><div className="lr-empty-actions">{onOpenDocument && <button type="button" className="lr-button" onClick={() => onOpenDocument(selectedDocument)}>Mở tài liệu</button>}{onTakeQuiz && <button type="button" className="lr-button lr-button-primary" onClick={() => onTakeQuiz(selectedDocument)}>Tạo Quiz</button>}</div></div>}
-          </section>
+                    <span className="lr-check-status">
+                      {isDone ? "Hoàn tất" : isActive ? "Đang xử lý..." : ""}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+
+          {/* Smooth Progress Bar */}
+          <div className="lr-loading-progress-box">
+            <div
+              className="lr-loading-progress-track"
+              role="progressbar"
+              aria-label="Tiến độ tạo lộ trình"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(loadingProgress)}
+            >
+              <div
+                className="lr-loading-progress-fill"
+                style={{ width: `${Math.min(100, Math.floor(loadingProgress))}%` }}
+              />
+            </div>
+            <div className="lr-loading-progress-label">
+              <span>Tiến trình hoàn thiện</span>
+              <strong>{Math.min(100, Math.floor(loadingProgress))}%</strong>
+            </div>
+          </div>
+
+          {/* Security Notice */}
+          <p className="lr-security-note">
+            <ShieldCheck size={16} /> {demoMode ? "Bản demo · Mô phỏng quá trình phân tích của Nova." : "Nova đang kết nối nội dung từ tài liệu đã chọn."}
+          </p>
         </div>
       ) : (
-        <div className="lr-career-mode">
-          <aside className="lr-career-setup"><span className="lr-eyebrow">BUILD YOUR PATH</span><h2>Chọn điểm đến</h2><p>Lộ trình tạo theo chuyên ngành, trình độ và thời gian học của bạn.</p>
-            <form onSubmit={generateCareerRoadmap}>
-              <label>Chuyên ngành<select value={field} onChange={(event) => { const next = FIELDS.find((item) => item.name === event.target.value); setField(event.target.value); if (next) setGoal(next.goal); }}>{FIELDS.map((item) => <option value={item.name} key={item.name}>{item.name}</option>)}</select></label>
-              <label>Trình độ hiện tại<select value={currentLevel} onChange={(event) => setCurrentLevel(event.target.value)}>{LEVELS.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></label>
-              <label>Mục tiêu nghề nghiệp<input value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="Ví dụ: Backend Developer" maxLength={200} /></label>
-              <div className="lr-level-pair"><label>Đích đến<select value={targetLevel} onChange={(event) => setTargetLevel(event.target.value)}>{LEVELS.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select></label><label>Giờ / tuần<input type="number" min="2" max="40" value={weeklyHours} onChange={(event) => setWeeklyHours(event.target.value)} /></label></div>
-              <button className="lr-button lr-button-primary lr-generate" type="submit" disabled={busy === "generate"}>{busy === "generate" ? <><span className="lr-spinner" />Nova đang tạo...</> : <><SparklesIcon aria-hidden="true" />Tạo lộ trình AI</>}</button>
-            </form>
-            <div className="lr-ai-note"><span>✳</span><p>Kết quả quiz đã chấm trong cùng chuyên ngành giúp nhận diện điểm mạnh và phần cần ôn.</p></div>
-          </aside>
+        <>
+          {/* Back Button for Steps */}
+          {currentStep !== "overview" && (
+            <button
+              className="lr-back-link"
+              disabled={Boolean(busy)}
+              onClick={() => {
+                setError("");
+                if (currentStep === "step2_set_goals") {
+                  setCurrentStep("step1_select_docs");
+                } else {
+                  setCurrentStep("overview");
+                }
+              }}
+            >
+              <ArrowLeft size={16} />
+              {currentStep === "step2_set_goals"
+                ? "Quay lại chọn tài liệu"
+                : "Quay lại lộ trình"}
+            </button>
+          )}
 
-          <section className="lr-career-workspace" aria-label="Lộ trình theo chuyên ngành">
-            {!careerIsLoaded ? <div className="lr-workspace-empty" role="status"><span className="lr-spinner" /><h2>Đang tải hành trình</h2><p>Đang đồng bộ lộ trình và điểm luyện tập đã lưu.</p></div>
-              : careerRoadmap ? <>
-                <header className="lr-career-heading"><div><span className="lr-eyebrow">✳ AI PERSONALIZED PATH · {careerRoadmap.subject}</span><h2>{careerRoadmap.title}</h2><p>{careerRoadmap.summary || careerRoadmap.goal}</p><div className="lr-goal-tags"><span>{levelLabel(careerRoadmap.current_level)} → {levelLabel(careerRoadmap.target_level)}</span><span>{careerRoadmap.goal}</span></div></div><div className="lr-overall lr-overall-career"><strong>{careerMastery}%</strong><span>MASTERY</span><i><b style={{ width: careerMastery + "%" }} /></i><small>{gradedCount}/{careerRoadmap.exercises?.length || 0} bài đã chấm</small></div></header>
-                {careerRoadmap.adaptation_note && <p className="lr-adaptation"><SparklesIcon aria-hidden="true" />{careerRoadmap.adaptation_note}</p>}
-                <div className="lr-career-layout">
-                  <div className="lr-career-path" aria-label="Các cấp độ trong lộ trình">
-                    {careerRoadmap.modules.map((module, moduleIndex) => {
-                      const moduleRows = lessonRows.filter((row) => row.module.key === module.key);
-                      const moduleProgress = moduleRows.length ? Math.round(moduleRows.reduce((sum, row) => sum + lessonMastery(row), 0) / moduleRows.length) : 0;
-                      return <section className="lr-level" key={module.key}>
-                        <div className="lr-level-heading"><span>LEVEL {String(moduleIndex + 1).padStart(2, "0")}</span><div><h3>{module.title}</h3><small>{levelLabel(module.difficulty)} · {moduleRows.length} checkpoints</small></div><b>{moduleProgress}%</b></div>
-                        <div className="lr-branch">{moduleRows.map((row, nodeIndex) => {
-                          const mastery = lessonMastery(row);
-                          const globalIndex = lessonRows.findIndex((item) => item.lesson.key === row.lesson.key);
-                          const locked = globalIndex > 0 && lessonRows.slice(0, globalIndex).some((item) => lessonMastery(item) < 60);
-                          const status = mastery >= 95 ? "mastered" : mastery >= 60 ? "familiar" : mastery > 0 ? "learning" : locked ? "locked" : "available";
-                          const selected = selectedLessonRow?.lesson.key === row.lesson.key;
-                          return <button type="button" className={"lr-career-node is-" + status + (selected ? " is-selected" : "")} key={row.lesson.key} onClick={() => { setSelectedLessonId(row.lesson.key); setActiveExerciseId(null); setGrade(null); setError(""); }} aria-pressed={selected}><span className="lr-node-orb">{status === "mastered" ? <CheckIcon aria-hidden="true" /> : locked ? "▣" : String(nodeIndex + 1).padStart(2, "0")}</span><span className="lr-career-node-copy"><small>{status === "locked" ? "LOCKED" : status === "available" ? "AVAILABLE" : masteryLabel(mastery).toUpperCase()}</small><strong>{row.lesson.title}</strong><em><i style={{ width: mastery + "%" }} />{mastery}%</em></span><ArrowRightIcon aria-hidden="true" /></button>;
-                        })}</div>
-                      </section>;
-                    })}
-                    <div className="lr-path-end">CAREER GOAL · {careerRoadmap.goal}</div>
+          {/* Header Hero Banner (Overview & Roadmap View) or Stepper Header (Wizard Steps) */}
+          {currentStep.startsWith("step") ? (
+            <header className="lr-view-header">
+              <div className="lr-wizard-title-block">
+                <div className="lr-nova-avatar-icon">
+                  <Sparkles size={20} />
+                </div>
+                <div>
+                  <span className="lr-eyebrow">NOVA ROADMAP</span>
+                  <h1 className="lr-page-title" id="learning-roadmap-title">
+                    {currentStep === "step1_select_docs"
+                      ? "Tạo lộ trình học"
+                      : "Thiết lập kế hoạch học"}
+                  </h1>
+                  <p className="lr-page-desc">
+                    {currentStep === "step1_select_docs"
+                      ? "Chọn tài liệu bạn muốn học, Nova sẽ giúp bạn xây dựng một lộ trình phù hợp."
+                      : "Cho Nova biết mục tiêu và quỹ thời gian của bạn."}
+                  </p>
+                </div>
+              </div>
+            </header>
+          ) : currentStep === "roadmap_view" ? (
+            <header className="lr-document-header" aria-labelledby="learning-roadmap-title">
+              <div className="lr-document-heading">
+                <RoadmapLogo size="sm" interactive eager className="lr-banner-logo" />
+                <div>
+                <span className="lr-badge"><Sparkles size={15} /> LỘ TRÌNH TỪ TÀI LIỆU</span>
+                <h1 id="learning-roadmap-title">{roadmapTitle}</h1>
+                <p>{`Lộ trình được tạo từ ${roadmapDocuments.length} tài liệu của bạn`}</p>
+                </div>
+              </div>
+              <button className="lr-btn lr-btn-primary" {...roadmapLock} onClick={beginWizard}><Plus size={18} /> Tạo lộ trình mới</button>
+            </header>
+          ) : null}
+
+          {/* Error Banner */}
+          {error && (
+            <div className="lr-error-banner" role="alert">
+              <span>{error}</span>
+              {currentStep === "overview" && (
+                <button
+                  className="lr-btn lr-btn-secondary"
+                  onClick={() => {
+                    setError("");
+                    setLoaded(false);
+                    setLoadAttempt((v) => v + 1);
+                  }}
+                >
+                  Thử lại
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Stepper for Wizard */}
+          {currentStep.startsWith("step") && (
+            <div className="lr-stepper" aria-label="Tiến trình tạo lộ trình">
+              {[
+                { num: 1, label: "Chọn tài liệu" },
+                { num: 2, label: "Thiết lập mục tiêu" },
+                { num: 3, label: "Nhận lộ trình", kicker: "HOÀN TẤT" },
+              ].map((stepItem, index) => {
+                const activeIndex = currentStep === "step1_select_docs" ? 0 : 1;
+                const isPast = index < activeIndex;
+                const isCurrent = index === activeIndex;
+                return (
+                  <div
+                    key={stepItem.label}
+                    className={`lr-step-node ${isPast ? "is-done" : isCurrent ? "is-active" : "is-upcoming"}`}
+                  >
+                    <div className="lr-step-circle">
+                      {isPast ? <Check size={14} strokeWidth={3} /> : stepItem.num}
+                    </div>
+                    <div className="lr-step-info">
+                      <small>{stepItem.kicker || `BƯỚC ${stepItem.num}`}</small>
+                      <strong>{stepItem.label}</strong>
+                    </div>
+                    {index < 2 && <div className={`lr-step-line ${index < activeIndex ? "is-done" : ""}`} />}
                   </div>
-                  <aside className="lr-detail-panel lr-career-detail" aria-live="polite">
-                    {selectedLessonRow ? <>
-                      <div className="lr-detail-top"><span>LEARNING CHECKPOINT</span><span className={"lr-difficulty is-" + selectedLessonRow.module.difficulty}>{levelLabel(selectedLessonRow.module.difficulty)}</span></div>
-                      <span className="lr-detail-index">{String(selectedLessonIndex + 1).padStart(2, "0")} / {String(lessonRows.length).padStart(2, "0")}</span><h3>{selectedLessonRow.lesson.title}</h3>
-                      <div className="lr-detail-meta"><span><ClockIcon aria-hidden="true" /> ~{selectedLessonRow.lesson.estimated_minutes} phút</span><span>Mastery: {lessonMastery(selectedLessonRow)}% · {masteryLabel(lessonMastery(selectedLessonRow))}</span></div>
-                      {selectedPrevious && <p className="lr-prerequisite">Tiên quyết · {selectedPrevious.lesson.title}</p>}
-                      {selectedLessonRow.lesson.objectives?.length ? <><h4>Bạn sẽ học</h4><ul className="lr-objectives">{selectedLessonRow.lesson.objectives.map((item) => <li key={item}>{item}</li>)}</ul></> : <p className="lr-empty-inline">Chưa có mục tiêu chi tiết cho node này.</p>}
-                      {selectedLessonRow.lesson.examples?.length > 0 && <p className="lr-example">Ví dụ · {selectedLessonRow.lesson.examples[0]}</p>}
-                      {isLessonLocked && <p className="lr-locked-note">Đạt mastery 60% ở checkpoint trước để mở node này.</p>}
-                      <div className="lr-exercise-actions"><button type="button" className="lr-button lr-button-primary" disabled={isLessonLocked || !practiceExercise} onClick={() => startExercise(practiceExercise)}>Bắt đầu học <ArrowRightIcon aria-hidden="true" /></button><button type="button" className="lr-button" disabled={isLessonLocked || !quizExercise} onClick={() => startExercise(quizExercise)}>Làm Quiz</button></div>
-                      {activeExercise && <form className="lr-exercise" onSubmit={sendExercise}>
-                        <div className="lr-exercise-top"><span>{activeExercise.exercise_type === "multiple_choice" ? "QUIZ" : "PRACTICE"}</span><button type="button" onClick={() => startExercise(null)} aria-label="Đóng bài luyện"><XMarkIcon aria-hidden="true" /></button></div><p>{activeExercise.prompt}</p>
-                        {activeExercise.options?.length ? <div className="lr-exercise-options">{activeExercise.options.map((option, index) => <label key={String(activeExercise.id) + "-" + index} className={answer === option ? "is-selected" : ""}><input type="radio" name={"exercise-" + activeExercise.id} checked={answer === option} onChange={() => setAnswer(option)} /><span>{option}</span></label>)}</div> : activeExercise.exercise_type === "math" ? <input inputMode="decimal" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Nhập đáp án" /> : <textarea rows="3" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Viết câu trả lời của bạn..." />}
-                        {grade && <div className="lr-grade-result" role="status"><strong>{grade.percentage}% · {grade.grade}</strong><span>{grade.feedback}</span></div>}
-                        <button type="submit" className="lr-button lr-button-primary" disabled={!answer.trim() || busy === "grade"}>{busy === "grade" ? "Đang chấm..." : "Nộp bài"}</button>
-                      </form>}
-                    </> : <div className="lr-detail-blank"><span>◉</span><p>Chọn một checkpoint trên hành trình để xem chi tiết.</p></div>}
+                );
+              })}
+            </div>
+          )}
+
+          {/* ==================== STEP 1: CHỌN MÔN & TÀI LIỆU ==================== */}
+          {currentStep === "step1_select_docs" && (
+            <div className="lr-wizard-card">
+              {/* Block 1: Choose Subject */}
+              <div className="lr-card-section">
+                <div className="lr-section-title-wrap">
+                  <span className="lr-number-pill">1</span>
+                  <div>
+                    <h2 className="lr-section-title">Bạn muốn học từ tài liệu nào?</h2>
+                    <p className="lr-section-sub">Chọn tài liệu trong Kho học liệu hoặc tải tài liệu mới lên.</p>
+                  </div>
+                </div>
+
+                <div className="lr-select-wrap">
+                  <select
+                    className="lr-custom-select"
+                    aria-label="Môn học"
+                    value={activeSubjectKey}
+                    onChange={(e) => {
+                      setSelectedSubject(e.target.value);
+                      setSelectedDocIds([]);
+                      setSearch("");
+                    }}
+                  >
+                    {subjectOptions.map((item) => (
+                      <option key={item.key} value={item.key}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="lr-select-caret" size={18} />
+                </div>
+              </div>
+
+              <div className="lr-divider" />
+
+              {/* Block 2: Choose Documents */}
+              <div className="lr-card-section">
+                <div className="lr-section-title-wrap lr-space-between">
+                  <div className="lr-title-inner">
+                    <span className="lr-number-pill">2</span>
+                    <div>
+                      <h2 className="lr-section-title">Chọn tài liệu</h2>
+                      <p className="lr-section-sub">Chỉ hiển thị tài liệu thuộc môn học đã chọn</p>
+                    </div>
+                  </div>
+                  {onUpload && (
+                    <button
+                      className="lr-btn lr-btn-outline"
+                      type="button"
+                      {...uploadLock}
+                      onClick={() => onUpload(subject?.code || "", (uploaded) => {
+                        setUploadedDocument(uploaded);
+                        setSelectedSubject(String(uploaded.subjectId));
+                        setSelectedDocIds((ids) => [...new Set([...ids, String(uploaded.id)])]);
+                        setSearch("");
+                      })}
+                    >
+                      <Upload size={16} /> Upload tài liệu mới
+                    </button>
+                  )}
+                </div>
+
+                {uploadedDocument && (
+                  <div className="lr-upload-success" role="status">
+                    <strong><CheckCircle2 size={16} /> Tài liệu đã được thêm vào Kho học liệu</strong>
+                    <label><input type="checkbox" checked={selectedDocIds.includes(String(uploadedDocument.id))} onChange={() => handleDocumentToggle(uploadedDocument.id)} /> Sử dụng tài liệu này để tạo lộ trình</label>
+                  </div>
+                )}
+
+                {/* Selected Subject Tag */}
+                <div className="lr-subject-banner">
+                  <div className="lr-subject-banner-left">
+                    <span className="lr-dot-green" />
+                    <span>
+                      Môn đang chọn: <strong>{subject?.name}</strong>
+                    </span>
+                  </div>
+                  <span className="lr-subject-banner-right">
+                    Bạn đang tạo lộ trình cho môn {subject?.name}.
+                  </span>
+                </div>
+
+                {/* Search Bar */}
+                <div className="lr-search-bar">
+                  <Search size={18} className="lr-search-icon" />
+                  <input
+                    type="text"
+                    aria-label="Tìm tài liệu"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Tìm kiếm tài liệu..."
+                  />
+                </div>
+
+                {/* Documents List & Aside Summary */}
+                <div className="lr-docs-layout">
+                  <div className="lr-docs-grid">
+                    {visibleDocuments.map((doc) => {
+                      const isSelected = selectedDocIds.includes(String(doc.id));
+                      const type = fileType(doc);
+                      return (
+                        <label
+                          key={doc.id}
+                          className={`lr-doc-item ${isSelected ? "is-selected" : ""}`}
+                        >
+                          <div className="lr-doc-checkbox">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleDocumentToggle(doc.id)}
+                              aria-label={`Chọn ${doc.title}`}
+                            />
+                            <span className="lr-custom-checkbox">
+                              {isSelected && <Check size={13} strokeWidth={3} />}
+                            </span>
+                          </div>
+
+                          <div className={`lr-doc-file-badge ${type === "PDF" ? "is-pdf" : "is-doc"}`}>
+                            <FileText size={18} />
+                            <small>{type}</small>
+                          </div>
+
+                          <div className="lr-doc-details">
+                            <h4 className="lr-doc-title">{doc.title}</h4>
+                            <span className="lr-doc-meta">
+                              {subject?.name} · {doc.chapter_count ? `${doc.chapter_count} chương · ` : ""}
+                              {type}
+                            </span>
+                          </div>
+
+                          {isSelected && <span className="lr-selected-badge">Đã chọn</span>}
+                        </label>
+                      );
+                    })}
+
+                    {!visibleDocuments.length && (
+                      <div className="lr-empty-docs">
+                        <BookOpen size={32} />
+                        <p>
+                          {subjectDocuments.length
+                            ? "Không tìm thấy tài liệu phù hợp từ khóa."
+                            : "Chưa có tài liệu nào thuộc môn học này. Hãy tải lên tài liệu mới."}
+                        </p>
+                      </div>
+                    )}
+
+                    {selectedDocuments.length > 0 && (
+                      <div className="lr-docs-match-note">
+                        <CheckCircle2 size={16} /> Các tài liệu đều thuộc môn {subject?.name}.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Aside Summary */}
+                  <aside className="lr-summary-aside">
+                    <span className="lr-summary-kicker">LỘ TRÌNH MỚI</span>
+                    <h3 className="lr-summary-heading">Tóm tắt lựa chọn</h3>
+                    <dl className="lr-summary-list">
+                      <div>
+                        <dt>MÔN HỌC</dt>
+                        <dd>{subject?.name || "Chưa chọn môn"}</dd>
+                      </div>
+                      <div>
+                        <dt>TÀI LIỆU</dt>
+                        <dd>{selectedDocuments.length} tài liệu</dd>
+                      </div>
+                    </dl>
+                    {selectedDocuments.length > 0 && (
+                      <div className="lr-summary-check">
+                        <CheckCircle2 size={15} /> Tất cả cùng môn học
+                      </div>
+                    )}
                   </aside>
                 </div>
-              </> : <div className="lr-career-empty"><div className="lr-pixel-guide" aria-hidden="true">🧑‍🚀</div><span className="lr-eyebrow">READY WHEN YOU ARE</span><h2>Chọn chuyên ngành, bắt đầu hành trình</h2><p>Lộ trình sẽ được AI tạo theo mục tiêu, trình độ và thời gian học mỗi tuần của bạn.</p></div>}
-          </section>
-        </div>
-      )}
+              </div>
 
-      <footer className="lr-achievements">
-        <div className="lr-achievement-head"><div><span className="lr-eyebrow">PLAYER PROFILE</span><h2>Thành tích hành trình</h2></div><span>LV {String(playerLevel).padStart(2, "0")} · {xp.toLocaleString("vi-VN")} XP</span></div>
-        <div className="lr-xp-track" role="progressbar" aria-label="Tiến độ cấp độ" aria-valuenow={xp % 250} aria-valuemin="0" aria-valuemax="250"><i style={{ width: ((xp % 250) * 100 / 250) + "%" }} /></div>
-        <div className="lr-badges">{badges.map((badge) => <span className={badge.earned ? "is-earned" : ""} key={badge.title}><i>{badge.icon}</i><b>{badge.title}</b>{badge.earned && <CheckIcon aria-label="Đã đạt" />}</span>)}</div>
-        <div className="lr-pixel-guide"><span aria-hidden="true">🧑‍🚀</span><p><strong>{careerMastery >= 95 ? "Hành trình xuất sắc!" : careerMastery >= 60 ? "Bạn đang giữ nhịp tốt." : "Mỗi node là một bước tiến."}</strong><small> {careerMastery >= 60 ? "Cứ tiếp tục nhé!" : "Nova đồng hành cùng bạn."}</small></p></div>
-      </footer>
-    </section>
+              {/* Bottom Action Footer */}
+              <footer className="lr-card-footer-bar">
+                <div className="lr-footer-count">
+                  <span className="lr-footer-number-circle">{selectedDocuments.length}</span>
+                  <div>
+                    <strong>{selectedDocuments.length} tài liệu được chọn</strong>
+                    <small>Các tài liệu đều thuộc môn {subject?.name}.</small>
+                  </div>
+                </div>
+                <button
+                  className="lr-btn lr-btn-primary lr-btn-continue"
+                  disabled={!selectedDocuments.length}
+                  onClick={() => {
+                    setError("");
+                    setCurrentStep("step2_set_goals");
+                  }}
+                >
+                  Tiếp tục
+                </button>
+              </footer>
+            </div>
+          )}
+
+          {/* ==================== STEP 2: THIẾT LẬP MỤC TIÊU & THỜI GIAN ==================== */}
+          {currentStep === "step2_set_goals" && (
+            <form className="lr-wizard-card" onSubmit={generateRoadmap}>
+              {/* Block 1: Goals */}
+              <div className="lr-card-section">
+                <div className="lr-section-title-wrap">
+                  <span className="lr-number-pill">2</span>
+                  <div>
+                    <h2 className="lr-section-title">Mục tiêu của bạn</h2>
+                    <p className="lr-section-sub">Bạn có thể chọn nhiều mục tiêu</p>
+                  </div>
+                </div>
+
+                <div className="lr-goals-grid">
+                  {GOALS.map((goal) => {
+                    const isChecked = selectedGoals.includes(goal);
+                    return (
+                      <label
+                        key={goal}
+                        className={`lr-goal-pill ${isChecked ? "is-selected" : ""}`}
+                      >
+                        <div className="lr-goal-check-box">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleGoalToggle(goal)}
+                            aria-label={goal}
+                          />
+                          {isChecked ? <Check size={14} strokeWidth={3} /> : <span className="lr-empty-circle" />}
+                        </div>
+                        <span className="lr-goal-text">{goal}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="lr-divider" />
+
+              {/* Block 2: Time Inputs (3 columns) */}
+              <div className="lr-card-section">
+                <div className="lr-time-columns">
+                  <div className="lr-input-box">
+                    <label>Thời gian còn lại</label>
+                    <div className="lr-input-unit-wrap">
+                      <input
+                        type="number"
+                        min={1}
+                        max={104}
+                        aria-label="Thời gian còn lại"
+                        value={weeks}
+                        onChange={(e) => setWeeks(e.target.value)}
+                        required
+                      />
+                      <span className="lr-unit">tuần</span>
+                    </div>
+                  </div>
+
+                  <div className="lr-input-box">
+                    <label>Thời gian học mỗi ngày</label>
+                    <div className="lr-input-unit-wrap">
+                      <input
+                        type="number"
+                        step={0.5}
+                        min={0.5}
+                        max={12}
+                        aria-label="Thời gian học mỗi ngày"
+                        value={dailyHours}
+                        onChange={(e) => setDailyHours(e.target.value)}
+                        required
+                      />
+                      <span className="lr-unit">giờ</span>
+                    </div>
+                  </div>
+
+                  <div className="lr-input-box">
+                    <label>Số ngày học mỗi tuần</label>
+                    <div className="lr-input-unit-wrap">
+                      <input
+                        type="number"
+                        min={1}
+                        max={7}
+                        aria-label="Số ngày học mỗi tuần"
+                        value={daysPerWeek}
+                        onChange={(e) => setDaysPerWeek(e.target.value)}
+                        required
+                      />
+                      <span className="lr-unit">ngày / tuần</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Calculation Summary Card */}
+                <div className="lr-time-calc-card lr-time-summary">
+                  <div className="lr-calc-left">
+                    <div className="lr-calc-calendar-icon">
+                      <CalendarDays size={22} />
+                    </div>
+                    <div>
+                      <span className="lr-calc-kicker">THỜI GIAN HỌC DỰ KIẾN</span>
+                      <p className="lr-calc-formula">
+                        {dailyHours || 0} giờ × {daysPerWeek || 0} ngày × {weeks || 0} tuần
+                      </p>
+                    </div>
+                  </div>
+                  <div className="lr-calc-right">
+                    <span className="lr-calc-total">= {validTime ? totalHours : "—"}</span>
+                    <small>giờ</small>
+                  </div>
+                </div>
+                <p className="lr-section-sub">Nova sẽ sử dụng thời gian này để phân bổ nội dung trong lộ trình.</p>
+                <label className="lr-demo-option"><input type="checkbox" checked={demoMode} onChange={(event) => setDemoMode(event.target.checked)} /> Chế độ demo — mô phỏng Nova trong vài giây</label>
+              </div>
+
+              {/* Footer */}
+              <footer className="lr-card-footer-bar">
+                <button
+                  type="button"
+                  className="lr-back-btn"
+                  onClick={() => setCurrentStep("step1_select_docs")}
+                >
+                  <ArrowLeft size={16} /> Quay lại
+                </button>
+                <button
+                  className="lr-btn lr-btn-primary lr-btn-start"
+                  type="submit"
+                  disabled={!permissions.personalizedRoadmap || !selectedGoals.length || !validTime || Boolean(busy)}
+                  title={roadmapLock.title}
+                >
+                  <Sparkles size={17} /> Tạo lộ trình với Nova
+                </button>
+              </footer>
+            </form>
+          )}
+
+          {/* ==================== OVERVIEW DASHBOARD ==================== */}
+          {currentStep === "overview" && (
+            <div className="lr-overview-layout">
+              <RoadmapBanner
+                hasRoadmap={Boolean(roadmap)}
+                completed={completed}
+                topics={lessonRows.length}
+                hours={roadmap ? formatHours(roadmapHours) : 0}
+                documents={roadmap ? roadmapDocuments.length : 0}
+                onCreate={beginWizard}
+                onUpload={onUpload}
+                canCreate={permissions.personalizedRoadmap}
+                canUpload={permissions.canUpload}
+              />
+
+              <div className="lr-section-header-row">
+                <div>
+                  <h2 className="lr-heading-2">Lộ trình hiện tại</h2>
+                  <p className="lr-sub-2">Tiếp tục hành trình bạn đang theo đuổi</p>
+                </div>
+                {documents.length > 0 && (
+                  <button
+                    className="lr-link-btn"
+                    onClick={() => setShowAll((v) => !v)}
+                  >
+                    {showAll ? "Thu gọn" : "Xem tất cả"} <ArrowRight size={15} />
+                  </button>
+                )}
+              </div>
+
+              {!loaded ? (
+                <div className="lr-loading-inline" role="status">
+                  <BookOpen size={18} aria-hidden="true" /> Đang tải dữ liệu lộ trình...
+                </div>
+              ) : roadmap ? (
+                <CurrentRoadmapCard
+                  disabled={!permissions.personalizedRoadmap}
+                  title={roadmapTitle}
+                  description={roadmapDescription}
+                  fileType={fileType(primaryDocument || {})}
+                  completed={completed}
+                  topics={lessonRows.length}
+                  documents={roadmapDocuments.length}
+                  completedHours={formatHours(completedHours)}
+                  totalHours={formatHours(roadmapHours)}
+                  remainingHours={formatHours(remainingHours)}
+                  percentage={overallProgress}
+                  streak={Number(streak.current_streak || 0)}
+                  progress={<ProgressBar value={overallProgress} label="Tiến độ học tập" />}
+                  onRename={(title) => updatePlan({ title })}
+                  onContinue={() => openLesson(nextLesson)}
+                />
+              ) : (
+                /* Empty State */
+                <div className="lr-empty-card">
+                  <RoadmapLogo size="md" interactive />
+                  <h2>Bạn chưa có lộ trình học nào</h2>
+                  <p>Chọn tài liệu từ Kho học liệu hoặc tải tài liệu mới lên để Nova tạo lộ trình cho bạn.</p>
+                  <button className="lr-btn lr-btn-primary" {...roadmapLock} onClick={beginWizard}>
+                    <Plus size={18} /> Tạo lộ trình đầu tiên
+                  </button>
+                </div>
+              )}
+
+              {/* Show All Source Docs */}
+              {showAll && (
+                <section className="lr-all-sources-section">
+                  <h3 className="lr-sources-title">Kho tài liệu của bạn</h3>
+                  <div className="lr-quick-grid">
+                    {documents.map((doc) => (
+                      <button
+                        type="button"
+                        className="lr-quick-card"
+                        key={doc.id}
+                        onClick={() => setSourceDocument(doc)}
+                      >
+                        <div className="lr-quick-icon">
+                          <FileText size={18} />
+                        </div>
+                        <div className="lr-quick-info">
+                          <strong>{doc.title}</strong>
+                          <small>
+                            {doc.subject_name} · {fileType(doc)}
+                          </small>
+                        </div>
+                        <ArrowRight size={15} />
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Quick Section: Học nhanh hôm nay */}
+              {roadmap && (
+                <section className="lr-quick-study-section">
+                  <div className="lr-section-header-row">
+                    <div>
+                      <h2 className="lr-heading-2">Học nhanh hôm nay</h2>
+                      <p className="lr-sub-2">Một chút tiến bộ, mỗi ngày</p>
+                    </div>
+                  </div>
+                  <div className="lr-quick-grid">
+                    {lessonRows
+                      .filter((row, idx) => !locked(idx) && lessonMastery(row) < 60)
+                      .slice(0, 3)
+                      .map((row) => (
+                        <button
+                          type="button"
+                          className="lr-quick-card"
+                          key={row.lesson.key}
+                          onClick={() => openLesson(row)}
+                        >
+                          <div className="lr-quick-icon is-mint">
+                            <BookOpen size={18} />
+                          </div>
+                          <div className="lr-quick-info">
+                            <strong>{row.lesson.title}</strong>
+                            <small>
+                              {row.module.title} · {row.lesson.estimated_minutes} phút
+                            </small>
+                          </div>
+                          <ArrowRight size={15} />
+                        </button>
+                      ))}
+                    {overallProgress >= 100 && (
+                      <p className="lr-finished-note">🎉 Bạn đã hoàn thành toàn bộ lộ trình này!</p>
+                    )}
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+
+          {/* ==================== ROADMAP STUDY VIEW ==================== */}
+          {currentStep === "roadmap_view" && roadmap && (
+            <div className="lr-study-view">
+              <div className="lr-schedule-overview">
+                <span><Clock3 size={19} /><b>{roadmapHours}</b> giờ học</span>
+                <span><CalendarDays size={19} /><b>{currentPlan?.weeks || 8}</b> tuần</span>
+                <span><BookOpen size={19} /><b>{currentPlan?.daysPerWeek || 5}</b> ngày / tuần</span>
+                <span><Sparkles size={19} /><b>{currentPlan?.dailyHours || 2}</b> giờ / ngày</span>
+              </div>
+              {roadmap.demo && <p className="lr-demo-note">Bản demo · Chủ đề lấy từ đề mục tài liệu; quá trình phân tích Nova được mô phỏng.</p>}
+              <div className="lr-progress-header">
+                <strong>
+                  {formatHours(completedHours)} / {roadmapHours} giờ · {completed} / {lessonRows.length} chủ đề
+                </strong>
+                <span>{overallProgress}%</span>
+              </div>
+              <ProgressBar value={overallProgress} label="Tiến độ lộ trình" />
+
+              {roadmap.adaptation_note && (
+                <p className="lr-adaptation-badge">
+                  <Sparkles size={16} /> {roadmap.adaptation_note}
+                </p>
+              )}
+
+              <div className="lr-study-layout">
+                <ol className="lr-timeline" aria-label="Các chủ đề trong lộ trình">
+                  {lessonRows.map((row, index) => {
+                    const score = lessonMastery(row);
+                    const isDone = score >= 60;
+                    const isLocked = locked(index);
+                    const isStarted = !isDone && !isLocked && (score > 0 || currentPlan?.started?.[row.lesson.key]);
+                    const start = lessonRows.slice(0, index).reduce((sum, item) => sum + topicHours(item), 0);
+                    const duration = topicHours(row);
+                    return (
+                      <li key={row.lesson.key} className={`lr-timeline-node ${isDone ? "is-done" : isStarted ? "is-current" : isLocked ? "is-locked" : "is-ready"}`}>
+                        <span className="lr-timeline-dot" aria-hidden="true">{isDone ? <Check size={18} /> : isLocked ? <LockKeyhole size={16} /> : String(index + 1).padStart(2, "0")}</span>
+                        <button type="button" {...roadmapLock} className={`lr-topic-card lr-lesson-btn lr-lesson ${selectedLesson === row ? "is-selected" : ""}`} aria-pressed={selectedLesson === row} onClick={() => openLesson(row)}>
+                          <span className="lr-topic-top"><span>STEP {String(index + 1).padStart(2, "0")}</span><span>{isDone ? "Hoàn thành" : isLocked ? "Đã khóa" : isStarted ? "Đang học" : "Chưa bắt đầu"}</span></span>
+                          <strong>{row.lesson.title}</strong>
+                          <span className="lr-topic-range"><Clock3 size={14} /> {formatHours(start)} – {formatHours(start + duration)} giờ · {formatHours(duration)} giờ học</span>
+                          <span className="lr-topic-description">{row.lesson.source?.excerpt?.slice(0, 150) || row.lesson.objectives?.[0]}</span>
+                          <span className="lr-topic-source"><FileText size={14} /> {row.lesson.source?.documentTitle || "Tài liệu đã chọn"}</span>
+                          {isStarted && <ProgressBar value={score} label={`Tiến độ ${row.lesson.title}`} />}
+                          {!isLocked && !isDone && <span className="lr-topic-link">{isStarted ? "Tiếp tục học" : "Bắt đầu học"} <ArrowRight size={15} /></span>}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+
+                {/* Lesson Detail Sidebar */}
+                <aside className="lr-study-detail-sidebar lr-detail">
+                  {selectedLesson && (
+                    <div className="lr-detail-inner-card">
+                      <span className="lr-eyebrow">
+                        CHỦ ĐỀ {selectedLessonIndex + 1} / {lessonRows.length}
+                      </span>
+                      <h2 className="lr-lesson-detail-title">{selectedLesson.lesson.title}</h2>
+                      <p className="lr-time-estimate">
+                        <Clock3 size={15} /> {formatHours(topicHours(selectedLesson) * (lessonMastery(selectedLesson) >= 60 ? 1 : lessonMastery(selectedLesson) / 100))} / {formatHours(topicHours(selectedLesson))} giờ · {lessonMastery(selectedLesson)}%
+                      </p>
+                      <ProgressBar value={lessonMastery(selectedLesson)} label="Tiến độ chủ đề" />
+
+                      {selectedLesson.lesson.objectives?.length > 0 && (
+                        <div className="lr-objectives-block">
+                          <h4>Mục tiêu học</h4>
+                          <ul>
+                            {selectedLesson.lesson.objectives.map((obj, i) => (
+                              <li key={i}>{obj}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {selectedLesson.lesson.examples?.length > 0 && (
+                        <div className="lr-example-snippet">
+                          <code>{selectedLesson.lesson.examples[0]}</code>
+                        </div>
+                      )}
+
+                      {locked(selectedLessonIndex) && (
+                        <p className="lr-locked-warning">
+                          <LockKeyhole size={15} /> Đạt 60% ở các chủ đề trước để tiếp tục.
+                        </p>
+                      )}
+
+                      <div className="lr-exercise-btn-row">
+                        <button
+                          className="lr-btn lr-btn-primary"
+                          disabled={locked(selectedLessonIndex) || Boolean(busy)}
+                          onClick={() => {
+                            updatePlan({ started: { ...plan.started, [selectedLesson.lesson.key]: true } });
+                            const doc = roadmapDocuments.find((item) => String(item.id) === selectedLesson.lesson.source?.documentId) || roadmapDocuments[0];
+                            if (doc) setSourceDocument(doc);
+                          }}
+                        >
+                          Bắt đầu học
+                        </button>
+                        <button className="lr-btn lr-btn-outline" disabled={locked(selectedLessonIndex) || !onAskNova} onClick={() => onAskNova(roadmapDocuments.find((doc) => String(doc.id) === selectedLesson.lesson.source?.documentId) || roadmapDocuments[0])}><Sparkles size={16} /> Hỏi Nova</button>
+                        <button
+                          className="lr-btn lr-btn-secondary"
+                          disabled={
+                            locked(selectedLessonIndex) ||
+                            Boolean(busy) ||
+                            !selectedLesson.exercises.some((ex) => ex.exercise_type === "multiple_choice")
+                          }
+                          onClick={() =>
+                            startExercise(
+                              selectedLesson.exercises.find((ex) => ex.exercise_type === "multiple_choice")
+                            )
+                          }
+                        >
+                          Làm Quiz
+                        </button>
+                        <button className="lr-btn lr-btn-secondary" disabled={locked(selectedLessonIndex) || lessonMastery(selectedLesson) >= 60} onClick={markComplete}><Check size={16} /> Đánh dấu hoàn thành</button>
+                      </div>
+
+                      {/* Active Exercise Form */}
+                      {activeExercise && (
+                        <form className="lr-exercise-box" onSubmit={sendExercise}>
+                          <div className="lr-exercise-header">
+                            <strong>
+                              {activeExercise.exercise_type === "multiple_choice" ? "Quiz" : "Bài luyện tập"}
+                            </strong>
+                            <button
+                              type="button"
+                              className="lr-close-btn"
+                              aria-label="Đóng bài tập"
+                              onClick={() => startExercise(null)}
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+                          <p className="lr-exercise-prompt">{activeExercise.prompt}</p>
+
+                          {activeExercise.options?.length ? (
+                            <div className="lr-quiz-choices">
+                              {activeExercise.options.map((opt, i) => (
+                                <label key={i} className="lr-choice-label">
+                                  <input
+                                    type="radio"
+                                    name="roadmap-quiz-opt"
+                                    checked={answer === opt}
+                                    aria-label={opt}
+                                    onChange={() => setAnswer(opt)}
+                                    disabled={Boolean(busy)}
+                                  />
+                                  <span>{opt}</span>
+                                </label>
+                              ))}
+                            </div>
+                          ) : (
+                            <textarea
+                              rows={4}
+                              value={answer}
+                              onChange={(e) => setAnswer(e.target.value)}
+                              placeholder="Viết câu trả lời của bạn..."
+                              required
+                              disabled={Boolean(busy)}
+                            />
+                          )}
+
+                          {grade && (
+                            <div className="lr-grade-report lr-grade">
+                              <strong>
+                                {grade.percentage}% · {grade.grade}
+                              </strong>
+                              <p>{grade.feedback}</p>
+                            </div>
+                          )}
+
+                          <button
+                            className="lr-btn lr-btn-primary"
+                            type="submit"
+                            disabled={!answer.trim() || Boolean(busy)}
+                          >
+                            {busy === "grade" ? "Đang chấm..." : "Nộp bài"}
+                          </button>
+                        </form>
+                      )}
+
+                      {/* Sources for this roadmap */}
+                      {roadmapDocuments.length > 0 && (
+                        <div className="lr-detail-sources-block">
+                          <h4>Tài liệu nguồn</h4>
+                          {(selectedLesson.lesson.source ? roadmapDocuments.filter((doc) => String(doc.id) === selectedLesson.lesson.source.documentId) : roadmapDocuments).map((doc) => (
+                            <button
+                              type="button"
+                              className="lr-doc-link-btn"
+                              key={doc.id}
+                              onClick={() => setSourceDocument(doc)}
+                            >
+                              <FileText size={15} />
+                              <span>{doc.title}{selectedLesson.lesson.source?.sourceLine ? ` · Dòng ${selectedLesson.lesson.source.sourceLine}` : ""}</span>
+                              <ArrowRight size={14} />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </aside>
+              </div>
+            </div>
+          )}
+
+        </>
+      )}
+    </div>
   );
 }

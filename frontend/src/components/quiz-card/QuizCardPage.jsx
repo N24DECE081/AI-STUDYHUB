@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { BookOpen, Layers, ListChecks, Plus, RotateCcw, Sparkles } from 'lucide-react';
-import { deleteQuiz, getQuiz, getQuizHistory, renameFlashcardDeck, renameQuiz, startQuiz } from '../../api';
+import { deleteQuiz, getQuiz, getQuizHistory, renameFlashcardDeck, renameQuiz } from '../../api';
+import { mutateStudy } from '../../utils/studySync';
 import { normalizeFlashcardColor, rememberedCount } from '../flashcard/flashcardTheme';
-import QuizWorkspace from '../QuizWorkspace';
-import LearningCreateModal from './LearningCreateModal';
+import { planPermissions } from '../../utils/planPermissions';
 import LearningDialog from './LearningDialog';
 import './quiz-card.css';
 
+const QuizWorkspace = lazy(() => import('../QuizWorkspace'));
+const LearningCreateModal = lazy(() => import('./LearningCreateModal'));
+const loadingContent = <p role="status">Đang tải nội dung…</p>;
 const levels = {easy:'Dễ', medium:'Trung bình', hard:'Khó', mixed:'Hỗn hợp'};
 function Menu({ name, onRename, onDelete, onEdit }) {
   const choose = (event, action) => { event.currentTarget.closest('details').open = false; action(); };
@@ -15,7 +18,7 @@ function Menu({ name, onRename, onDelete, onEdit }) {
   </div></details>;
 }
 
-export default function QuizCardPage({ user, decks, decksLoading, onDeckSaved, onDeleteDeck, onStudy, onEdit, onManual, onLogin, onLibrary }) {
+export default function QuizCardPage({ user, subscription, decks, decksLoading, onDeckSaved, onDeleteDeck, onStudy, onEdit, onManual, onLogin, onLibrary }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(Boolean(user));
   const [error, setError] = useState('');
@@ -24,7 +27,25 @@ export default function QuizCardPage({ user, decks, decksLoading, onDeckSaved, o
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [quiz, setQuiz] = useState(null);
+  const [pendingQuiz, setPendingQuiz] = useState(null);
   const [reload, setReload] = useState(0);
+  const [subjectFilter, setSubjectFilter] = useState('');
+  const [difficultyFilter, setDifficultyFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const filteredItems = items.filter((item) =>
+    (!subjectFilter || String(item.subject_id ?? item.subject ?? '') === subjectFilter) &&
+    (!difficultyFilter || (item.difficulty || 'mixed') === difficultyFilter) &&
+    (!typeFilter || (item.question_type || 'multiple_choice') === typeFilter));
+  const quizSubjects = [...new Map(items.map((item) => [String(item.subject_id ?? item.subject ?? ''), item.subject || 'Chưa phân loại'])).entries()];
+  useEffect(() => {
+    const saved = (event) => {
+      if (event.detail.id === pendingQuiz?.key) {
+        setQuiz({ ...pendingQuiz.value, run: event.detail.result }); setPendingQuiz(null); setCreating(null); setError('');
+      }
+    };
+    window.addEventListener('studyhub:mutation-saved', saved);
+    return () => window.removeEventListener('studyhub:mutation-saved', saved);
+  }, [pendingQuiz]);
   useEffect(() => {
     let active = true;
     if (!user) return () => { active = false; };
@@ -35,12 +56,13 @@ export default function QuizCardPage({ user, decks, decksLoading, onDeckSaved, o
   }, [user, reload]);
   const refresh = () => { setError(''); setLoading(true); setReload((n) => n+1); };
   const create = (kind) => { if (!user) { onLogin(); return; } setError(''); setCreating(kind); };
-  const openQuiz = async (item, alreadyLoaded = false) => {
+  const openQuiz = async (item, alreadyLoaded = false, retake = false) => {
     if (busy) return;
     setBusy(true); setError('');
     try {
       const value = alreadyLoaded ? item : await getQuiz(item.id);
-      const run = await startQuiz(value.id);
+      const run = await mutateStudy('/quiz-attempts', { quizId: value.id, resume: !retake });
+      if (run.pending) { setPendingQuiz({ value, key: run.idempotencyKey }); setError('Chưa đồng bộ, sẽ thử lại khi có mạng.'); return false; }
       setQuiz({...value,run}); setCreating(null);return true;
     } catch { refresh();setError('Không mở được bài trắc nghiệm. Vui lòng thử lại.');return false; }
     finally { setBusy(false); }
@@ -59,7 +81,7 @@ export default function QuizCardPage({ user, decks, decksLoading, onDeckSaved, o
     } catch { setError('Không lưu được thay đổi. Vui lòng thử lại.'); }
     finally { setBusy(false); }
   };
-  if (quiz) return <div className="qc-page"><QuizWorkspace key={`${quiz.id}:${quiz.run.run_id}`} quiz={quiz} onBack={() => {setQuiz(null);refresh();}} onRetake={() => openQuiz(quiz,true)} /></div>;
+  if (quiz) return <div className="qc-page"><Suspense fallback={loadingContent}><QuizWorkspace key={`${quiz.id}:${quiz.run.attemptId}`} quiz={quiz} onBack={() => {setQuiz(null);refresh();}} onRetake={() => openQuiz(quiz,true,true)} /></Suspense></div>;
   return <section className="qc-page" aria-labelledby="quiz-title">
     <header className="qc-hero"><div><span className="qc-badge"><Layers size={15}/> 3D Flashcards & Lặp lại Ngắt quãng (Spaced Repetition)</span><h1 id="quiz-title">Bộ Thẻ Ôn Tập &<br/><span>Quiz Card Thông Minh</span></h1><p>Luyện tập 3D phản xạ nhanh. Tự động trích xuất các thuật ngữ then chốt từ tài liệu học tập hoặc tự tạo bộ ôn thi riêng theo môn học.</p>
       <div className="qc-hero-actions"><button className="btn btn-primary" onClick={() => create('flashcard')}><Plus size={18}/>Tạo bộ Flashcard</button><button className="btn qc-mint" onClick={() => create('quiz')}><Plus size={18}/>Tạo bài trắc nghiệm</button></div></div>
@@ -81,18 +103,26 @@ export default function QuizCardPage({ user, decks, decksLoading, onDeckSaved, o
       <button className="text-link qc-manual" onClick={() => user ? onManual() : onLogin()}>Hoặc tạo bộ thẻ thủ công / tải file mới</button>
     </section>
     <section className="qc-section" aria-labelledby="qc-quizzes-title"><header><div><span className="eyebrow">KIỂM TRA KIẾN THỨC</span><h2 id="qc-quizzes-title"><ListChecks/>Bài trắc nghiệm của bạn</h2><p>Kiểm tra kiến thức từ chính tài liệu bạn đang học.</p></div><button className="btn qc-mint" onClick={() => create('quiz')}><Plus size={17}/>Tạo bài trắc nghiệm</button></header>
-      {loading ? <p role="status">Đang tải bài trắc nghiệm…</p> : items.length ? <div className="qc-grid">{items.map((item) => <article className="qc-quiz" key={item.id}>
+      <form className="qc-create" aria-label="Lọc bài trắc nghiệm" onSubmit={(event) => event.preventDefault()}>
+        <div className="qc-form-grid">
+          <label>Chủ đề<select aria-label="Chủ đề" value={subjectFilter} onChange={(event) => setSubjectFilter(event.target.value)}><option value="">Tất cả chủ đề</option>{quizSubjects.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+          <label>Độ khó<select aria-label="Độ khó" value={difficultyFilter} onChange={(event) => setDifficultyFilter(event.target.value)}><option value="">Tất cả độ khó</option>{Object.entries(levels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>Loại câu hỏi<select aria-label="Loại câu hỏi" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option value="">Tất cả loại câu hỏi</option><option value="multiple_choice">Trắc nghiệm nhiều lựa chọn</option></select></label>
+        </div>
+        <small role="status">{filteredItems.length} bài trắc nghiệm phù hợp</small>
+      </form>
+      {loading ? <p role="status">Đang tải bài trắc nghiệm…</p> : filteredItems.length ? <div className="qc-grid">{filteredItems.map((item) => <article className="qc-quiz" key={item.id}>
         <div className="qc-card-top"><span className="qc-card-icon"><ListChecks size={22}/></span><Menu name={item.title} onRename={() => beginAction('rename','quiz',item)} onDelete={() => beginAction('delete','quiz',item)}/></div>
         <small className="qc-subject">{item.subject || 'Chưa phân loại'}</small><h3>{item.title}</h3><p>{item.question_count} câu · {item.time_limit ? `${item.time_limit} phút` : 'Không giới hạn'} · {levels[item.difficulty] || 'Hỗn hợp'}</p>
         <div className="qc-score"><span>Điểm gần nhất</span><strong>{item.attempts?.length ? `${item.attempts[0].score}/${item.attempts[0].total}` : 'Chưa làm'}</strong></div><small>Đã làm {item.attempts?.length || 0} lần</small>
         <button className="btn qc-mint" disabled={busy} onClick={() => openQuiz(item)}><RotateCcw size={16}/>{item.attempts?.length ? 'Làm lại' : 'Làm bài'}</button>
-      </article>)}</div> : <div className="qc-empty qc-empty-mint"><ListChecks size={34}/><h3>Chưa có bài trắc nghiệm nào</h3><p>Tạo bài trắc nghiệm bằng Nova AI để kiểm tra kiến thức.</p><button className="btn qc-mint" onClick={() => create('quiz')}><Plus size={17}/>Tạo bài trắc nghiệm</button></div>}
+      </article>)}</div> : items.length ? <div className="qc-empty qc-empty-mint"><ListChecks size={34}/><h3>Không có bài trắc nghiệm phù hợp</h3><button className="btn btn-outline" onClick={() => {setSubjectFilter('');setDifficultyFilter('');setTypeFilter('');}}>Xóa bộ lọc</button></div> : <div className="qc-empty qc-empty-mint"><ListChecks size={34}/><h3>Chưa có bài trắc nghiệm nào</h3><p>Tạo bài trắc nghiệm bằng Nova AI để kiểm tra kiến thức.</p><button className="btn qc-mint" onClick={() => create('quiz')}><Plus size={17}/>Tạo bài trắc nghiệm</button></div>}
       {busy && !action && <p role="status">Đang mở bài trắc nghiệm…</p>}
     </section>
-    {creating && <LearningCreateModal kind={creating} onClose={() => setCreating(null)} onLibrary={() => {setCreating(null);onLibrary();}} onCreated={async (value) => {
+    {creating && <Suspense fallback={loadingContent}><LearningCreateModal kind={creating} canGenerate={planPermissions(subscription).advancedQuiz} onClose={() => setCreating(null)} onLibrary={() => {setCreating(null);onLibrary();}} onCreated={async (value) => {
       if (creating==='flashcard') {onDeckSaved(value);setCreating(null);onStudy(value);}
       else {refresh();const opened=await openQuiz(value,true);if (!opened) {setCreating(null);}}
-    }}/>}
+    }}/></Suspense>}
     {action?.type==='review' && <LearningDialog title="Bạn muốn ôn thế nào?" onClose={() => setAction(null)}><p>{action.item.name}</p><div className="qc-review-options"><button className="btn qc-mint" onClick={() => {onStudy(action.item);setAction(null);}}><RotateCcw/>Ôn lại tất cả · {action.item.cards.length} Flashcards</button><button className="btn btn-primary" disabled={action.item.cards.every((card) => card.remembered)} onClick={() => {onStudy({...action.item,reviewCardIds:action.item.cards.filter((card) => !card.remembered).map((card) => card.id)});setAction(null);}}>Ôn lại phần chưa nhớ · {action.item.cards.filter((card) => !card.remembered).length} Flashcards</button></div>{action.item.cards.every((card) => card.remembered) && <p>🎉 Bạn đã nhớ tất cả Flashcard trong bộ này!</p>}</LearningDialog>}
     {action && action.type!=='review' && <LearningDialog title={action.type==='rename' ? 'Đổi tên' : action.kind==='flashcard' ? 'Xóa bộ Flashcard?' : 'Xóa bài trắc nghiệm?'} busy={busy} onClose={() => {setAction(null);setError('');}}><form className="qc-create" onSubmit={applyAction}>
       {action.type==='rename' ? <label>Tên mới<input required autoFocus maxLength={100} value={name} onChange={(e) => setName(e.target.value)}/></label> : <p>Bạn có chắc muốn xóa <strong>{action.item.name || action.item.title}</strong>? {action.kind==='flashcard' ? 'Toàn bộ Flashcard và tiến độ học sẽ bị xóa.' : 'Bài trắc nghiệm và lịch sử làm bài sẽ bị xóa.'}</p>}

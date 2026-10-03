@@ -635,6 +635,47 @@ class RoadmapResilienceTests(unittest.TestCase):
                 'target_level': 'intermediate', 'pace': 'steady', 'study_time': 240,
                 'topics': ['Đạo hàm'], 'weaknesses': ['Tích phân']}
 
+    def test_local_roadmap_does_not_multiply_topics_by_pace(self):
+        topics = ['Khái niệm', 'Semaphore', 'Thread', 'Vùng găng', 'Thực hành']
+        for pace, minutes in [('slow', 120), ('steady', 240), ('fast', 480)]:
+            with self.subTest(pace=pace):
+                built = roadmap.build_roadmap({**self._payload(), 'pace': pace,
+                                              'study_time': minutes, 'topics': topics}, engine=engine.LocalEngine())
+                lessons = [lesson for module in built['modules'] for lesson in module['lessons']]
+                self.assertEqual([lesson['title'] for lesson in lessons], topics)
+                self.assertEqual(len({lesson['key'] for lesson in lessons}), len(topics))
+                self.assertTrue(all(lesson['estimated_minutes'] >= 20 for lesson in lessons))
+                self.assertTrue(all(lesson['objectives'] and lesson['examples'] for lesson in lessons))
+
+    def test_saved_repeated_parts_are_compacted_without_losing_exercises_or_history(self):
+        lessons = [{'key': f'm1-l{index}', 'title': f'Semaphore — phần {index}',
+                    'objectives': ['Hiểu Semaphore', 'Áp dụng Semaphore'],
+                    'examples': [f'Ví dụ minh hoạ cho Semaphore (phần {index})'],
+                    'estimated_minutes': 75} for index in range(1, 5)]
+        row = {'id': 1, 'payload': {'modules': [{'key': 'm1', 'lessons': lessons}]}}
+        exercises = [{'id': index, 'module_key': 'm1', 'lesson_key': f'm1-l{index}',
+                      'exercise_type': 'short_answer', 'topic': 'Semaphore',
+                      'expected_answer': 'private', 'rubric': 'private'} for index in range(1, 5)]
+        progress = {'graded': 2, 'total_exercises': 4, 'average_percentage': 80}
+        before = json.dumps([row, exercises], ensure_ascii=False)
+        compact = server.public_roadmap(row, exercises, progress)
+        self.assertEqual(json.dumps([row, exercises], ensure_ascii=False), before)
+        self.assertEqual(compact['progress'], progress)
+        self.assertEqual(len(compact['modules'][0]['lessons']), 1)
+        lesson = compact['modules'][0]['lessons'][0]
+        self.assertEqual(lesson['title'], 'Semaphore')
+        self.assertEqual(lesson['estimated_minutes'], 300)
+        self.assertEqual(lesson['exercise_ids'], ['1', '2', '3', '4'])
+        self.assertEqual([item['id'] for item in compact['exercises']], [1, 2, 3, 4])
+        self.assertTrue(all(item['lesson_key'] == 'm1-l1' for item in compact['exercises']))
+        self.assertTrue(all('expected_answer' not in item and 'rubric' not in item for item in compact['exercises']))
+        for field in ('objectives', 'examples'):
+            with self.subTest(distinct_content=field):
+                distinct = json.loads(json.dumps(row))
+                distinct['payload']['modules'][0]['lessons'][1][field] = ['Nội dung khác']
+                unchanged = server.public_roadmap(distinct, exercises, progress)
+                self.assertEqual(len(unchanged['modules'][0]['lessons']), 4)
+
     def test_a_roadmap_whose_modules_have_no_lessons_falls_back_to_the_offline_one(self):
         provider = self._HalfBrokenProvider([{'title': 'Chặng 1', 'lessons': []}])
         built = roadmap.build_roadmap(self._payload(), engine=provider)

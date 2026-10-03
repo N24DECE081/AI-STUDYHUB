@@ -40,11 +40,20 @@ async function request(path, options = {}) {
   }
   if (!response.ok) {
     const message = await readError(response);
+    if ([403, 429].includes(response.status) && !publicAuthPaths.has(path)) {
+      window.dispatchEvent(new Event('studyhub:permissions-changed'));
+    }
     if (response.status === 401 && !publicAuthPaths.has(path)) {
       window.dispatchEvent(new Event("studyhub:session-expired"));
     }
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
+  if (options.method && options.method !== 'GET' && (
+    ['/upload', '/ai-tutor/chat', '/ai/chat', '/chat', '/subscription/checkout', '/subscription/cancel'].includes(path) ||
+    options.method === 'DELETE' && /^\/documents\//.test(path)
+  )) window.dispatchEvent(new Event('studyhub:permissions-changed'));
   return response.json();
 }
 
@@ -54,6 +63,12 @@ const postJson = (path, payload) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload || {}),
   });
+export const postStudy = postJson;
+export const getProgressSummary = () => request('/progress/summary');
+export const getProgressTimeline = (range) => request(`/progress/timeline?range=${range}`);
+export const getTodayTasks = () => request('/progress/today-tasks');
+export const getLatestQuizAttempt = (quizId) => request(`/quiz-attempts/latest?quiz_id=${encodeURIComponent(quizId)}`);
+export const studyHeartbeat = () => postJson('/study-session/heartbeat', {});
 
 export const login = (email, password) =>
   request("/auth/login", {

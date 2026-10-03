@@ -84,11 +84,11 @@ function AiTutorTab({ currentDocument }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '78vh' }}>
       <div style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #2e264d', display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <img src={robotImg} alt="AI Tutor Bot" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
+        <img src={robotImg} alt="AI Tutor Bot" loading="eager" decoding="async" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
         <div>
-          <h2 style={{ fontSize: '18px', color: '#ffffff', margin: 0 }}>Học cùng AI Tutor (Phản hồi siêu tốc)</h2>
-          <p style={{ fontSize: '12px', color: '#a78bfa', margin: 0 }}>
-            Đang trao đổi về: <strong style={{ color: '#ffffff' }}>{currentDocument ? currentDocument.fileName : 'Chưa chọn tài liệu'}</strong>
+          <h2 style={{ fontSize: '18px', color: 'var(--foreground)', margin: 0 }}>Học cùng AI Tutor (Phản hồi siêu tốc)</h2>
+          <p style={{ fontSize: '12px', color: 'var(--foreground)', margin: 0 }}>
+            Đang trao đổi về: <strong style={{ color: 'var(--foreground)' }}>{currentDocument ? currentDocument.fileName : 'Chưa chọn tài liệu'}</strong>
           </p>
         </div>
       </div>
@@ -96,8 +96,8 @@ function AiTutorTab({ currentDocument }) {
       <div style={{ flex: 1, overflowY: 'auto', paddingRight: '8px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {messages.length === 0 ? (
           <div style={{ margin: 'auto', textAlign: 'center' }}>
-            <img src={robotImg} alt="AI Tutor Bot" style={{ width: '90px', height: '90px', objectFit: 'contain', marginBottom: '12px' }} />
-            <p style={{ color: '#64748b', fontSize: '14px' }}>Hỏi bất kỳ câu hỏi nào để trải nghiệm tốc độ phản hồi từ AI!</p>
+            <img src={robotImg} alt="AI Tutor Bot" loading="lazy" decoding="async" style={{ width: '90px', height: '90px', objectFit: 'contain', marginBottom: '12px' }} />
+            <p style={{ color: 'var(--foreground)', fontSize: '14px' }}>Hỏi bất kỳ câu hỏi nào để trải nghiệm tốc độ phản hồi từ AI!</p>
           </div>
         ) : (
           messages.map((msg, index) => (
@@ -106,8 +106,8 @@ function AiTutorTab({ currentDocument }) {
               style={{
                 alignSelf: msg.sender === 'USER' ? 'flex-end' : 'flex-start',
                 maxWidth: '85%',
-                background: msg.sender === 'USER' ? 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)' : '#231b3e',
-                color: msg.sender === 'USER' ? '#ffffff' : '#e2e8f0',
+                background: msg.sender === 'USER' ? 'var(--accent)' : 'var(--card)',
+                color: msg.sender === 'USER' ? 'var(--accent-foreground)' : 'var(--card-foreground)',
                 padding: '14px 18px',
                 borderRadius: '16px',
                 border: msg.sender === 'USER' ? 'none' : '1px solid #362a5b',
@@ -117,7 +117,7 @@ function AiTutorTab({ currentDocument }) {
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
                 {msg.sender === 'AI' && (
-                  <img src={robotImg} alt="AI Avatar" style={{ width: '22px', height: '22px', objectFit: 'contain' }} />
+                  <img src={robotImg} alt="AI Avatar" loading="lazy" decoding="async" style={{ width: '22px', height: '22px', objectFit: 'contain' }} />
                 )}
                 <strong style={{ fontSize: '11px', color: msg.sender === 'USER' ? '#ddd6fe' : '#a78bfa' }}>
                   {msg.sender === 'USER' ? 'Bạn' : 'AI Tutor'}
@@ -144,12 +144,12 @@ function AiTutorTab({ currentDocument }) {
           onChange={(e) => setQuestion(e.target.value)}
           placeholder={currentDocument ? "Hỏi câu hỏi bất kỳ..." : "Vui lòng chọn tài liệu để hỏi..."}
           disabled={!currentDocument || loading}
-          style={{ flex: 1, padding: '14px', background: '#0f0c1b', border: '1px solid #3b2d5d', borderRadius: '12px', color: '#ffffff', outline: 'none' }}
+          style={{ flex: 1, padding: '14px', background: 'var(--card)', border: '1px solid #3b2d5d', borderRadius: '12px', color: 'var(--foreground)', outline: 'none' }}
         />
         <button
           type="submit"
           disabled={!currentDocument || loading}
-          style={{ padding: '14px 28px', background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}
+          style={{ padding: '14px 28px', background: 'var(--accent)', color: 'var(--accent-foreground)', border: 'none', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}
         >
           {loading ? 'Đang gửi...' : 'Gửi'}
         </button>
